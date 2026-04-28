@@ -1,0 +1,87 @@
+\section{Appendix A: Soundness Theorem -- Full Proof}\label{app:proof}
+
+We restate \cref{thm:soundness} for self-containment, then give the
+full proof. The proof is structured as the three-step argument
+sketched in~\cref{sec:soundness}: termination, safety, coverage.
+
+\paragraph{Restated theorem.}
+Let~\(\Lambda\) be a layout satisfying invariants I1--I3.
+Let~\(\mathcal{G}\) be the recovery operator of \cref{def:G},
+satisfying I4--I5. Let~\(\mathcal{E}\) be a family of physical
+perturbations such that, for every event~\(e \in \mathcal{E}\) and
+every state~\(s\), the number of corrupted symbols in any single
+RS subblock of~\(e(s)\) does not exceed the correction capacity
+\(t = \lfloor (n-k)/2 \rfloor\) declared by~\(\Lambda\). Then for
+every initial consistent state~\(s_0 \models\) and every
+\(e \in \mathcal{E}\), there exists~\(K \le |\Lambda|\) such that
+\(\mathcal{G}^{K}(e(s_0)) \models\) or
+\(\mathcal{G}^{K}(e(s_0)) = \bot\).
+
+\paragraph{Proof.}
+Let~\(s_0 \models\) and~\(e \in \mathcal{E}\). Define
+\(s^{(0)} = e(s_0)\) and~\(s^{(i+1)} = \mathcal{G}(s^{(i)})\) for
+\(i \ge 0\), terminating the sequence at the first~\(K\) such that
+\(s^{(K)} \models\) or~\(s^{(K)} = \bot\).
+
+\textbf{Termination.}
+Define~\(N(s)\) as in \cref{lem:descent}: the number of regions
+of~\(\Lambda\) on which the syndrome of~\(s\) is non-zero.
+By construction~\(N(s) \in \{0, 1, \dots, |\Lambda|\}\).
+Furthermore, \(N(s) = 0\) iff~\(s \models\) (\cref{def:consistent},
+clause~1 and~2 are equivalent to all syndromes being zero; clause~3
+follows from~I3 once syndromes are zero on dual-layer regions;
+clause~4 follows from~I2 since sentinels are part of the redundancy
+coverage). By \cref{lem:descent}, for every~\(i\) such that
+\(s^{(i)} \notin \{\bot\} \cup \{s : s \models\}\), we have
+\(N(s^{(i+1)}) \le N(s^{(i)}) - 1\). The sequence~\((N(s^{(i)}))_i\)
+is therefore strictly decreasing on the non-terminating part, and
+bounded below by~0; it must reach~0 in at most~\(|\Lambda|\) steps,
+or hit~\(\bot\) earlier. In either case~\(K \le |\Lambda|\).
+
+\textbf{Safety.}
+We show that the sequence cannot terminate in a state~\(s^{(K)}
+\notin \{\bot\} \cup \{s : s \models\}\). Suppose for contradiction
+that it does. By the termination clause, the sequence terminates
+when~\(s^{(K)} \models\) or~\(s^{(K)} = \bot\), neither of which
+holds by hypothesis: contradiction. The sequence therefore terminates
+in one of the two safe states.
+
+We further show that no intermediate state silently masks a
+corruption. Inspection of \cref{def:G} shows that the only ways
+the operator returns~\(s' \neq \bot\) on input~\(s\) are: (a) all
+syndromes are zero (skip, return~\(s\) unchanged), or (b) RS
+correction succeeded \emph{and} CRC re-verification succeeded
+\emph{and} sentinels are at canonical values. Case~(a) preserves
+consistency by~\cref{prop:idem}. Case~(b) restores
+consistency on the affected region by I3 and I2. Any state
+returned by the operator therefore either is consistent on the
+affected region or is~\(\bot\); silent corruption is impossible
+by construction.
+
+\textbf{Coverage.}
+The hypothesis on~\(\mathcal{E}\) asserts that each event~\(e\)
+induces at most~\(t\) symbol errors per RS subblock. The
+Reed--Solomon code, by its bounded-distance decoding property,
+decodes correctly any received word within Hamming distance~\(t\)
+of a code word, which is exactly the regime in which step~2 of
+\cref{def:G} returns a valid corrected codeword. The CRC
+re-verification of step~3 is, by I3, a strict tightening: any
+corrected word that fails CRC is rejected, even if RS accepted it.
+Therefore the operator, applied iteratively to~\(e(s_0)\), restores
+each affected region to its consistent state, until either all
+regions are consistent (\(N = 0\),~\(s^{(K)} \models\)) or a region
+is found whose RS-corrected codeword fails CRC, indicating
+corruption beyond the design assumption (out of~\(\mathcal{E}\)),
+in which case~\(\bot\) is returned.
+
+This concludes the proof. \(\mathchar"1003\)
+
+\paragraph{What the proof does not show.}
+The proof is for a single application chain on a fixed
+perturbation~\(e\). It does not address (a) interleaved events
+arriving during the recovery loop itself, which would require a
+concurrent-execution model; (b) probabilistic statements about the
+distribution of~\(e\) in~\(\mathcal{E}\), which would require a
+measure on the perturbation family; (c) machine-checkability,
+which would require mechanization in a proof assistant. All three
+are noted as v3 work in \cref{sec:limits}.

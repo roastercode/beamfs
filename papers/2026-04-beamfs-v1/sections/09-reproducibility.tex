@@ -1,0 +1,46 @@
+\section{Reproducibility}\label{sec:repro}
+
+\paragraph{Source repository.}
+\url{https://github.com/roastercode/beamfs}, sub-directory
+\texttt{papers/2026-04-beamfs-v1/}.
+
+\paragraph{Companion report.}
+The FTRFS v1 Technical Report~\cite{desbrieres2026ftrfs} is
+prerequisite reading. Its empirical dataset is reused in
+\cref{sec:empirical}; its threat model is extended in
+\cref{sec:phys}.
+
+\paragraph{Build commands.}
+\begin{lstlisting}[language=bash]
+cd papers/2026-04-beamfs-v1
+make figures   # regenerate matplotlib figures from canonical data
+make           # build paper.pdf via lualatex + biber + lualatex
+\end{lstlisting}
+
+\paragraph{Figure data generation.}
+The three figures (\cref{fig:see-cross-section,fig:nand-retention,fig:recovery-surface}) are generated from canonical
+cross-section curves and JEDEC NAND endurance data by Python scripts
+in \texttt{scripts/}:
+\begin{itemize}
+\item \texttt{scripts/gen\_data.py} produces \texttt{data/fig1.dat}
+  (Weibull fits to Petersen-form SEE cross-sections),
+  \texttt{data/fig2.dat} (TLC NAND raw BER versus retention age,
+  empirical Cai/Mielke model), and \texttt{data/fig3.dat}
+  (RS-capacity-bounded recovery probability over the
+  LET\(\times\)fluence grid, Poisson statistics).
+\item \texttt{scripts/gen\_figures.py} reads these data and produces
+  \texttt{figures/fig1.pdf}, \texttt{figures/fig2.pdf},
+  \texttt{figures/fig3.pdf} via matplotlib.
+\end{itemize}
+Each script is deterministic: given the canonical input parameters
+documented in its header, it produces a byte-for-byte identical
+output.
+
+\paragraph{Verification.}
+\begin{lstlisting}[language=bash]
+md5sum data/*.dat
+# values are committed in scripts/gen_data.py headers
+# matching values mean: same parameters, same output.
+make
+# zero error, zero warning expected.
+\end{lstlisting}

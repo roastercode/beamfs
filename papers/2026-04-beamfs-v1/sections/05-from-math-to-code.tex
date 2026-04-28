@@ -1,0 +1,319 @@
+\section{From Mathematics to Code: A Three-Tier Derivation}\label{sec:m2c}
+
+The contribution of this report rests on a deliberate three-tier
+descent: from the mathematical operator~\(\mathcal{G}\) of
+\cref{sec:soundness}, to a deterministic algorithm, to a Linux-kernel
+implementation path. Each tier preserves the invariants of the tier
+above, by construction. This section presents the descent in a single
+narrative arc, ending with a traceability table
+(\cref{tab:traceability}) that maps each line of the proof to the
+algorithmic step and the kernel construct that realizes it. The aim
+is auditability: a reviewer should be able to follow the chain
+\emph{theorem~\(\rightarrow\)~pseudocode~\(\rightarrow\)~kernel call} line
+by line.
+
+\subsection{Tier~1: The Recovery Operator (Mathematics)}\label{sec:m2c-tier1}
+
+\begin{definition}[Recovery operator]\label{def:G}
+The BEAMFS recovery operator~\(\mathcal{G} : \mathcal{S} \to
+\mathcal{S} \cup \{\bot\}\) is the partial function defined by the
+following procedure on input~\(s = (s_V, s_P)\):
+\begin{enumerate}
+\item For every region~\(R\) of~\(\Lambda\), evaluate the redundancy
+  syndrome on~\(s|_R\). If all syndromes are zero, return~\(s\)
+  (idempotence by~I4).
+\item Otherwise, for the first region~\(R^{*}\) (in canonical region
+  order) whose syndrome is non-zero, attempt RS correction
+  on~\(s|_{R^{*}}\) using the parity bytes adjacent to that region.
+  Let~\(s|_{R^{*}}'\) denote the corrected bytes.
+\item Re-evaluate CRC on~\(s|_{R^{*}}'\). If CRC fails, return~\(\bot\)
+  (corruption exceeded RS correction capacity, by~I1).
+\item If~\(R^{*}\) is a region with both layers, re-establish coherence
+  by overwriting the lagging copy with the corrected leading copy.
+\item Verify all sentinels in~\(R^{*}\) are at canonical values. If
+  any sentinel is corrupted in a way RS missed, return~\(\bot\).
+\item Append a journal entry to the RAF journal documenting the
+  correction (block number, timestamp, symbol count, entropy
+  estimate where applicable).
+\item Recurse: \(\mathcal{G}\bigl(\text{state with } s|_{R^{*}}
+  \text{ replaced by } s|_{R^{*}}'\bigr)\).
+\end{enumerate}
+\end{definition}
+
+\begin{proposition}[Idempotence on consistent inputs]\label{prop:idem}
+For every~\(s \models\),~\(\mathcal{G}(s) = s\).
+\end{proposition}
+\begin{proof}[Proof sketch]
+By \cref{def:consistent}, all syndromes are zero on a consistent
+state. Step~1 of \cref{def:G} returns~\(s\) without modification.
+\end{proof}
+
+\begin{lemma}[Descent under perturbation]\label{lem:descent}
+Let~\(N(s)\) denote the number of regions in~\(\Lambda\) whose
+syndrome is non-zero on~\(s\). Then for every~\(s\),
+either~\(\mathcal{G}(s) = \bot\), or
+\(N\bigl(\mathcal{G}(s)\bigr) \le N(s) - 1.\)
+\end{lemma}
+\begin{proof}[Proof sketch]
+Inspect the cases of \cref{def:G}. Step~1 with~\(N(s) = 0\) yields
+the same state; if~\(N(s) \ge 1\), the loop body either
+returns~\(\bot\) (cases~3, 5) or replaces a corrupt region by a
+CRC-verified, sentinel-verified consistent region, decreasing~\(N\)
+by exactly one before the recursive call.
+\end{proof}
+
+\begin{proposition}[Fail-closed absorbing]\label{prop:absorb}
+\(\mathcal{G}(\bot) = \bot\). If~\(\mathcal{G}(s) = \bot\), then for
+every~\(s'\) reachable from~\(s\) by a sequence of
+\(\mathcal{G}\)-applications, \(\mathcal{G}(s') = \bot\) (invariant~I5).
+\end{proposition}
+\begin{proof}[Proof sketch]
+Direct from \cref{def:G}: \(\bot\) has no syndrome to evaluate; the
+procedure terminates at step~1 by convention, returning~\(\bot\).
+I5 then propagates by induction on the application chain.
+\end{proof}
+
+These three results, combined with \cref{thm:soundness} of
+\cref{sec:soundness}, fully characterize~\(\mathcal{G}\) as a
+mathematical object. They are the contract that the next two tiers
+must respect.
+
+\subsection{Tier~2: The Algorithm}\label{sec:m2c-tier2}
+
+We translate~\(\mathcal{G}\) into a deterministic algorithm in
+C-style pseudocode (kernel-conformant: ISO C with kernel
+extensions, no C++ idioms). Each numbered step of \cref{def:G}
+corresponds to a labelled comment in the algorithm.
+\Cref{tab:traceability} below makes the correspondence explicit.
+
+\begin{lstlisting}[language=C,frame=single,
+  basicstyle=\ttfamily\footnotesize]
+/*
+ * BEAMFS recovery operator G, single application.
+ * Returns 0 on success (state consistent or unchanged),
+ * 1 if a region was corrected, -EBADMSG on fail-closed.
+ *
+ * Caller iterates until return value is 0 or -EBADMSG.
+ */
+int beamfs_g_step(struct beamfs_state *s)
+{
+    struct region *R;
+    u32 syndrome;
+    int rc;
+
+    list_for_each_entry(R, &s->lambda, list) {
+        syndrome = rs_syndrome(s, R);
+        if (syndrome == 0)
+            continue;                /* I4: skip consistent */
+
+        /* Step 2: RS correction */
+        rc = rs_correct_region(s, R);
+        if (rc < 0)
+            return -EBADMSG;          /* uncorrectable */
+
+        /* Step 3: re-verify CRC */
+        if (crc32_region(s, R) != stored_crc(s, R))
+            return -EBADMSG;          /* RS produced wrong codeword */
+
+        /* Step 4: re-establish coherence */
+        if (region_is_dual_layer(R))
+            propagate_corrected(s, R);
+
+        /* Step 5: sentinel verification */
+        if (!sentinels_canonical(s, R))
+            return -EBADMSG;
+
+        /* Step 6: journal */
+        raf_log_event(s, R, rc /* symbol_count */);
+
+        return 1;                     /* one region corrected */
+    }
+    return 0;                          /* fixpoint: all consistent */
+}
+
+/*
+ * Driver loop: at most |Lambda| iterations by Lemma 5.3.
+ */
+int beamfs_recover(struct beamfs_state *s)
+{
+    int iter = 0, rc;
+
+    while ((rc = beamfs_g_step(s)) == 1) {
+        if (++iter > LAMBDA_MAX)
+            return -EBADMSG;          /* belt-and-braces */
+    }
+    return rc;                         /* 0 or -EBADMSG */
+}
+\end{lstlisting}
+
+\paragraph{Complexity.}
+Each call to \texttt{beamfs\_g\_step} performs at most one RS decode
+on the affected region plus constant-time syndrome checks elsewhere.
+The dominant cost is the RS decode, \(O(n^{2})\) for a
+Berlekamp--Massey decoder over GF(\(2^{8}\)) with \(n=255\),
+approximately \(65{,}000\) GF operations per subblock. The driver
+loop runs at most \(|\Lambda|\) iterations
+(\cref{lem:descent}), so total worst-case complexity is
+\(O(|\Lambda| \cdot n^{2})\). For the FTRFS layout, counting the
+five named regions of \cref{def:layout} together with their
+constituent RS subblocks yields~\(|\Lambda| \approx 16\); with
+\(n^{2} = 65{,}025\) this gives approximately one million GF
+operations per worst-case full recovery---a sub-millisecond cost
+on contemporary CPUs. The bound is robust to a factor of a few
+in the subblock count.
+
+\subsection{Tier~3: The Kernel Implementation}\label{sec:m2c-tier3}
+
+The reference implementation of BEAMFS targets the Linux kernel
+through the standard VFS infrastructure
+(\texttt{file\_system\_type}, \texttt{iomap}). The recovery
+operator runs kernel-side, invoked at mount
+(\texttt{ftrfs\_fill\_super}) and on every metadata-region read
+path. Userspace recovery is excluded by~I3: the coherence relation
+between volatile and persistent layers cannot be enforced from a
+process holding its own page-cache view.
+
+\paragraph{Language choice.}
+The reference implementation is in C, compiled by the kernel
+toolchain. C is the kernel's lingua franca; upstreaming requires
+it. The RS hot path reuses the kernel's audited
+\texttt{lib/reed\_solomon}~\cite{kernelrslib}, preserving the
+audit-surface argument of FTRFS v1~\cite{desbrieres2026ftrfs}.
+A future v2 may explore a Rust port of the driver loop (not the
+GF arithmetic), following the model
+of~\cite{sigurbjarnarson2016yggdrasil} and the recent
+kernel Rust support.
+
+\paragraph{Differences from FTRFS v1.}
+FTRFS v1 implements a proto-version of the operator without the
+formal calculus. A BEAMFS-compliant implementation introduces:
+\begin{itemize}
+\item Explicit invariant table compiled into the module
+  (\texttt{lambda[]}), making region iteration order canonical and
+  auditable.
+\item Mandatory journal entry on every correction event, with the
+  format-v4 entropy field replacing FTRFS v3's coarse symbol count.
+\item Driver loop explicitly bounded at~\(|\Lambda|\); refusing to
+  mount a layout where this bound is violated by the data.
+\item Fail-closed transition flipping the superblock to read-only
+  mode; subsequent mutations rejected until offline repair
+  (\texttt{fsck.beamfs}, planned).
+\end{itemize}
+
+\subsection{Traceability: Math~\texorpdfstring{$\rightarrow$}{to}~Algorithm~\texorpdfstring{$\rightarrow$}{to}~Code}\label{sec:m2c-trace}
+
+\Cref{tab:traceability} expresses the descent in tabular form.
+Each row corresponds to one mathematical commitment, the
+algorithmic line that realizes it, and the kernel construct that
+will instantiate it. The table is the auditable contract: a kernel
+patch series proposing BEAMFS must exhibit each kernel construct
+of the third column, and a reviewer must be able to verify that
+each construct enforces the property of the first.
+
+\begin{table*}[t]
+\centering\small
+\caption{Traceability: each mathematical commitment in the operator
+definition (Tier~1) maps to an algorithmic step (Tier~2) and a
+planned kernel construct (Tier~3). The phase indicates when the
+construct is checked: \emph{Static} = compile-time
+(\texttt{BUILD\_BUG\_ON} or \texttt{static\_assert});
+\emph{Mount} = once at \texttt{fill\_super}; \emph{Runtime} = on
+each metadata access.}
+\label{tab:traceability}
+\begin{tabularx}{\textwidth}{l X X X l}
+\toprule
+\textbf{Math} & \textbf{Commitment (Tier~1)} & \textbf{Algorithm (Tier~2)} & \textbf{Kernel construct (Tier~3)} & \textbf{Phase} \\
+\midrule
+I1 (Total redundancy) &
+each region's RS capacity covers worst-case MBU width &
+\texttt{rs\_correct\_region(s, R)} returns \texttt{<0} when \(>t\) errors &
+\texttt{rs\_subblock\_capacity[]} table; \texttt{BUILD\_BUG\_ON} per region &
+Static + Mount \\
+\addlinespace[0.3em]
+I2 (Sentinel separation) &
+canonical-value bytes detectable in syndrome alone &
+\texttt{sentinels\_canonical(s, R)} verification &
+zero-pad fields in on-disk structs; \texttt{BUILD\_BUG\_ON(offsetof(\dots))} &
+Static \\
+\addlinespace[0.3em]
+I3 (Coherence checkpoint) &
+volatile/persistent serialization total, deterministic, bijective &
+\texttt{propagate\_corrected(s, R)} on dual-layer regions &
+\texttt{ftrfs\_dirty\_super()} family; single-source-of-truth canonical serializer &
+Runtime \\
+\addlinespace[0.3em]
+I4 (Idempotence) &
+\(\mathcal{G}(s) = s\) for every \(s \models\) &
+\texttt{if (syndrome == 0) continue;} early skip in inner loop &
+\texttt{rs\_syndrome() == 0} early return &
+Runtime \\
+\addlinespace[0.3em]
+I5 (Fail-closed monotonicity) &
+\(\mathcal{G}(\bot) = \bot\); no recovery from \(\bot\) &
+\texttt{return -EBADMSG} (steps~3, 5) absorbing &
+\texttt{set\_sb\_rdonly()} + journal mark; subsequent mutations rejected &
+Runtime \\
+\addlinespace[0.3em]
+\Cref{def:G}, step~1 &
+syndrome evaluation per region &
+\texttt{u32 syndrome = rs\_syndrome(s, R);} &
+\texttt{ftrfs\_rs\_syndrome\_region()} in \texttt{super.c} &
+Runtime \\
+\addlinespace[0.3em]
+\Cref{def:G}, step~2 &
+RS correction on first non-zero region &
+\texttt{rs\_correct\_region(s, R)} &
+\texttt{decode\_rs8()} from \texttt{lib/reed\_solomon}~\cite{kernelrslib} &
+Runtime \\
+\addlinespace[0.3em]
+\Cref{def:G}, step~3 &
+CRC re-verification after RS correction &
+\texttt{if (crc32\_region(s, R) != stored\_crc(s, R))} &
+\texttt{crc32\_le()} from \texttt{lib/crc32.c} &
+Runtime \\
+\addlinespace[0.3em]
+\Cref{def:G}, step~6 &
+journal entry on every correction event &
+\texttt{raf\_log\_event(s, R, rc)} &
+RAF journal v4 entry append (\texttt{ftrfsd}) &
+Runtime \\
+\addlinespace[0.3em]
+\Cref{lem:descent} &
+\(N(\mathcal{G}(s)) \le N(s) - 1\) per non-fail-closed step &
+each \texttt{return 1} reduces non-zero region count by one &
+loop counter bounded at \texttt{LAMBDA\_MAX} &
+Runtime \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Why a Calculus, Not a Procedure}\label{sec:m2c-calculus}
+
+A reviewer may legitimately ask: why frame the work as a
+\emph{calculus} rather than as a recovery procedure? The
+distinction matters for the descent presented above. A procedure
+is verifiable case by case but composes unpredictably---each
+combination of cases requires re-verification. A calculus is a
+small set of operators with stated algebraic properties
+(idempotence by~\cref{prop:idem}, descent
+by~\cref{lem:descent}, fail-closed absorption
+by~\cref{prop:absorb}); its composition is governed by those
+properties, once and for all. The calculus is what allows
+\cref{thm:soundness} to be stated globally, rather than re-proved
+per call site. It is also what allows future filesystems beyond
+BEAMFS, possibly with different layouts, to inherit the soundness
+result by exhibiting an instance of the same calculus---without
+re-proving the descent.
+
+\subsection{The Soundness--Implementation Gap}\label{sec:m2c-gap}
+
+The three tiers above preserve the invariants by construction. The
+remaining gap is between Tier~3 and the binary actually executed by
+the kernel: the standard verified-compilation gap. Closing it
+requires a verified compilation chain in the seL4
+sense~\cite{klein2009sel4} or a verified
+filesystem in the FSCQ sense~\cite{chen2015fscq}, neither of
+which is in scope for v1. v3 of this report will discuss
+mechanization of \cref{thm:soundness} in a proof assistant
+(Coq, Isabelle/HOL, or Lean) and the corresponding implications
+for the implementation gap.

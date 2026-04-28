@@ -1,0 +1,28 @@
+We present~BEAMFS, a recovery calculus for filesystem resilience under
+Single-Event Effects (SEE). The work is the formal counterpart to the
+FTRFS implementation experience reported in~\cite{desbrieres2026ftrfs}:
+the empirical limits encountered during the FTRFS validation campaign
+motivate a mathematical treatment of \emph{recovery itself} as a
+first-class object, rather than as a side-effect of detection-and-correction
+loops layered onto an unmodelled state space.
+
+We define a recovery operator~\(\mathcal{G}\) over the joint state space
+of a filesystem's volatile and persistent memory layers, formulate the
+soundness property as a fixpoint convergence theorem under physically
+realistic SEE perturbations, and derive an algorithm whose Linux-kernel
+implementation path is sketched. Three memory technology layers are
+treated explicitly: \mbox{DRAM} (with a forward note on
+\mbox{DDR5} on-die~\mbox{ECC}), \mbox{SRAM}, and \mbox{NAND} flash via
+\mbox{NVMe}. Emerging non-volatile technologies (\mbox{3D~XPoint},
+\mbox{ReRAM}, \mbox{MRAM}) are positioned but left out of v1's modelling.
+
+This Technical Report v1 establishes authorship of the approach,
+fixes its scope, and lays the mathematical scaffolding for a reference
+implementation in the planned successor to FTRFS. The empirical
+section reinterprets the four bench metrics of the FTRFS v1
+validation through the recovery-calculus lens, identifying which
+metrics are actually \emph{recovery-bounded} and which are not.
+No accelerator-beam measurements are claimed; the present document
+is intended, among other purposes, as the scientific dossier from
+which beam-time at facilities such as RADEF, GANIL or TRIUMF would
+later be requested.

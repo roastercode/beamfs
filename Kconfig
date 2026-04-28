@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# BEAMFS filesystem configuration
+#
+
+config BEAMFS_FS
+	tristate "BEAMFS fault-tolerant radiation-robust filesystem"
+	depends on BLOCK
+	select CRC32
+	select REED_SOLOMON
+	select REED_SOLOMON_ENC8
+	select REED_SOLOMON_DEC8
+	help
+	  BEAMFS is a POSIX-compatible filesystem designed for dependable
+	  storage in radiation-intensive environments. It provides:
+
+	    - CRC32 checksumming per block and per inode
+	    - Reed-Solomon forward error correction (FEC) via lib/reed_solomon
+	    - Radiation Event Journal: persistent per-correction log in superblock
+
+	  RS(255,239) over GF(2^8) corrects up to 8 symbol errors per 239-byte
+	  subblock in place, on a single device, without external redundancy.
+	  This addresses silent bit flips caused by single-event upsets (SEU)
+	  in MRAM or NOR flash on embedded systems in radiation environments.
+
+	  Target: embedded Linux on nanosatellites and CubeSats (MOVE-II,
+	  TU Munich), robotics in nuclear/industrial environments, space HPC.
+	  DO-178C / ECSS-E-ST-40C / IEC 61508 certification is an explicit
+	  design constraint: the codebase targets under 5000 auditable lines.
+
+	  Originally described in:
+	  Fuchs, Langer, Trinitis — ARCS 2015, TU Munich / MOVE-II CubeSat.
+	  https://www.cfuchs.net/chris/publication-list/ARCS2015/BEAMFS.pdf
+
+	  To compile as a module, choose M. The module will be called beamfs.
+
+	  If unsure, say N.
+

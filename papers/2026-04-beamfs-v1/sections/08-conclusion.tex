@@ -1,0 +1,33 @@
+\section{Conclusion}\label{sec:conclusion}
+
+We have presented the v1 mathematical scaffolding of BEAMFS, a
+recovery calculus for filesystem resilience under Single-Event
+Effects. The contribution of this report is not an implementation,
+nor a measurement campaign: it is the formal apparatus that
+subsequent versions will instantiate, measure, and prove against.
+
+The calculus is constructed on a multi-layer physical threat model
+covering DRAM, SRAM and NAND-flash, with explicit positioning of
+emerging memory technologies. The five invariants (I1--I5) are
+stated minimally and mapped directly to kernel constructs. The
+soundness theorem (\cref{thm:soundness}) shows that the recovery
+operator drives every consistent state, perturbed by any event
+within the bounded perturbation family, either to a consistent
+successor or to fail-closed in a finite number of iterations.
+Silent corruption is excluded by construction.
+
+The empirical content of v1 is necessarily indirect: a re-reading
+of the FTRFS v1 dataset through the calculus, and a projected
+recovery surface from canonical cross-section data. The next
+versions of the report will close this gap. v2 will document the
+FTRFS Phase~E fault-injection campaign and a corresponding M6
+bench metric. v3 will explore proof-assistant mechanization of
+\cref{thm:soundness} and a verified-compilation chain for the
+operator. Beam-time at a recognized accelerator facility is the
+measurement programme this report is intended to support, with
+the present formal apparatus as scientific dossier.
+
+This is also v1 in another sense: it establishes authorship and
+fixes the scope. Subsequent versions will refine; the present
+fixed point is the right place to draw a line and submit it to
+public review.

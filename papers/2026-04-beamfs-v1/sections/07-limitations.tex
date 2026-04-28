@@ -1,0 +1,63 @@
+\section{Scope and Limitations}\label{sec:limits}
+
+We adopt the same posture as the FTRFS v1 report: the limitations
+section is structural, not concessionary. It records, in plain
+language, what the present version covers and what it does not.
+
+\paragraph{V1 covers.}
+The mathematical formalization (state space, invariants, recovery
+operator, soundness theorem with proof in \cref{app:proof}), the
+algorithmic derivation, the implementation-path mapping, and a
+re-reading of the FTRFS v1 dataset under the calculus. Three
+memory-stack layers are modelled physically: DRAM, SRAM, NAND flash
+via NVMe. Sources are canonical: JEDEC, NASA-HDBK, ESA ECSS,
+IEEE TNS.
+
+\paragraph{V1 does not cover.}
+\begin{itemize}
+\item \emph{Beam-time measurements.} No accelerator data; the surface
+  of \cref{fig:recovery-surface} is a projection from canonical
+  cross-section data, explicitly so.
+\item \emph{Verified-compilation closure.} The implementation path
+  preserves invariants by construction, but the gap from
+  algorithm to kernel binary is the standard
+  unverified-compilation gap. seL4-style closure is v3 work.
+\item \emph{TID and DDD modelling.} Cumulative ionizing dose and
+  displacement damage are below the filesystem layer; they are
+  hardware-level concerns. Mention only.
+\item \emph{Adversarial fault injection.} An attacker with kernel
+  privileges who manipulates the filesystem state directly is
+  outside~\(\mathcal{E}\). This is the same scope choice as
+  FTRFS v1 (Stage~5 in that roadmap).
+\item \emph{Hardware SEL recovery.} Latched-up hardware is recovered
+  by power cycling; the filesystem operator's response is to map
+  it to~\(\bot\), nothing more.
+\item \emph{Emerging memory technologies.} 3D~XPoint, ReRAM, MRAM
+  are positioned but not modelled.
+\item \emph{DDR5 on-die ECC.} Mentioned as a strengthening
+  assumption to be added in v2; v1 models the unfiltered DRAM
+  matrix as the conservative baseline.
+\item \emph{The fault-injection metric M6.} Reserved for v2,
+  following the FTRFS Phase~E campaign currently under
+  development.
+\end{itemize}
+
+\paragraph{Methodological limits.}
+The author is the sole contributor; no peer review beyond the
+public mailing-list interactions on linux-fsdevel
+(referenced in~\cite{ftrfs-rfc-thread}) has shaped this text.
+The proof of the soundness theorem (\cref{app:proof}) is
+hand-written; it is not machine-checked. v3 will explore
+mechanization in a proof assistant such as Coq, Isabelle/HOL,
+or Lean.
+
+\paragraph{Threats to validity.}
+The principal threat is that the perturbation family~\(\mathcal{E}\)
+defined in \cref{sec:phys} does not faithfully represent the
+distribution of real SEE events seen by a deployed filesystem.
+This is precisely why beam-time measurements are needed for v2:
+to bind the model to ground truth. The soundness theorem is
+robust under tightening of~\(\mathcal{E}\) (any sub-family
+of~\(\mathcal{E}\) inherits the result) but fragile under
+loosening (a perturbation that exceeds RS capacity is, by
+construction, out of scope).

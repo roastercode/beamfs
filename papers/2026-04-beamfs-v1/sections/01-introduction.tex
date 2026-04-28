@@ -1,0 +1,116 @@
+\section{Introduction}\label{sec:intro}
+
+Modern Linux filesystems detect metadata corruption through cryptographic
+or polynomial checksums; few correct it in place, and to the
+author's knowledge none ship with a \emph{formally proved} discipline
+for recovery from \emph{active} memory corruption induced by physical
+perturbation.\footnote{FSCQ~\cite{chen2015fscq} and
+Yggdrasil~\cite{sigurbjarnarson2016yggdrasil} prove crash-consistency,
+that is, recovery under power-loss with a benevolent storage substrate.
+Neither models adversarial corruption of volatile memory under physical
+perturbation, which is the subject of the present work.}
+Detection without proved correction is insufficient for radiation-prone
+deployments \cite{nasa-seeca,esa-eccs60,normand1996}: a single-event
+upset (SEU) on a critical metadata word can put the filesystem into a
+state from which best-effort recovery procedures diverge, loop, or
+silently propagate the corruption.
+
+The companion Technical Report~\cite{desbrieres2026ftrfs} documents an
+implementation, FTRFS, that adds layered Reed--Solomon forward error
+correction to inode, allocation-bitmap, and superblock metadata, with a
+persistent radiation event journal. FTRFS as a name and concept
+originates in the work of Fuchs \emph{et al.}~\cite{fuchs2015ftrfs};
+the companion report builds on that lineage with contemporary Linux
+kernel infrastructure. That implementation reaches a
+ceiling: it demonstrates correction \emph{empirically} but does not
+characterize, prove, or bound its recovery properties. The present
+report addresses that gap by treating recovery itself as a mathematical
+object, and by tracing it explicitly to a kernel implementation path.
+
+\paragraph{Position of the problem.}
+Let~\(\mathcal{S}\) denote the joint state space of a filesystem's
+volatile (RAM, page cache, kernel buffers) and persistent (NVMe,
+NAND-flash) memory. Let~\(\mathcal{E}\) denote the family of physically
+realizable Single-Event Effects acting on~\(\mathcal{S}\), parameterized
+by the linear energy transfer of the incident particle, the vulnerable
+cross-section of the target memory cell, and the geometry of the
+silicon node. Let~\(\models\) denote the relation ``\(s \in
+\mathcal{S}\) is consistent'' (cyclic redundancy code valid, Reed--Solomon
+syndromes zero, structural sentinels intact, on-disk versus in-memory
+copies coherent). The problem is to construct an
+operator~\(\mathcal{G} : \mathcal{S} \to \mathcal{S} \cup \{\bot\}\),
+implementable in a Linux-kernel filesystem, such that
+\[
+  \forall\, s_0 \models,\ \forall\, e \in \mathcal{E},\
+  \exists\, k \in \mathbb{N} :\
+  \mathcal{G}^{k}\bigl(e(s_0)\bigr) \models
+  \quad\lor\quad
+  \mathcal{G}^{k}\bigl(e(s_0)\bigr) = \bot,
+\]
+where~\(\bot\) denotes the fail-closed state in which the filesystem
+explicitly refuses to proceed. The disjunction is essential: silent
+corruption is excluded by construction.
+
+\paragraph{Where we are going, and how.}
+This report defends a single thesis: \emph{provable filesystem recovery
+under SEE is achievable, and the chain from theorem to kernel code is
+auditable line by line}. The chain is presented in
+\cref{sec:m2c} as a three-tier descent---mathematics, algorithm,
+kernel implementation---closed by a traceability table
+(\cref{tab:traceability}) where each line of the proof is paired with
+the algorithmic step and the kernel construct that realizes it. This
+structure is the report's central contribution to the literature: it
+makes the implementation gap explicit and bounded.
+
+\paragraph{Contributions.}
+We claim the following:
+\begin{itemize}
+\item A multi-layer physical threat model
+  (\cref{sec:phys}) drawing on canonical SEE literature
+  \cite{heinrich1977,petersen1996,dodd2003,baumann2005,normand1996} and
+  standards~\cite{jedec89a,nasa-hdbk-4002a,esa-eccs60}, treating DRAM,
+  SRAM, and NAND-flash distinctly with realistic per-technology rates.
+\item A formal definition of the filesystem state space, its
+  consistency relation, and a small set of structural invariants
+  (\cref{sec:state}) that are necessary preconditions for any proved
+  recovery.
+\item A soundness theorem (\cref{thm:soundness}, full proof in
+  \cref{app:proof}) showing that under stated hypotheses on the
+  perturbation family, the recovery operator drives every initial
+  consistent state to a consistent successor or to fail-closed in a
+  finite number of iterations.
+\item A three-tier descent (\cref{sec:m2c}) from the operator's
+  mathematical definition to a deterministic algorithm to a Linux-kernel
+  implementation path, with a traceability table
+  (\cref{tab:traceability}) auditable line by line. This is the
+  report's central contribution.
+\item An empirical re-reading (\cref{sec:empirical}) of the FTRFS v1
+  bench dataset~\cite{desbrieres2026ftrfs} through the recovery-calculus
+  lens, identifying which metrics constrain recovery and which do not.
+\end{itemize}
+
+\paragraph{Scope.}
+This is v1. We model SEE explicitly; we do not model Total Ionizing
+Dose (TID) or Displacement Damage Dose (DDD), both of which are
+hardware-level cumulative phenomena outside the filesystem's
+operational reach. We discuss DDR5 on-die ECC~\cite{jedec79-5} as a
+recent evolution that modifies the threat surface, but we do not
+incorporate it into the v1 model: the matrix-cell-level abstraction
+remains the conservative baseline, and on-die ECC will be added in v2
+as a strengthening assumption (it can only improve outcomes, never
+worsen them, given the soundness theorem's structure). We claim no
+beam-time measurements; the empirical section reuses the FTRFS v1
+software validation dataset and projects expected outcomes from
+canonical cross-section data. The recovery calculus is positioned
+to support the auditable-evidence posture demanded by safety-critical
+standards such as MIL-STD-882E~\cite{milstd882e} and DO-178C, which
+require traceable failure-mode coverage; the three-tier descent of
+\cref{sec:m2c} is designed to provide such a trace.
+
+\paragraph{Anti-claim.}
+We are explicit about what BEAMFS v1 does \emph{not} prove:
+filesystem behavior under simultaneous TID-induced cell drift and
+SEE; recovery from latched-up hardware states (SEL); coverage of
+adversarial fault injection by an attacker with kernel privileges
+(distinct from physical SEE). Each is acknowledged as future work
+(\cref{sec:limits}).

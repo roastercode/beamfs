@@ -1,0 +1,49 @@
+# build artifacts
+*.o
+*.ko
+*.ko.cmd
+*.mod
+*.mod.c
+*.cmd
+.tmp_versions/
+Module.symvers
+modules.order
+
+# editor
+*~
+.#*
+\#*#
+*.swp
+
+# papers build artifacts (keep tex/bib/figures, exclude generated)
+papers/*/*.aux
+papers/*/*.bbl
+papers/*/*.bcf
+papers/*/*.blg
+papers/*/*.fdb_latexmk
+papers/*/*.fls
+papers/*/*.log
+papers/*/*.out
+papers/*/*.run.xml
+papers/*/*.synctex.gz
+papers/*/*.toc
+papers/*/_minted-*/
+
+# generated PDFs in papers/
+papers/*/paper.pdf
+
+# big binary backups, ad-hoc
+*.tar.gz
+*.tar.xz
+*.tar.bz2
+*.zip
+
+# OS / FS metadata
+.DS_Store
+Thumbs.db
+
+# Kernel build artifacts (deeper)
+.*.o.d
+.*.o.cmd
+.*.ko.cmd
+.*.mod.cmd

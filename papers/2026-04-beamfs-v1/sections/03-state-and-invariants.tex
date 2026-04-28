@@ -1,0 +1,109 @@
+\section{Filesystem State Space and Invariants}\label{sec:state}
+
+We now define formally the object on which the recovery operator acts.
+The aim is to make every subsequent proof refer to a precisely typed
+object rather than to an informal notion of ``filesystem state''.
+
+\subsection{State Space}
+
+\begin{definition}[Layered state]\label{def:state}
+The BEAMFS state space~\(\mathcal{S}\) is the Cartesian product
+\[
+  \mathcal{S} \;=\; \mathcal{S}_V \times \mathcal{S}_P,
+\]
+where~\(\mathcal{S}_V\) is the volatile component (kernel data
+structures, page cache, in-memory superblock copy, in-memory bitmap)
+and~\(\mathcal{S}_P\) is the persistent component (on-disk
+superblock, inode table, allocation bitmap, data blocks, RAF journal).
+\end{definition}
+
+\begin{definition}[Layout]\label{def:layout}
+A \emph{layout}~\(\Lambda\) is a finite map from named regions
+(\texttt{sb}, \texttt{inode\_table}, \texttt{bitmap},
+\texttt{rs\_journal}, \texttt{data}) to byte ranges in their
+hosting layer, together with a redundancy specification (CRC
+algorithm, RS parameters) per region.
+\end{definition}
+
+The FTRFS v1 layout, formalized in~\cite{desbrieres2026ftrfs}, is one
+instance of~\(\Lambda\). BEAMFS targets a strictly extended layout in
+which every region is RS-protected and every region of~\(\mathcal{S}_V\)
+that mirrors a region of~\(\mathcal{S}_P\) carries the redundancy
+metadata necessary to detect drift between the two.
+
+\subsection{Consistency Relation}
+
+\begin{definition}[Per-region consistency]
+Let~\(R\) be a region of~\(\Lambda\) with redundancy specification~\(r\).
+A state~\(s\) is \emph{R-consistent}, written~\(s \models_R\), iff
+applying~\(r\) to the bytes of~\(R\) in~\(s\) yields a zero syndrome
+(\textsc{crc} valid and Reed--Solomon syndromes all zero).
+\end{definition}
+
+\begin{definition}[Consistency]\label{def:consistent}
+A state~\(s = (s_V, s_P) \in \mathcal{S}\) is \emph{consistent},
+written~\(s \models\), iff:
+\begin{enumerate}
+\item For every region~\(R\) of~\(\Lambda_V\) (the volatile-side
+  layout), \(s \models_R\).
+\item For every region~\(R\) of~\(\Lambda_P\) (the persistent-side
+  layout), \(s \models_R\).
+\item For every region~\(R\) that has both volatile and persistent
+  representations (the superblock, the bitmap, recently accessed
+  inodes), the canonical serialization of~\(s_V|_R\) equals
+  \(s_P|_R\) byte-for-byte (\emph{coherence}).
+\item Every structural sentinel (the zero pads of \texttt{re\_reserved}
+  and \texttt{re\_pad} in the v4 RAF journal entry, the validity
+  range of \texttt{s\_data\_protection\_scheme}, the high zero
+  bytes of feature flags) is at its canonical value.
+\end{enumerate}
+We write~\(\bot\) for the explicit fail-closed state, distinct from
+every consistent state.
+\end{definition}
+
+\subsection{The Five Invariants}\label{sub:invariants}
+
+The recovery soundness theorem (\cref{thm:soundness}) requires the
+following invariants to hold of the layout~\(\Lambda\) and of the
+operator~\(\mathcal{G}\). They are minimal and stated separately so
+that an implementation can be audited against them line by line.
+
+\begin{description}
+\item[I1 -- Total redundancy.] Every region of~\(\Lambda\) is covered
+  by a redundancy specification (CRC for detection, RS for correction)
+  whose correction power equals or exceeds the maximum MBU width of
+  the targeted technology layer. For a layer with worst-case MBU
+  width~\(w\), each RS subblock must tolerate at least~\(w\) symbol
+  errors.
+\item[I2 -- Sentinel separation.] Each region carries at least one
+  byte whose canonical value is fixed and whose corruption is
+  detectable in the redundancy syndrome alone, without semantic
+  interpretation.
+\item[I3 -- Coherence checkpoint.] For any region present in both
+  layers, the canonical serialization map is total, deterministic,
+  and bijective on its domain of valid values. This rules out
+  ambiguous in-memory representations of an on-disk byte sequence.
+\item[I4 -- Idempotence.] For every consistent~\(s\),
+  \(\mathcal{G}(s) = s\). The recovery operator is the identity on
+  consistent states.
+\item[I5 -- Fail-closed monotonicity.] If
+  \(\mathcal{G}(s) = \bot\) for some~\(s\), then
+  \(\mathcal{G}(\bot) = \bot\). Once the operator declares
+  fail-closed, no subsequent application reverses that decision.
+\end{description}
+
+The first three are properties of the layout; the last two are
+properties of the operator. The soundness theorem couples them.
+
+\begin{remark}
+A reviewer may legitimately object that I1 is unrealistically
+strong: total redundancy increases space overhead, typically by a
+factor proportional to~\((n-k)/k\) for an RS\((n, k)\) code (e.g.,
+6.7\% for RS(255,239)). We agree, and we treat the total-redundancy
+regime as the v1 baseline. A future v2 will explore selective
+redundancy under a probabilistic relaxation of the soundness
+statement (with bounded silent-corruption risk quantified rather
+than zero by construction). The conservative v1 statement is what
+allows the present soundness theorem to be \emph{absolute} rather
+than statistical.
+\end{remark}

@@ -1,0 +1,86 @@
+\section{Soundness Theorem}\label{sec:soundness}
+
+\subsection{Statement}
+
+\begin{theorem}[Soundness of BEAMFS recovery]\label{thm:soundness}
+Let~\(\Lambda\) be a layout satisfying invariants~\textup{I1--I3} of
+\cref{sub:invariants}. Let~\(\mathcal{G}\) be the recovery operator
+of \cref{def:G}, satisfying~\textup{I4--I5}. Let~\(\mathcal{E}\) be a
+family of physical perturbations such that, for every event
+\(e \in \mathcal{E}\) and every state~\(s\), the number of corrupted
+symbols in any single RS subblock of~\(e(s)\) does not exceed the
+correction capacity~\(t = \lfloor (n-k)/2 \rfloor\) declared by~\(\Lambda\).
+Then for every initial consistent state~\(s_0 \models\) and every
+\(e \in \mathcal{E}\), there exists~\(K \le |\Lambda|\) such that
+\[
+  \mathcal{G}^{K}\bigl(e(s_0)\bigr) \models
+  \quad\text{or}\quad
+  \mathcal{G}^{K}\bigl(e(s_0)\bigr) = \bot,
+\]
+where~\(|\Lambda|\) denotes the number of regions in~\(\Lambda\).
+\end{theorem}
+
+The full proof appears in \cref{app:proof}. The argument has
+three steps:
+
+\paragraph{Termination.}
+By Lemma~\ref{lem:descent}, the function~\(N\) strictly decreases on
+each non-fail-closed iteration. Since~\(N \in \{0, 1, \dots, |\Lambda|\}\)
+and~\(N = 0\) implies consistency by \cref{def:consistent},
+the recursion terminates in at most~\(|\Lambda|\) iterations.
+
+\paragraph{Safety.}
+At every iteration, if step~3 or step~5 of \cref{def:G}
+fails (CRC mismatch after RS, or sentinel violation),~\(\bot\) is
+returned. By \cref{prop:absorb}, fail-closed is absorbing:
+no subsequent iteration can return a state that silently masks the
+violation.
+
+\paragraph{Coverage of the perturbation family.}
+The hypothesis on~\(\mathcal{E}\) (no event corrupts more than~\(t\)
+symbols in any single subblock) is exactly the RS code's correction
+capacity. Events that violate this hypothesis correspond, by~I1, to
+physical perturbations whose intensity exceeds the layout's design
+target. They are out of scope of the theorem and of the layout, and
+the operator's response (fail-closed at step~3 or~5) is the
+designed safe failure.
+
+\subsection{Discussion}
+
+\paragraph{What this theorem does, and does not, prove.}
+\Cref{thm:soundness} establishes that the recovery operator either
+returns to consistency or to fail-closed in a bounded number of
+steps, under stated physical hypotheses. It does \emph{not} prove
+that the kernel implementation of~\(\mathcal{G}\) is bug-free: a
+buggy implementation can violate I4 or I5 even with a correct
+operator definition. \Cref{sec:m2c-tier3} sketches an implementation
+path that preserves the invariants by construction, but only a
+verified compilation chain (in the seL4~\cite{klein2009sel4} or
+FSCQ~\cite{chen2015fscq} sense) can close the implementation gap.
+We mark this as v3 work.
+
+\paragraph{Why the bound is~\(|\Lambda|\), not a constant.}
+The bound scales with the number of regions because the worst case is
+a perturbation that corrupts every region simultaneously up to the
+RS limit. This worst case is unrealistic (\cref{sec:phys} establishes
+that simultaneous corruption of all regions requires fluences
+orders of magnitude beyond environmental backgrounds), but the bound
+is conservative and has the merit of making no probabilistic
+assumption. The per-iteration cost is dominated by a single
+RS-decode of~\(O(n^{2})\) GF operations
+(\cref{sec:m2c-tier2}), so the total worst-case running time is
+\(O(|\Lambda| \cdot n^{2})\): sub-millisecond on contemporary CPUs
+for the FTRFS layout.
+
+\paragraph{Comparison with crash-consistency proofs.}
+FSCQ~\cite{chen2015fscq} proves that a filesystem returns to a
+consistent state after a crash (sudden power loss). The hypothesis
+there is that the storage substrate is \emph{benevolent}: it
+preserves whatever was written, exactly. \Cref{thm:soundness}
+proves the dual: it assumes the substrate is \emph{adversarial}
+within the bounded-perturbation family~\(\mathcal{E}\), and the
+filesystem must recover. The two proofs compose: a BEAMFS-compliant
+implementation satisfying \cref{thm:soundness} \emph{and} satisfying
+crash-Hoare logic in the FSCQ sense recovers from the union of
+both threat models. Combining the two formal frameworks is left
+for future work.
