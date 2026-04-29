@@ -115,6 +115,159 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 }
 
 /* ------------------------------------------------------------------------- */
+/* Allocating block-mapping (v2 INLINE write path)                           */
+/*                                                                           */
+/* Variant of beamfs_inline_lookup_phys() that allocates on demand. Used by  */
+/* the write path (write_begin + writepages) to map a logical iblock to a    */
+/* physical block, allocating direct/indirect/data blocks as needed and      */
+/* zero-initializing freshly allocated data blocks so a subsequent read sees */
+/* deterministic content (16 zero subblocks of valid RS codewords -- the    */
+/* zero data plus zero parity is a valid RS(255,239) codeword by linearity). */
+/*                                                                           */
+/* Allocates:                                                                */
+/*   - Direct: writes phys into fi->i_direct[iblock] + mark_inode_dirty.     */
+/*   - Indirect: allocates the indirect block first (zero-init) if absent,   */
+/*     then allocates the data block and writes phys into ptrs[slot].        */
+/*                                                                           */
+/* The freshly allocated data block is zero-initialized via sb_getblk +      */
+/* memset, NOT via sb_bread, because there is no on-disk content to read     */
+/* (the block was unallocated). The buffer is marked uptodate + dirty so     */
+/* writepages can RMW it without an extra sb_bread.                          */
+/*                                                                           */
+/* Returns:                                                                  */
+/*   0  + *phys_out = block number (mapped or freshly allocated)             */
+/*   <0 on error (-ENOSPC if alloc fails, -EIO on indirect read fail,        */
+/*                -EOPNOTSUPP beyond v1 capacity)                            */
+/* ------------------------------------------------------------------------- */
+static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
+					      u64 iblock_logical,
+					      u64 *phys_out)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block       *sb = inode->i_sb;
+	struct buffer_head       *ibh;
+	struct buffer_head       *dbh;
+	__le64                   *ptrs;
+	u64                       indirect_blk;
+	u64                       indirect_slot;
+	u64                       phys;
+	u64                       new_block;
+
+	if (!phys_out)
+		return -EINVAL;
+
+	*phys_out = 0;
+
+	if (iblock_logical < BEAMFS_DIRECT_BLOCKS) {
+		/* --- Direct block --- */
+		phys = le64_to_cpu(fi->i_direct[iblock_logical]);
+		if (phys) {
+			*phys_out = phys;
+			return 0;
+		}
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			pr_err_ratelimited("beamfs/inline: no free blocks (direct)\n");
+			return -ENOSPC;
+		}
+		/* Zero-init the freshly allocated data block on disk. */
+		dbh = sb_getblk(sb, new_block);
+		if (!dbh) {
+			beamfs_free_block(sb, new_block);
+			return -EIO;
+		}
+		lock_buffer(dbh);
+		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(dbh);
+		unlock_buffer(dbh);
+		mark_buffer_dirty(dbh);
+		brelse(dbh);
+
+		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
+		mark_inode_dirty(inode);
+
+		*phys_out = new_block;
+		return 0;
+	}
+
+	if (iblock_logical < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS) {
+		/* --- Single indirect block --- */
+		indirect_slot = iblock_logical - BEAMFS_DIRECT_BLOCKS;
+		indirect_blk  = le64_to_cpu(fi->i_indirect);
+
+		if (!indirect_blk) {
+			/* Allocate indirect block first, zero-init. */
+			indirect_blk = beamfs_alloc_block(sb);
+			if (!indirect_blk) {
+				pr_err_ratelimited("beamfs/inline: no free blocks (indirect)\n");
+				return -ENOSPC;
+			}
+			ibh = sb_getblk(sb, indirect_blk);
+			if (!ibh) {
+				beamfs_free_block(sb, indirect_blk);
+				return -EIO;
+			}
+			lock_buffer(ibh);
+			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(ibh);
+			unlock_buffer(ibh);
+			mark_buffer_dirty(ibh);
+			brelse(ibh);
+
+			fi->i_indirect = cpu_to_le64(indirect_blk);
+			mark_inode_dirty(inode);
+		}
+
+		/* Read indirect to look up / install the slot. */
+		ibh = sb_bread(sb, indirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
+					  (unsigned long long)indirect_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+		phys = le64_to_cpu(ptrs[indirect_slot]);
+
+		if (phys) {
+			brelse(ibh);
+			*phys_out = phys;
+			return 0;
+		}
+
+		/* Allocate data block and zero-init. */
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			brelse(ibh);
+			pr_err_ratelimited("beamfs/inline: no free blocks (data)\n");
+			return -ENOSPC;
+		}
+		dbh = sb_getblk(sb, new_block);
+		if (!dbh) {
+			beamfs_free_block(sb, new_block);
+			brelse(ibh);
+			return -EIO;
+		}
+		lock_buffer(dbh);
+		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(dbh);
+		unlock_buffer(dbh);
+		mark_buffer_dirty(dbh);
+		brelse(dbh);
+
+		ptrs[indirect_slot] = cpu_to_le64(new_block);
+		mark_buffer_dirty(ibh);
+		brelse(ibh);
+
+		*phys_out = new_block;
+		return 0;
+	}
+
+	pr_err_ratelimited("beamfs/inline: iblock %llu beyond v1 indirect capacity (write)\n",
+			  (unsigned long long)iblock_logical);
+	return -EOPNOTSUPP;
+}
+
+/* ------------------------------------------------------------------------- */
 /* read_folio (v2 INLINE) -- per-block RS(255,239) FEC on data blocks.       */
 /*                                                                           */
 /* Each disk block is laid out as 16 interleaved subblocks of 255 bytes      */
@@ -274,17 +427,7 @@ out_unlock:
 }
 
 /* ------------------------------------------------------------------------- */
-/* writepages -- to be implemented in stage 4b4                              */
-/* ------------------------------------------------------------------------- */
-static int beamfs_inline_writepages(struct address_space *mapping,
-				    struct writeback_control *wbc)
-{
-	pr_warn_ratelimited("beamfs/inline: writepages not implemented yet\n");
-	return 0;
-}
-
-/* ------------------------------------------------------------------------- */
-/* readahead -- to be implemented in stage 4b5 (initial: per-folio loop)     */
+/* readahead -- per-folio loop on top of read_folio.                         */
 /* ------------------------------------------------------------------------- */
 static void beamfs_inline_readahead(struct readahead_control *rac)
 {
@@ -294,25 +437,219 @@ static void beamfs_inline_readahead(struct readahead_control *rac)
 }
 
 /* ------------------------------------------------------------------------- */
-/* write_begin / write_end -- to be implemented in stage 4b3                 */
+/* write_begin (v2 INLINE, single-block scope)                               */
+/*                                                                           */
+/* Provides a folio for the write to land into. The actual encoding to disk  */
+/* (RS encode + sync) happens in writepages.                                 */
+/*                                                                           */
+/* SCOPE LIMITATION (v2.0): only single-block files (file_offset + len <=    */
+/* BEAMFS_DATA_INLINE_BYTES = 3824). Multi-block INLINE writes are rejected  */
+/* with -EFBIG. The reason is the impedance mismatch between the VFS folio  */
+/* model (4096 user bytes per page) and the INLINE layout (3824 user bytes  */
+/* per disk block). Multi-block INLINE write is deferred to the v2.x roadmap*/
+/* per Documentation/format-v4.md section 7.5.                               */
+/*                                                                           */
+/* RMW handling:                                                             */
+/*   - If the folio is already uptodate, no read is needed (overwrite).      */
+/*   - Otherwise, look up the physical block. If allocated, read+decode      */
+/*     it via the existing read path. If HOLE, zero-fill the folio.          */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_write_begin(const struct kiocb *iocb,
 				     struct address_space *mapping,
 				     loff_t pos, unsigned int len,
 				     struct folio **foliop, void **fsdata)
 {
-	pr_warn_ratelimited("beamfs/inline: write_begin not implemented yet\n");
-	return -EOPNOTSUPP;
+	struct inode *inode = mapping->host;
+	struct folio *folio;
+	int           ret;
+
+	/* v2.0 scope: single-block only. */
+	if (pos < 0 || len == 0)
+		return -EINVAL;
+	if ((u64)pos + len > BEAMFS_DATA_INLINE_BYTES) {
+		pr_warn_ratelimited("beamfs/inline: write_begin: pos+len=%llu exceeds single-block scope (3824 bytes); multi-block INLINE write is v2.x roadmap\n",
+				   (unsigned long long)((u64)pos + len));
+		return -EFBIG;
+	}
+
+	folio = __filemap_get_folio(mapping, 0,
+				   FGP_WRITEBEGIN | FGP_NOFS,
+				   mapping_gfp_mask(mapping));
+	if (IS_ERR(folio))
+		return PTR_ERR(folio);
+
+	/* If folio already has the data, nothing more to do. */
+	if (folio_test_uptodate(folio)) {
+		*foliop = folio;
+		return 0;
+	}
+
+	/* Read the existing block (if allocated) to populate the folio. */
+	ret = beamfs_inline_read_folio(NULL, folio);
+	if (ret < 0) {
+		folio_unlock(folio);
+		folio_put(folio);
+		return ret;
+	}
+
+	/* read_folio unlocked the folio on success; re-lock for the write. */
+	folio_lock(folio);
+	*foliop = folio;
+	return 0;
 }
 
+/* ------------------------------------------------------------------------- */
+/* write_end (v2 INLINE)                                                     */
+/*                                                                           */
+/* Standard kernel pattern: flush dcache, mark folio uptodate + dirty,       */
+/* update i_size if the write extended the file, then release the folio.    */
+/* The actual RS encode + disk write happens later in writepages.            */
+/* ------------------------------------------------------------------------- */
 static int beamfs_inline_write_end(const struct kiocb *iocb,
 				   struct address_space *mapping,
 				   loff_t pos, unsigned int len,
 				   unsigned int copied,
 				   struct folio *folio, void *fsdata)
 {
-	pr_warn_ratelimited("beamfs/inline: write_end not implemented yet\n");
-	return -EOPNOTSUPP;
+	struct inode *inode = mapping->host;
+	loff_t        new_i_size;
+
+	flush_dcache_folio(folio);
+
+	if (!folio_test_uptodate(folio))
+		folio_mark_uptodate(folio);
+	filemap_dirty_folio(mapping, folio);
+
+	new_i_size = pos + copied;
+	if (new_i_size > i_size_read(inode)) {
+		i_size_write(inode, new_i_size);
+		mark_inode_dirty(inode);
+	}
+
+	folio_unlock(folio);
+	folio_put(folio);
+	return copied;
+}
+
+/* ------------------------------------------------------------------------- */
+/* writepages (v2 INLINE)                                                    */
+/*                                                                           */
+/* For each dirty folio in the mapping:                                      */
+/*   1) Look up or allocate the physical block backing the folio.            */
+/*   2) sb_bread the physical block (or use a freshly zero-init'd buffer).   */
+/*   3) Scatter 3824 user bytes from the folio into the buffer head, one     */
+/*      239-byte run per subblock, leaving the 16 parity bytes untouched.    */
+/*   4) RS encode all 16 subblocks via beamfs_rs_encode_region().            */
+/*   5) Zero the 16-byte pad zone (offset 4080..4096).                       */
+/*   6) mark_buffer_dirty + sync_dirty_buffer for autonomic durability.      */
+/*   7) folio_clear_dirty_for_io + folio_end_writeback.                      */
+/*                                                                           */
+/* Single-block scope (v2.0): only folio->index == 0 is processed; any       */
+/* other dirty folio is silently skipped (write_begin already enforces the   */
+/* single-block constraint at write entry).                                  */
+/* ------------------------------------------------------------------------- */
+static int beamfs_inline_writepages(struct address_space *mapping,
+				    struct writeback_control *wbc)
+{
+	struct inode       *inode = mapping->host;
+	struct super_block *sb    = inode->i_sb;
+	struct folio_batch  fbatch;
+	struct folio       *folio;
+	unsigned int        i;
+	int                 ret = 0;
+
+	folio_batch_init(&fbatch);
+
+	while (filemap_get_folios_tag(mapping, &wbc->range_start,
+				      wbc->range_end >> PAGE_SHIFT,
+				      PAGECACHE_TAG_DIRTY, &fbatch)) {
+		for (i = 0; i < folio_batch_count(&fbatch); i++) {
+			struct buffer_head *bh;
+			u64                 phys = 0;
+			u8                 *src;
+			unsigned int        sb_idx;
+
+			folio = fbatch.folios[i];
+
+			/* v2.0 scope: only process folio index 0. */
+			if (folio->index != 0) {
+				pr_warn_ratelimited("beamfs/inline: writepages: skipping folio index %lu (single-block scope)\n",
+						   folio->index);
+				continue;
+			}
+
+			folio_lock(folio);
+
+			if (!folio_test_dirty(folio) ||
+			    folio->mapping != mapping) {
+				folio_unlock(folio);
+				continue;
+			}
+
+			ret = beamfs_inline_lookup_or_alloc_phys(inode, 0, &phys);
+			if (ret < 0) {
+				folio_unlock(folio);
+				goto out_release;
+			}
+
+			bh = sb_bread(sb, phys);
+			if (!bh) {
+				pr_err_ratelimited("beamfs/inline: writepages: sb_bread phys=%llu failed\n",
+						  (unsigned long long)phys);
+				ret = -EIO;
+				folio_unlock(folio);
+				goto out_release;
+			}
+
+			folio_clear_dirty_for_io(folio);
+			folio_start_writeback(folio);
+
+			/* Scatter folio bytes into bh: 16 segments of 239 bytes. */
+			src = kmap_local_folio(folio, 0);
+			for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++) {
+				memcpy((u8 *)bh->b_data + (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
+				       src + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
+				       BEAMFS_SUBBLOCK_DATA);
+			}
+			kunmap_local(src);
+
+			/* RS encode all 16 subblocks: parity at offset 239 within each 255-byte stride. */
+			ret = beamfs_rs_encode_region(
+				(u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS);
+			if (ret < 0) {
+				pr_err_ratelimited("beamfs/inline: writepages: rs_encode_region failed: %d\n",
+						  ret);
+				brelse(bh);
+				folio_end_writeback(folio);
+				folio_unlock(folio);
+				goto out_release;
+			}
+
+			/* Zero the 16-byte pad zone (4080..4096). */
+			memset((u8 *)bh->b_data + BEAMFS_DATA_INLINE_TOTAL, 0,
+			       BEAMFS_DATA_INLINE_PAD);
+
+			/* Autonomic durability: sync the encoded block to disk. */
+			mark_buffer_dirty(bh);
+			ret = sync_dirty_buffer(bh);
+			brelse(bh);
+
+			folio_end_writeback(folio);
+			folio_unlock(folio);
+
+			if (ret < 0)
+				goto out_release;
+		}
+		folio_batch_release(&fbatch);
+	}
+
+	return 0;
+
+out_release:
+	folio_batch_release(&fbatch);
+	return ret;
 }
 
 /* ------------------------------------------------------------------------- */
