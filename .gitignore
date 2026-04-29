@@ -47,3 +47,4 @@ Thumbs.db
 .*.o.cmd
 .*.ko.cmd
 .*.mod.cmd
+context/
