@@ -582,9 +582,81 @@ Planned: `v0.5.0-security-reviewed`.
 
 ## Long-term vision (post-merge)
 
-The following are out of the staged plan and are sketched here
-only to make scope boundaries explicit. None of them is
-scheduled, none competes with stages 3 to 5 for attention.
+### Principal long-term objective: Full BEAMFS rootfs
+
+The principal long-term engineering objective of the BEAMFS project
+is to be deployable as a **full Linux rootfs**, replacing squashfs
+on production OIV-grade systems where electromagnetic resilience is
+a stated design constraint. This is the deployment scenario that
+fully realizes the EMR threat model of `threat-model.md`: the
+operating system itself, not merely its data partition, runs on a
+filesystem that detects and corrects EMR perturbations autonomically.
+
+Concretely: a Yocto image whose `IMAGE_FSTYPES = "beamfs"` (no
+squashfs intermediate, no tmpfs overlay), boots from BEAMFS, runs
+init from BEAMFS, mounts `/`, `/etc`, `/var`, `/home` all on the
+same BEAMFS partition, and exhibits the autonomic repair contract
+of Theorem v2.1 across the full operating-system surface, not just
+on synthetic loop images.
+
+This objective dominates the post-merge roadmap. The items below
+(read-only mode with compression, extended attributes and SELinux,
+post-quantum metadata authentication) are **prerequisites or
+adjuncts** to the full-rootfs deployment, not parallel work.
+
+#### Dependency chain
+
+The full rootfs cannot be deployed until each of the following is
+in tree, validated, and stable under load:
+
+1. INLINE write path (single-block scope, `develop` branch as of
+   2026-04-29). Required for any write operation on an INLINE
+   volume.
+2. Multi-block INLINE write path (v2.x roadmap). Required for any
+   file > 3824 bytes, which includes essentially all configuration
+   files, logs, and binaries.
+3. Full POSIX semantics: `link`, `rename`, `truncate`, `fsync`,
+   `mmap`, `xattr`, ACL. Each is a known-limitation today.
+4. `xfstests` "auto" group passing under load, with the four-node
+   HPC cluster as the test substrate.
+5. Symlinks. Required for any rootfs use (numerous compatibility
+   symlinks live in `/usr/lib`, `/etc`, `/var`).
+6. Extended attributes and SELinux. Prerequisite for any
+   mandatory-access-control deployment, which is a typical OIV
+   requirement.
+7. `dm-verity`-equivalent verified-boot story for BEAMFS, tying
+   the filesystem to the trusted-boot chain. The RS FEC layer is
+   already at the FS level; verified boot integrates the
+   filesystem identity into the boot chain attestation.
+
+Each of these is a separate engineering effort estimated in the
+weeks-to-months range. The cumulative path from the present
+session (INLINE write single-block on `develop`) to a tagged
+`v3.0.0-full-rootfs` release is estimated at 6-12 months of focused
+work, assuming the v2.x post-Zenodo continuation runs unblocked.
+
+#### Publication anchor
+
+A separate Technical Report (BEAMFS v3 — Full POSIX filesystem with
+electromagnetic resilience: production deployment validation) is
+planned to accompany the `v3.0.0-full-rootfs` engineering tag.
+This report will document the deployment scenario, the
+end-to-end empirical validation under load (boot, init, OS
+operations, application workloads), and the recovery contract
+generalized from synthetic Theorem v2.1 fixtures to the full
+operating-system surface.
+
+The objective is registered here as the canonical long-term
+direction of the project. Subsequent design decisions
+(format-v5 considerations, kernel API choices, userspace
+tooling priorities) are evaluated against it.
+
+---
+
+The following items are out of the staged plan and are sketched
+here only to make scope boundaries explicit relative to the
+principal objective above. They are sequenced as adjuncts on the
+path to full rootfs.
 
 ### Read-only mode with compression
 
