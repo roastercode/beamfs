@@ -1,0 +1,200 @@
+\section{From Mathematics to Code: Three-Tier Derivation}\label{sec:m2c}
+
+\subsection{Tier 1: The Perturbation Operator (Mathematics)}
+
+\cref{def:perturbation} is the mathematical contract. The five
+invariants F1--F5 (\cref{ssec:invariants}) are the obligations the
+next tiers must preserve.
+
+\subsection{Tier 2: The Algorithm}
+
+The perturbation operator translates to a deterministic
+kernel-conformant algorithm. A \texttt{pre\_handler} is registered on
+each kprobe (one for \texttt{submit\_bh}, one for
+\texttt{submit\_bio\_noacct}); on each invocation, the handler reads
+the relevant arguments, applies the filter, samples the PRNG, and
+performs the flip via \texttt{kmap\_local\_page} for arm64-safe page
+access~\cite{kernel-highmem}.
+
+\begin{lstlisting}[caption={RadFI bio pre-handler kprobe on
+\texttt{submit\_bio\_noacct}.},label={lst:prehandler}]
+/*
+ * RadFI bio pre-handler -- kprobe on submit_bio_noacct.
+ * Returns 0 always (pre-handler does not redirect execution).
+ */
+static int radfi_kp_submit_bio_pre(struct kprobe *kp,
+                                   struct pt_regs *regs)
+{
+    struct radfi_state *st = radfi_global;
+    struct bio *bio;
+    unsigned int op;
+    dev_t dev;
+
+    if (!st || !READ_ONCE(st->hook_blk))
+        return 0;
+
+    bio = (struct bio *)regs->regs[0];
+    if (!bio || !bio->bi_bdev)
+        return 0;
+
+    /* F3: filter monotonicity (op type) */
+    op = bio_op(bio);
+    if (op == REQ_OP_WRITE) {
+        /* always candidate */
+    } else if (op == REQ_OP_READ) {
+        if (!READ_ONCE(st->inject_on_read))
+            return 0;        /* v0.1.2 flag */
+    } else {
+        return 0;            /* skip non-data ops */
+    }
+
+    /* F3: filter monotonicity (device) */
+    dev = bio->bi_bdev->bd_dev;
+    if (READ_ONCE(st->target_dev) &&
+        (u32)dev != READ_ONCE(st->target_dev))
+        return 0;
+
+    atomic64_inc(&st->call_count);
+
+    /* F1: probability sampling */
+    if (!radfi_should_inject(st)) {
+        atomic64_inc(&st->skipped_prob);
+        return 0;
+    }
+
+    /* F1, F2: single bit-flip on first segment, uniform */
+    radfi_flip_one_bit_in_first_segment(bio);
+
+    atomic64_inc(&st->flip_count);
+    return 0;
+}
+\end{lstlisting}
+
+The listing above shows the principal control flow; the actual
+implementation includes additional safety checks on
+\texttt{bio->bi\_vcnt} and \texttt{bio->bi\_iter.bi\_size},
+omitted here for clarity.
+
+The algorithm is structurally simple. Its correctness rests entirely
+on the alignment between the mathematical invariants and the
+kernel-side implementation choices. \cref{tab:m2c-trace} makes this
+alignment explicit.
+
+\subsection{Tier 3: The Kernel Implementation}
+
+The reference implementation is a Linux kernel module
+(\texttt{radfi.ko}, GPL-2.0) registering two kprobes: one on
+\texttt{submit\_bh} (filesystem hook), one on
+\texttt{submit\_bio\_noacct} (block layer hook). Configuration is
+exposed through debugfs entries under
+\texttt{/sys/kernel/debug/radfi/}:
+
+\begin{itemize}
+\item \texttt{enabled} (bool): master switch.
+\item \texttt{hook\_fs} (bool), \texttt{hook\_blk} (bool): per-hook
+  enable.
+\item \texttt{inject\_on\_read} (bool, v0.1.2): DRAM-bidirectional
+  toggle.
+\item \texttt{probability} (u32): PPM probability.
+\item \texttt{target\_dev} (u32), \texttt{target\_inode} (u64),
+  \texttt{target\_block} (u64): filter values.
+\item \texttt{seed} (u64): PRNG seed.
+\item \texttt{call\_count}, \texttt{flip\_count},
+  \texttt{skipped\_disabled}, \texttt{skipped\_prob} (read-only u64):
+  F5 counters.
+\end{itemize}
+
+The kmap path uses \texttt{kmap\_local\_page} (rather than the
+deprecated \texttt{kmap\_atomic}) for arm64
+safety~\cite{kernel-highmem}. The PRNG state is per-module-load,
+re-seeded at module init. In the actual implementation, fields
+accessed multiple times in the pre-handler (e.g.\ \texttt{target\_dev})
+are loaded once into a local variable to avoid double
+\texttt{READ\_ONCE} hazards under concurrent debugfs writes; the
+listing elides this for readability.
+
+\paragraph{Differences from generic SDC fault-injection tools.}
+Tools such as Xception~\cite{carreira1998xception} and
+EDFI~\cite{giuffrida2013edfi} inject into instruction streams or
+memory regions selected by static analysis. RadFI restricts itself
+to the bio-layer payload, which corresponds precisely to the
+abstraction at which a filesystem can defend (the BEAMFS recovery
+operator \(\mathcal{G}\) acts on bytes read back from disk, not on
+instructions). This narrow scope is what makes the
+falsification-of-recovery-theorems use case crisp.
+
+\paragraph{Choice of kprobes over fprobe.}
+The v0.1.x build uses \texttt{register\_kprobe}\cite{kernel-kprobes}
+for compatibility with Linux kernel 7.0.x and earlier; migration
+to the newer \texttt{fprobe} interface is v2 work.
+
+\paragraph{Architecture-specific register access.}
+The pre-handler reads its bio argument from \texttt{regs->regs[0]},
+which is the aarch64 first-argument register \texttt{x0}. The
+x86\_64 path uses \texttt{regs->di}; the production module selects
+the correct field via \texttt{\#ifdef CONFIG\_ARM64} /
+\texttt{CONFIG\_X86\_64}.
+
+\paragraph{Allocation contexts.}
+The kprobe pre-handler runs in interrupt context (the bio submission
+path may be invoked under spinlocks or in softirq); all allocations
+on the pre-handler path use \texttt{GFP\_ATOMIC}. The slow paths
+(module init, debugfs writes) use \texttt{GFP\_KERNEL}.
+
+\paragraph{Kprobe blacklist verification.}
+Neither \texttt{submit\_bio\_noacct} nor \texttt{submit\_bh} appears
+in the \texttt{\_\_kprobes} blacklist as of Linux kernel 7.0.x; this
+is verified at module load by inspecting the kprobe
+registration return value.
+
+\paragraph{Singleton state and replay determinism.}
+RadFI uses a singleton state (\texttt{radfi\_global}) rather than a
+per-CPU structure. This is intentional: a per-CPU PRNG state would
+break F4 (replay determinism) by making the flip sequence depend on
+which CPU happened to service each bio.
+
+\paragraph{Module unload safety.}
+Module unload calls \texttt{unregister\_kprobe} followed by
+\texttt{synchronize\_rcu}, ensuring any in-flight pre-handler
+invocation completes before the module's data structures are freed.
+
+\paragraph{Production safety.}
+The v0.1.x build aborts module load if the host system has any
+non-loop block device mounted with a BEAMFS filesystem. This is a build-time check enforced by a runtime probe
+in \texttt{radfi\_init}. The intent is to make accidental injection
+on a production filesystem impossible without explicit code
+modification.
+
+\subsection{Traceability: Math \(\to\) Algorithm \(\to\) Code}
+
+\cref{tab:m2c-trace} expresses the descent in tabular form, in the
+same auditable contract style
+as~\cite[Table~II]{desbrieres2026beamfsv1}.
+
+\begin{table*}[t]
+\caption{Traceability of the perturbation operator. Each
+mathematical commitment maps to an algorithmic step and a kernel
+construct. The ``Phase'' column indicates when the construct is
+checked: Mount = once at module load; Runtime = on each bio
+interception.}
+\label{tab:m2c-trace}
+\centering
+\small
+\begin{tabular}{@{}p{3.2cm}p{4.6cm}p{6.5cm}l@{}}
+\toprule
+Math Commitment (Tier 1) & Algorithm (Tier 2) & Kernel Construct (Tier 3) & Phase \\
+\midrule
+F1 (Single-bit primitive) & \texttt{radfi\_flip\_one\_\allowbreak bit\_in\_\allowbreak first\_segment}\\flips one bit per call & Sampling: \texttt{byte\_off = prng \% bv.bv\_len}; \texttt{bit\_pos = prng \% 8}; XOR & Runtime \\
+F2 (Targeting independence) & Sample positions from bio geometry only, not from byte values & \texttt{bv.bv\_len}, \texttt{bv.bv\_offset} used as bounds; payload bytes never read & Runtime \\
+F3 (Filter monotonicity) & Sequential filter checks return 0 on any non-match & \texttt{if ((u32)dev != target\_dev) return 0;} per filter component & Runtime \\
+F4 (Replay determinism) & xoshiro256** seeded by \texttt{seed} parameter & \texttt{radfi\_prng\_state} initialized from \texttt{st->prng\_seed} at module init & Mount \\
+F5 (Counter accounting) & \texttt{atomic64\_inc} on each path & \texttt{\&st->call\_count}, \texttt{\&st->flip\_count}, \texttt{\&st->skipped\_*} & Runtime \\
+\cref{def:perturbation}, step 1 (Intercept) & kprobe \texttt{pre\_handler} & \texttt{register\_\allowbreak kprobe(\&radfi\_kp\_\allowbreak submit\_bio)} & Mount \\
+\cref{def:perturbation}, step 2 (Filter) & Filter algebra on bio attributes & \texttt{bio\_op(bio)}, \texttt{bio->bi\_bdev->bd\_dev} & Runtime \\
+\cref{def:perturbation}, step 3 (Probability) & PRNG comparison vs \(\mathit{prob}\) & \texttt{radfi\_should\_inject(st)} & Runtime \\
+\cref{def:perturbation}, step 4 (Flip) & \texttt{kmap\_local\_page} + XOR + \texttt{kunmap\_local} & arm64-safe page access~\cite{kernel-highmem} & Runtime \\
+\cref{def:filter} (Filter algebra) & Tuple of optional filters & debugfs entries \texttt{target\_dev}, \texttt{target\_inode}, \texttt{target\_block}, op type & Mount \\
+DRAM-bidirectional (\cref{ssec:dram-bidir}) & \texttt{inject\_on\_read} toggle on \texttt{REQ\_OP\_READ} & \texttt{READ\_ONCE(st->inject\_on\_read)} at op type filter & Runtime \\
+\bottomrule
+\end{tabular}
+\end{table*}

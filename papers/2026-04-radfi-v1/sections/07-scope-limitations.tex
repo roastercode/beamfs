@@ -1,0 +1,55 @@
+\section{Scope and Limitations}\label{sec:limitations}
+
+We adopt the same posture as~\cite{desbrieres2026beamfsv1}: the
+limitations section is structural, not concessionary.
+
+\paragraph{v1 covers.}
+The mathematical formalization of \(\varepsilon\)
+(\cref{sec:operator}), the faithfulness theorem
+(\cref{sec:faithfulness} with proof in \cref{app:proof}), the
+three-tier descent to a Linux kernel module (\cref{sec:m2c}), and
+two empirical applications: falsification of BEAMFS v1 and
+corroboration of BEAMFS v2 INLINE.
+
+\paragraph{v1 does not cover.}
+
+\begin{itemize}
+\item \emph{Multi-flip per bio.} v0.1.x flips at most one bit per
+  intercepted bio. A real burst event ionizing multiple cells along
+  a single particle track is not modelled.
+\item \emph{MBU spatial correlation.} Multi-bit upsets in physically
+  adjacent cells are correlated through the particle's track
+  geometry. RadFI's uniform sampling does not reproduce this
+  correlation.
+\item \emph{Beam-time calibration.} The faithfulness theorem
+  (\cref{thm:faithfulness}) is a statistical claim; physical
+  equivalence with accelerator-measured upset distributions is not
+  established.
+\item \emph{RDMA fast path.} RadFI hooks the bio layer; RDMA paths
+  bypassing this layer are not intercepted.
+\item \emph{Hook diagnostic on Linux 7.0.x.} The \texttt{hook\_blk}
+  pre-handler observed on 2026-04-29 to register without firing
+  under controlled conditions remains unexplained at v0.1.2.
+  Diagnosis is deferred.
+\item \emph{Verified compilation.} The kernel implementation is C;
+  the gap from algorithm to executed binary is the standard
+  unverified-compilation gap~\cite{klein2009sel4}.
+\end{itemize}
+
+\paragraph{Methodological limits.}
+The author is the sole contributor; no peer review beyond the
+public visibility of the BEAMFS repository has shaped this text.
+The falsification of BEAMFS v1 is a self-falsification: the same
+author wrote v1, RadFI, and the present retraction. We claim this
+is a strength rather than a weakness --- a single author's
+willingness to falsify their own theorem is a stronger Popperian
+commitment than third-party falsification --- but we acknowledge
+the absence of independent replication is a v2 priority.
+
+\paragraph{Threats to validity.}
+The principal threat is that the perturbation distribution emulated
+by RadFI is not faithful to the SEU distribution observed in
+deployed systems. \cref{thm:faithfulness} establishes statistical
+indistinguishability under stated hypotheses, but the hypotheses
+themselves (uniform sampling, single-bit primitive, no spatial
+correlation) are simplifications. v2 will address each.

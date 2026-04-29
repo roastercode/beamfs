@@ -1,0 +1,126 @@
+\section{Introduction}\label{sec:intro}
+
+Fault injection is the canonical empirical method for evaluating the
+resilience of computer systems to transient hardware
+faults~\cite{carreira1998xception,hsueh1997faultinjection,giuffrida2013edfi}.
+Its scientific function is twofold: to \emph{validate} resilience
+claims by demonstrating that a system survives a targeted
+perturbation distribution, and to \emph{falsify} them by exhibiting a
+perturbation that the system fails to handle. The two are not
+symmetric: validation accumulates evidence under a chosen
+perturbation family; falsification produces a single counter-example
+sufficient to retract a soundness theorem. The latter, properly
+understood in the Popperian tradition~\cite{popper1959logic}, is what
+advances the science.
+
+The present report concerns the falsification side. We define an
+algebraic perturbation operator, RadFI, designed to produce
+\emph{controlled, repeatable, and physically meaningful} Single-Event
+Upset emulations against an instrumented Linux filesystem. The
+operator is the empirical dual of the BEAMFS recovery operator
+\(\mathcal{G}\) defined in~\cite{desbrieres2026beamfsv1}: both act on
+the same filesystem state space \(\mathcal{S}\); \(\mathcal{G}\)
+drives perturbed states back to consistency, \(\varepsilon\) injects
+perturbations whose distribution is calibrated to a chosen SEU
+cross-section regime.
+
+\subsection{Position of the problem}
+
+A filesystem resilience theorem of the form ``for every
+\(s \models\) and every \(e \in \mathcal{E}\), the recovery operator
+drives \(e(s)\) to consistency or to fail-closed in finite steps'' is
+meaningful only if the perturbation family \(\mathcal{E}\) is
+\emph{realizable}. A theorem that quantifies over a family no real
+fault can produce is a tautology disguised as a theorem. Conversely,
+a theorem whose stated \(\mathcal{E}\) excludes a class of physically
+realizable faults is \emph{incomplete}, and the proper response is
+to enlarge \(\mathcal{E}\) and revise the proof, not to dismiss the
+omitted faults as out of scope.
+
+RadFI is constructed as the empirical instrument that closes this
+loop. It produces perturbations \(e \in \mathcal{E}\) that are
+simultaneously (i) physically meaningful, in the sense that each
+\(e\) corresponds to a single bit-flip on volatile memory in
+transit, modelling a canonical
+SEU~\cite{dodd2003seu,baumann2005softerrors}; (ii) controllable, in
+the sense that the position, timing, and target of each flip are
+governed by stated parameters; and (iii) replayable, in the sense
+that a fixed PRNG seed reproduces the exact perturbation sequence
+across runs, enabling regression on resilience claims.
+
+\subsection{Where we are going}
+
+This report defends a single thesis: a filesystem resilience theorem
+must be subject to empirical falsification, and the instrument of
+falsification must be a formally specified algebraic operator whose
+own faithfulness is theorem-bound. The chain is presented in
+\cref{sec:m2c} as a three-tier descent --- mathematics, algorithm,
+kernel implementation --- closed by a traceability table where each
+line of the perturbation operator's specification is paired with the
+algorithmic step and the kprobe-based kernel construct that realizes
+it.
+
+\subsection{Contributions}
+
+We claim the following:
+
+\begin{enumerate}
+\item A formal definition of the perturbation operator
+  \(\varepsilon\) acting on the BEAMFS-compatible state space, with
+  stated targeting algebra (region, device, inode, block, op type)
+  and a probability sampling regime calibrated to canonical SEU
+  rate models (\cref{sec:operator}).
+\item A \emph{faithfulness theorem} (\cref{thm:faithfulness}, full
+  proof in \cref{app:proof}) showing that under stated hypotheses on
+  the bit-flip distribution and the kprobe interception path,
+  \(\varepsilon\) is statistically indistinguishable from the
+  canonical SEU perturbation operator \(\varepsilon_{\text{SEE}}\)
+  of~\cite{desbrieres2026beamfsv1} within bounded probability
+  \(\delta\).
+\item A three-tier descent (\cref{sec:m2c}) from \(\varepsilon\) to a
+  kprobe-based algorithm to a Linux kernel module implementation,
+  with a traceability table auditable line by line.
+\item An \emph{empirical falsification} (\cref{sec:empirical}) of
+  BEAMFS v1 Theorem IV.1~\cite{desbrieres2026beamfsv1} using RadFI
+  v0.1.0 against the BEAMFS v1 reference implementation, dated
+  2026-04-28; and a \emph{corroboration} of BEAMFS v2 INLINE
+  recovery against equivalent disk-level corruption, dated
+  2026-04-29.
+\end{enumerate}
+
+\subsection{Scope}
+
+This is v1. We model bit-flip perturbations on bio-layer payloads
+only. We do not model: bus-level SET on the DRAM channel; SEFI on
+storage controller firmware; SEL on the host system; multi-flip
+events within a single bio (capped at one flip per intercepted bio
+in v0.1.x); RDMA fast-path interception bypassing the bio layer;
+cumulative TID/DDD effects (these are below the filesystem and not
+perturbations in the SEE sense). RadFI requires kernel privileges to
+load and operates on instrumented test devices only; it is not a
+remote attack model and is not, by construction, a production
+deployment tool.
+
+\subsection{Anti-claim}
+
+We are explicit about what RadFI v1 does \emph{not} establish:
+
+\begin{itemize}
+\item \emph{Faithfulness as ground-truth equivalence with beam-time
+  measurements.} \cref{thm:faithfulness} shows statistical
+  indistinguishability under stated hypotheses, not physical
+  equivalence with accelerator-measured upset distributions.
+  Bridging this gap requires beam-time at facilities such as RADEF,
+  GANIL, or TRIUMF, and is reserved for v2.
+\item \emph{Falsification of BEAMFS v2.} The falsification of v1
+  Theorem IV.1 in \cref{sec:empirical} does not extend to v2, whose
+  revised recovery properties are corroborated empirically but not
+  yet formally proved. The successor
+  report~\cite{desbrieres2026beamfsv2} states and proves
+  Theorem v2.1.
+\item \emph{Coverage of adversarial fault injection by an attacker
+  with kernel privileges.} RadFI's targeting filters could in
+  principle be misused; the v0.1.x build refuses to attach to
+  physical block devices and is restricted to loop-mounted test
+  images. This is a safety measure, not a security guarantee.
+\end{itemize}

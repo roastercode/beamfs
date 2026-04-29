@@ -1,0 +1,68 @@
+\section{Appendix: Faithfulness Theorem -- Full Proof}\label{app:proof}
+
+We restate \cref{thm:faithfulness} for self-containment.
+
+\paragraph{Restated theorem.}
+Let \(\varepsilon_{\text{RadFI}}\) be the perturbation operator of
+\cref{def:perturbation}, satisfying invariants F1--F5. Let
+\(\varepsilon_{\text{SEE}}\) be the canonical SEU operator
+parameterized by cross-section \(\sigma\) and flux \(\Phi\). Let
+\(X\) count bit-flips per byte of bio payload traversed under
+\(\varepsilon_{\text{RadFI}}\) with \(\mathit{prob} = p_R\) and a
+uniform I/O workload of duration \(T\), and \(Y\) the corresponding
+count under \(\varepsilon_{\text{SEE}}\). Then for every
+\(\delta > 0\), there exists \(p_R(\sigma, \Phi)\) such that
+\(d_{\text{TV}}(X, Y) \leq \delta\) for \(T\) sufficiently large.
+
+\begin{proof}
+Let \(N\) be the number of bytes of bio payload traversed in time
+\(T\). Under uniform workload, \(N\) grows linearly:
+\(N = r \cdot T\) for I/O rate \(r\).
+
+\emph{Distribution of \(X\).} By F1 and F2, each intercepted bio
+that passes the filter and the probability roll produces exactly one
+bit-flip at a uniformly sampled byte and bit position. Let \(B\) be
+the number of intercepted-and-passed bios in time \(T\). By F4 and
+the linearity of the workload,
+\(B \sim \text{Binomial}(N / \bar{b}, p_R)\) where
+\(\bar{b} = \mathbb{E}[|\text{bio.payload}|]\) is the expected bio
+payload size over the I/O workload's size distribution. By the law of large numbers,
+\(X = B\) converges in distribution to
+\(\text{Poisson}(\lambda_R)\) with
+\(\lambda_R = (N / \bar{b}) \cdot p_R\), in the limit
+\(N \to \infty\), \(p_R \to 0\), \(N p_R \to \lambda_R\).
+
+\emph{Distribution of \(Y\).} The canonical SEU
+model~\cite{dodd2003seu,petersen1996crosssection} gives a Poisson
+distribution of bit-flips per byte exposed:
+\(Y \sim \text{Poisson}(\lambda_S)\) with
+\(\lambda_S = N \cdot \sigma \Phi \cdot 8\) (factor 8 for bits per
+byte, under the standard cross-section convention).
+
+\emph{Calibration.} Choose \(p_R = (\bar{b} / N) \cdot \lambda_S\),
+i.e.\ \(p_R = \bar{b} \cdot \sigma \Phi \cdot 8\). The dimensional
+analysis assumes one device per byte of bio payload (an abuse
+standard in software fault injection literature, where the
+``cell'' to which \(\sigma\) applies is identified with the byte
+on which the flip is observed). This yields \(\lambda_R = \lambda_S\).
+
+\emph{Bounding total variation.} Two Poisson distributions with
+equal rate are identically distributed; \(d_{\text{TV}} = 0\). The
+convergence of the binomial \(\text{Binomial}(n, p)\) to
+\(\text{Poisson}(np)\) is bounded by Le Cam's
+theorem~\cite{lecam1960poisson}:
+\(d_{\text{TV}}(\text{Binomial}(n, p), \text{Poisson}(np)) \leq n p^2\).
+With \(n = N / \bar{b}\) and \(p = p_R\), this gives
+\(d_{\text{TV}} \leq (N/\bar{b}) \cdot p_R^2 = \lambda_R \cdot p_R\),
+which tends to zero as \(p_R \to 0\) at fixed \(\lambda_R\). For
+any \(\delta > 0\), choosing \(p_R \leq \delta / \lambda_R\)
+yields \(d_{\text{TV}}(X, Y) \leq \delta\).
+\end{proof}
+
+\paragraph{What the proof does not show.}
+The proof treats the bit-flip count distribution only. It does not
+address: (a) spatial correlation of multi-bit upsets, which is
+absent from RadFI by F1; (b) temporal clustering during solar
+particle events, which is absent from the uniform-workload
+assumption; (c) the joint distribution of flips with the I/O
+workload itself. Each is noted as v2 work.

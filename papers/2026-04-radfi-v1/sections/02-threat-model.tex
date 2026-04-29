@@ -1,0 +1,78 @@
+\section{Threat Model: SEU Emulation in Volatile Memory}\label{sec:threat}
+
+The faithfulness theorem (\cref{sec:faithfulness}) is meaningful only
+against a precisely stated perturbation family. This section
+establishes that family. We separate three concerns: the canonical
+SEU primitive that RadFI emulates (\cref{ssec:seu-primitive}), the
+kernel transit path on which RadFI operates
+(\cref{ssec:kernel-transit}), and the DRAM-bidirectional refinement
+introduced in v0.1.2 following empirical observation of the Linux
+7.0.x I/O path (\cref{ssec:dram-bidir}).
+
+\subsection{The Canonical SEU Primitive}\label{ssec:seu-primitive}
+
+Following the canonical SEE
+taxonomy~\cite{dodd2003seu,baumann2005softerrors}, a Single-Event
+Upset is a single-bit (occasionally multi-bit) state transition of a
+memory cell induced by the charge deposited by an ionizing particle.
+The probability of a SEU striking a given cell exposed to a particle
+flux \(\Phi\) of linear energy transfer LET is, to first order,
+\(P_{\text{SEU}} = 1 - \exp(-\sigma(\text{LET}) \, \Phi \, t)\),
+where \(\sigma(\text{LET})\) is the cross-section curve of the cell
+technology~\cite{petersen1996crosssection}.
+
+For the purposes of RadFI, the modelled primitive is the
+\emph{single bit-flip} --- a transition of one bit from 0 to 1 or 1
+to 0, in a memory location reached by a kernel I/O path. We do not
+model the underlying physics; we model the \emph{observable
+consequence} at the byte level. This is the same abstraction used by
+software-implemented fault injection tools in the canonical
+literature~\cite{carreira1998xception,hsueh1997faultinjection}, and
+is the level at which a filesystem recovery operator can defend.
+
+\subsection{Kernel Transit Path}\label{ssec:kernel-transit}
+
+The action surface of RadFI is the bio-layer of the Linux block I/O
+path. A \texttt{struct bio} is the kernel's representation of an
+in-flight I/O request; it carries a vector of \texttt{bio\_vec}
+segments, each pointing to a kernel memory page with offset and
+length. When a filesystem issues a read or write, the kernel
+constructs one or more bios and submits them through
+\texttt{submit\_bio\_noacct()} or, in some buffer-cache paths,
+\texttt{submit\_bh()}~\cite{corbet2005ldd3}.
+
+RadFI intercepts these submission entry points through
+kprobes~\cite{corbet2017kprobes,kernel-kprobes}. At the moment of
+interception, the bio's payload is in DRAM, in transit to or from
+the storage device. A single bit-flip applied to one byte of the
+first \texttt{bio\_vec} segment is the operational realization of an
+SEU on this payload.
+
+\subsection{The DRAM-Bidirectional Model}\label{ssec:dram-bidir}
+
+RadFI v0.1.0 modelled bit-flips on \emph{write} bios only, on the
+rationale that a flip on a read bio would be re-fetched from storage
+and effectively self-correct. Empirical observation during the
+BEAMFS v2 development on 2026-04-29 invalidated this rationale:
+under Linux kernel 7.0.x, a read of an \texttt{sb\_bread}-backed
+block (the BEAMFS metadata path) traverses
+\texttt{\_\_bread\_gfp} \(\to\) \texttt{\_\_getblk\_slow} \(\to\)
+\texttt{bh\_read} \(\to\) \texttt{submit\_bio\_noacct}, and the
+resulting payload is delivered to the page cache without re-fetch. A
+flip on a read bio is therefore \emph{persistent} until the next
+page cache eviction, and corrupts the consumer of the data exactly
+as a flip on a write bio corrupts the disk.
+
+RadFI v0.1.2 introduces the \emph{DRAM-bidirectional model}
+(intermediate v0.1.1 added internal counter accounting for F5 only):
+bit-flips can target both write bios (modelling SEU on memory
+transit toward storage) and read bios (modelling SEU on memory
+transit from storage to user). The choice is governed by the
+\texttt{inject\_on\_read} debugfs flag (default true). Setting it to
+false restores the v0.1.0 write-only behaviour.
+
+This model is more conservative --- and more physically realistic
+--- than the v0.1.0 model: a DRAM cell holding bio payload is
+vulnerable to SEU regardless of the data flow direction, and an
+instrument that injects only one direction misses half the empirical
+surface.

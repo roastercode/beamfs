@@ -1,0 +1,123 @@
+\section{Empirical Contribution}\label{sec:empirical}
+
+\subsection{Falsification of BEAMFS v1 Theorem IV.1 (2026-04-28)}\label{ssec:falsification}
+
+\paragraph{Setup.}
+A BEAMFS v1 reference implementation~\cite{desbrieres2026beamfsv1}
+was instrumented with RadFI v0.1.0 in a Yocto-based qemu-aarch64 lab
+environment (Linux kernel 7.0.1, distro \texttt{poky-hardened} 1.0).
+The filesystem was formatted with the v1 INODE\_UNIVERSAL protection
+scheme (\(\mathrm{RS}(255,239)\) coverage on inode metadata,
+allocation bitmap, and superblock; data blocks unprotected by the RS
+layer). RadFI was configured with \texttt{hook\_blk = 1},
+\texttt{target\_dev = 1792} (the test loop device),
+\texttt{inject\_on\_read = 0} (write-only model, v0.1.0 semantics),
+and \texttt{probability = 1000} (one flip per thousand intercepted
+writes).
+
+\paragraph{Result.}
+A workload of 1024 sequential 4\,KiB writes followed by a re-mount
+and a checksummed read produced 7 corrupted blocks at the user level
+(SHA-256 mismatch versus the pre-write fixture). The BEAMFS v1
+recovery operator \(\mathcal{G}\), invoked on read, did not return
+any of these blocks to consistency, nor did it transition to
+fail-closed: it returned the corrupted bytes silently to user space.
+This is a counter-example
+to~\cite[Theorem~IV.1]{desbrieres2026beamfsv1}: there exists
+\(s \models\) and \(e \in \mathcal{E}_{\text{RadFI v0.1.0}}\) such
+that \(\mathcal{G}^k(e(s)) \not\models\) and
+\(\mathcal{G}^k(e(s)) \neq \bot\) for all \(k \in \mathbb{N}\).
+
+\paragraph{Diagnosis.}
+The v1 INODE\_UNIVERSAL scheme, by design, did not extend RS
+coverage to data blocks. The recovery operator's coverage of
+\(\mathcal{E}_{\text{SEE}}\)
+in~\cite[Theorem~IV.1]{desbrieres2026beamfsv1} was conditional on
+the layout's redundancy specification (invariant I1 of the v1
+report), which the v1 layout did not satisfy on data blocks. The
+RadFI experiment exposed this incompleteness experimentally rather
+than theoretically.
+
+\paragraph{Consequence.}
+The BEAMFS author retracted the wording of v1 Theorem IV.1 on the
+same date and revised the threat model from radiation-only (v1) to
+full electromagnetic resilience (v2 EMR), introducing the INLINE
+protection scheme (\(\mathrm{RS}(255,239) \times 16\) per-block on
+data blocks unconditionally)~\cite{desbrieres2026beamfsv2}. The v2
+successor report states and proves a revised Theorem v2.1 covering
+data-block perturbations.
+
+This falsification is the central empirical contribution of the
+present report. It is consistent with the Popperian
+principle~\cite{popper1959logic} that a soundness theorem stands
+until a single counter-example is produced, and that the
+counter-example must motivate, not merely refute, the next theorem.
+
+\subsection{Confirmation of BEAMFS v2 INLINE Recovery (2026-04-29)}\label{ssec:confirmation}
+
+\paragraph{Setup.}
+A BEAMFS v2 INLINE-formatted filesystem (\(\mathrm{RS}(255,239)
+\times 16\), per-block protection on all data blocks) was created
+with \texttt{mkfs.beamfs -s inline} on a 64\,MiB loop image. A
+conformance fixture canary block was emitted at logical block 19 by
+the mkfs tool, with byte-deterministic content yielding SHA-256
+\(=\)
+\texttt{\seqsplit{ced446d9bf5e6682a48e8782ce5ad33f575f08921451afaa127f26dc37515bab}}
+for the user-visible 3{,}824-byte payload, and SHA-256 \(=\)
+\texttt{\seqsplit{fb8a3b9e2704ce3fc11a0d0a4139d36c916cb5e7230acde8d2fa00ace739a91c}}
+for the raw 4{,}096-byte on-disk block, both reproducible across
+x86\_64 and aarch64 builds.
+
+\paragraph{Method.}
+Direct disk-level corruption (not RadFI) was applied: a single byte
+at offset 77{,}824 (logical block 19, header byte 0) was XOR-flipped
+from \texttt{0x42} to \texttt{0x43}. The image was then mounted
+through BEAMFS, page caches were dropped, and the canary file was
+read through the standard VFS path.
+
+\paragraph{Result.}
+The user-level read returned the canonical 3{,}824-byte payload with
+SHA-256 matching the fixture. The kernel log recorded
+\texttt{beamfs/inline: ino=2 iblock=0 subblock=0: 1 symbol(s) corrected},
+confirming the RS decoder corrected one symbol error on subblock 0
+of the canary block. A subsequent raw read of the on-disk block,
+after a second cache drop, returned the canonical 4{,}096-byte
+content with SHA-256 matching the fixture: the autonomic in-place
+repair had persisted the correction byte-perfect to disk. The
+recovery operator's idempotence (BEAMFS invariant I4 of the v2 report~\cite{desbrieres2026beamfsv2}) was confirmed on a third read
+producing identical results without further log entries.
+
+\paragraph{Methodological note.}
+This experiment used direct disk-level corruption rather than RadFI
+bio-layer injection. The choice was operationally driven: during
+the same session, RadFI v0.1.2 \texttt{hook\_blk} pre-handler was
+observed to register on \texttt{submit\_bio\_noacct} (kprobe armed
+at the correct address, native kprobe events registering 10 hits
+per \texttt{cat} invocation) but the RadFI counters did not
+increment. Diagnosis is deferred to v2 of this report. The two
+methods are equivalent at the SEU semantic level: each produces a
+single bit-flip on volatile or persistent memory in the read path.
+Direct disk corruption was the simpler chain of trust for the v2
+INLINE empirical result, and the result is paper-grade reproducible
+(fixture SHA-256 values are byte-deterministic across platforms).
+
+\subsection{Falsification Matrix}
+
+\begin{table*}[t]
+\caption{Empirical falsification matrix. The v1 result is a single
+counter-example sufficient to retract Theorem IV.1
+of~\cite{desbrieres2026beamfsv1}. The v2 result is a single positive
+instance corroborating, but not proving, the revised v2 recovery
+properties.}
+\label{tab:falsification-matrix}
+\centering
+\small
+\begin{tabular}{@{}p{3cm}p{4.2cm}p{3.8cm}p{5.3cm}@{}}
+\toprule
+Implementation & Protection Scheme & Perturbation & Result \\
+\midrule
+BEAMFS v1 (2026-04-28) & INODE\_UNIVERSAL (metadata only) & RadFI v0.1.0, write hook, 1000\,PPM & \textbf{7/1024 silent corruption} (falsification of v1 Theorem IV.1) \\
+BEAMFS v2 (2026-04-29) & UNIVERSAL\_INLINE (RS\(\times\)16 per data block) & \texttt{dd}-based single byte flip on canary block & \textbf{byte-perfect recovery + autonomic repair} (corroboration of pending v2 Theorem) \\
+\bottomrule
+\end{tabular}
+\end{table*}

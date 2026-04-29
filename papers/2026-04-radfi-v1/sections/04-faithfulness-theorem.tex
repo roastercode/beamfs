@@ -1,0 +1,53 @@
+\section{Faithfulness Theorem}\label{sec:faithfulness}
+
+% Override theorem numbering: explicit IV.x via the underlying definition counter
+\renewcommand{\thedefinition}{IV.\arabic{definition}}
+\setcounter{definition}{0}
+
+\subsection{Statement}
+
+\begin{theorem}[Faithfulness of RadFI as SEU emulator]\label{thm:faithfulness}
+Let \(\varepsilon_{\text{RadFI}}\) be the perturbation operator of
+\cref{def:perturbation}, satisfying invariants F1--F5
+(\cref{ssec:invariants}). Let \(\varepsilon_{\text{SEE}}\) be the
+canonical SEU operator of~\cite{desbrieres2026beamfsv1}, parameterized
+by a cross-section \(\sigma\) and a flux \(\Phi\). Let \(X\) be the
+random variable counting bit-flips per unit of bio payload bytes
+traversed, under \(\varepsilon_{\text{RadFI}}\) with
+\(\mathit{prob} = p_R\) and a uniformly distributed I/O workload, and
+let \(Y\) be the corresponding random variable under
+\(\varepsilon_{\text{SEE}}\). Then for every \(\delta > 0\), there
+exists a calibration \(p_R(\sigma, \Phi)\) such that the total
+variation distance between the distributions of \(X\) and \(Y\) is
+bounded:
+\[
+  d_{\text{TV}}(X, Y) \leq \delta.
+\]
+\end{theorem}
+
+\subsection{Discussion}
+
+\paragraph{What the theorem establishes.}
+RadFI, parameterized by \(p_R\), can emulate any SEU regime up to
+total variation \(\delta\), where \(\delta\) shrinks as the I/O
+workload duration grows (asymptotic indistinguishability). The proof
+(\cref{app:proof}) is a concentration argument on bio interception
+counts, exploiting F4 and F5.
+
+\paragraph{What the theorem does not establish.}
+Faithfulness is statistical, not physical. RadFI does not reproduce
+the spatial correlation of multi-bit upsets within a memory row, nor
+the temporal clustering of solar particle event bursts. Both are
+observable in beam-time data and absent from RadFI by design. v2 of
+this report will discuss extensions (per-row MBU clustering, Poisson
+burst arrivals) that close part of this gap.
+
+\paragraph{Composition with BEAMFS.}
+\cref{thm:faithfulness} of the present report
+(\(\varepsilon_{\text{RadFI}}\) faithful) composes
+with~\cite[Theorem~IV.1]{desbrieres2026beamfsv1} (BEAMFS recovery
+sound under \(\mathcal{E}_{\text{SEE}}\)) only if the family
+\(\mathcal{E}\) used by the BEAMFS theorem contains the distribution
+emulated by RadFI. The empirical falsification reported in
+\cref{sec:empirical} demonstrates that the v1 \(\mathcal{E}\) did
+not.

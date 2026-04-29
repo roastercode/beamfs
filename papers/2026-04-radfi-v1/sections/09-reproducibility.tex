@@ -1,0 +1,61 @@
+\section{Reproducibility}\label{sec:repro}
+
+\paragraph{Source repository.}
+The reference implementation source is held in a private repository,
+\texttt{roastercode/radfi}, pending coordinated public release
+with this methodology paper. Source access may be granted on a
+case-by-case basis to qualified academic researchers under a light
+non-disclosure agreement; contact
+\texttt{aurelien@hackers.camp}. The present paper is published in
+the public BEAMFS repository, \texttt{roastercode/beamfs},
+sub-directory \texttt{papers/2026-04-radfi-v1/}.
+
+\paragraph{Build environment.}
+The reference build environment is a Yocto-based qemu-aarch64 lab
+(Linux kernel 7.0.1, distro \texttt{poky-hardened} 1.0, kernel
+module out-of-tree). The RadFI module loads via
+\texttt{modprobe radfi}, exposes its debugfs interface under
+\texttt{/sys/kernel/debug/radfi/}, and registers two kprobes whose
+presence is verifiable through
+\texttt{/sys/kernel/debug/kprobes/list}.
+
+\paragraph{Empirical reproduction.}
+Both empirical results of \cref{sec:empirical} are reproducible from
+the public BEAMFS source code at the tagged commit:
+
+\begin{itemize}
+\item BEAMFS v1 falsification: \texttt{roastercode/beamfs} tag
+  \texttt{v1.0.0-paper-pending} (commit \texttt{32f590e}), with
+  RadFI v0.1.0 module load and the parameters of
+  \cref{ssec:falsification}.
+\item BEAMFS v2 INLINE confirmation: \texttt{roastercode/beamfs}
+  tag \texttt{v0.2.0-palier3-validated} (commit \texttt{c47f130}),
+  with the \texttt{dd}-based corruption procedure of
+  \cref{ssec:confirmation} and the conformance fixture canary block
+  defined in the BEAMFS reference
+  implementation~\cite{beamfs-impl}, on-disk format v4
+  specification (\texttt{Documentation/format-v4.md} \S 11.5).
+\end{itemize}
+
+The fixture SHA-256 values are normative and reproducible across
+x86\_64 and aarch64 builds (verified by \texttt{cmp(1)} silent on
+the canary block raw bytes). The normative fixtures are: raw
+4{,}096-byte block
+\texttt{\seqsplit{fb8a3b9e2704ce3fc11a0d0a4139d36c916cb5e7230acde8d2fa00ace739a91c}};
+3{,}824-byte user content via VFS alias
+\texttt{\seqsplit{ced446d9bf5e6682a48e8782ce5ad33f575f08921451afaa127f26dc37515bab}}.
+
+\paragraph{Build (paper).}
+The present paper is built from LaTeX sources in
+\texttt{papers/2026-04-radfi-v1/} using \texttt{lualatex} +
+\texttt{biber} + IEEEtran 2-column 10pt A4. Section files are
+modular under \texttt{sections/}; bibliography is in
+\texttt{refs.bib}. The build command is
+\texttt{latexmk -lualatex paper.tex}.
+
+\paragraph{License and distribution.}
+Source code is under the GPL-2.0 license. The present technical
+report is under CC-BY-4.0. Citation by tag and commit hash is
+preferred over DOI for the implementation, as commit hashes are
+strict identifiers of the audited state; DOI references for the
+present report are added at Zenodo upload time.

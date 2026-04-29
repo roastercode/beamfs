@@ -1,0 +1,167 @@
+% =====================================================================
+% RadFI v1 -- bibliography
+% =====================================================================
+
+% [1] BEAMFS v1 (FTRFS lineage, retracted theorem)
+@misc{desbrieres2026beamfsv1,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{FTRFS}: {B}ringing Radiation-Robust Filesystem Principles to Contemporary {L}inux},
+  year   = 2026, month = apr,
+  note   = {Technical Report v1 (lineage paper; v1 Theorem IV.1 retracted following
+            falsification reported in the present paper)},
+  doi    = {10.5281/zenodo.19824442},
+  url    = {https://doi.org/10.5281/zenodo.19824442},
+}
+
+% [12] BEAMFS v2 (successor paper, published companion)
+@misc{desbrieres2026beamfsv2,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{BEAMFS} v2: {A} {L}inux Filesystem with Electromagnetic Resilience
+            and {R}eed--{S}olomon Recovery},
+  year   = 2026, month = apr,
+  note   = {Technical Report v2. Companion to the present methodology paper.
+            \texttt{roastercode/beamfs}, tag \texttt{v1.0.0-paper-zenodo-pending},
+            commit \texttt{52260d0}.},
+  url    = {https://github.com/roastercode/beamfs/tree/v1.0.0-paper-zenodo-pending/papers/2026-04-beamfs-v2},
+}
+
+% [2] Xception
+@article{carreira1998xception,
+  author  = {Jo{\~a}o Carreira and Henrique Madeira and Jo{\~a}o Gabriel Silva},
+  title   = {{Xception}: {A} technique for the experimental evaluation of
+             dependability in modern computers},
+  journal = {IEEE Transactions on Software Engineering},
+  volume  = 24, number = 2, pages = {125--136}, year = 1998,
+  doi     = {10.1109/32.666826},
+}
+
+% [3] Hsueh, Tsai, Iyer
+@article{hsueh1997faultinjection,
+  author  = {Mei-Chen Hsueh and Timothy K. Tsai and Ravishankar K. Iyer},
+  title   = {Fault injection techniques and tools},
+  journal = {Computer},
+  volume  = 30, number = 4, pages = {75--82}, year = 1997,
+  doi     = {10.1109/2.585157},
+}
+
+% [4] EDFI
+@inproceedings{giuffrida2013edfi,
+  author    = {Cristiano Giuffrida and Anton Kuijsten and Andrew S. Tanenbaum},
+  title     = {{EDFI}: {A} dependable fault injection tool for dependability
+               benchmarking experiments},
+  booktitle = {Proc. IEEE 19th Pacific Rim Int. Symp. Dependable Computing},
+  year      = 2013, pages = {31--40},
+  doi       = {10.1109/PRDC.2013.12},
+}
+
+% [5] Dodd Massengill SEU mechanisms
+@article{dodd2003seu,
+  author  = {P. E. Dodd and L. W. Massengill},
+  title   = {Basic mechanisms and modeling of single-event upset in digital
+             microelectronics},
+  journal = {IEEE Transactions on Nuclear Science},
+  volume  = 50, number = 3, pages = {583--602}, year = 2003,
+  doi     = {10.1109/TNS.2003.813129},
+}
+
+% [6] Baumann radiation soft errors
+@article{baumann2005softerrors,
+  author  = {R. C. Baumann},
+  title   = {Radiation-induced soft errors in advanced semiconductor technologies},
+  journal = {IEEE Transactions on Device and Materials Reliability},
+  volume  = 5, number = 3, pages = {305--316}, year = 2005,
+  doi     = {10.1109/TDMR.2005.853449},
+}
+
+% [7] Petersen cross-section
+@article{petersen1996crosssection,
+  author  = {E. L. Petersen},
+  title   = {Cross section measurements and upset rate calculations},
+  journal = {IEEE Transactions on Nuclear Science},
+  volume  = 43, number = 6, pages = {2805--2813}, year = 1996,
+  doi     = {10.1109/23.556870},
+}
+
+% [8] LDD3
+@book{corbet2005ldd3,
+  author    = {Jonathan Corbet and Alessandro Rubini and Greg Kroah-Hartman},
+  title     = {Linux Device Drivers},
+  edition   = {3rd},
+  publisher = {O'Reilly Media},
+  year      = 2005,
+  note      = {Block layer chapter; bio submission API has evolved,
+               see kernel source \texttt{block/blk-core.c} for current API.},
+}
+
+% [9] xoshiro256**
+@article{blackman2021xoshiro,
+  author  = {David Blackman and Sebastiano Vigna},
+  title   = {Scrambled linear pseudorandom number generators},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = 47, number = 4, year = 2021,
+  note    = {article 36},
+  doi     = {10.1145/3460772},
+}
+
+% [10] highmem.rst kernel docs
+@misc{kernel-highmem,
+  author       = {{Linux kernel contributors}},
+  title        = {Highmem and \texttt{kmap\_local\_page} documentation},
+  howpublished = {Linux kernel source tree, \texttt{Documentation/mm/highmem.rst}},
+  year         = 2026,
+  url          = {https://www.kernel.org/},
+}
+
+% [11] seL4
+@inproceedings{klein2009sel4,
+  author    = {Gerwin Klein and others},
+  title     = {{seL4}: {F}ormal verification of an {OS} kernel},
+  booktitle = {Proc. 22nd ACM SIGOPS Symp. Operating Systems Principles ({SOSP})},
+  year      = 2009, pages = {207--220},
+  doi       = {10.1145/1629575.1629596},
+}
+
+% [13] kprobes LWN
+@misc{corbet2017kprobes,
+  author       = {Jonathan Corbet},
+  title        = {Notes on the kprobes interface},
+  howpublished = {LWN.net},
+  year         = 2017,
+  url          = {https://lwn.net/Articles/132196/},
+}
+
+% [14] kprobes kernel docs
+@misc{kernel-kprobes,
+  author       = {{Linux kernel contributors}},
+  title        = {kprobes documentation},
+  howpublished = {Linux kernel source tree, \texttt{Documentation/trace/kprobes.rst}},
+  year         = 2026,
+  url          = {https://www.kernel.org/},
+}
+
+% Falsificationism
+@book{popper1959logic,
+  author    = {Karl R. Popper},
+  title     = {The Logic of Scientific Discovery},
+  publisher = {Hutchinson},
+  address   = {London},
+  year      = 1959,
+}
+
+% BEAMFS reference implementation (for format-v4 spec, fixture sha256, kernel sources)
+@misc{beamfs-impl,
+  author       = {Aur{\'e}lien Desbri{\`e}res},
+  title        = {{BEAMFS} reference implementation and on-disk format specification},
+  howpublished = {\texttt{roastercode/beamfs}, on-disk format normatively specified
+                  in \texttt{Documentation/format-v4.md}},
+  year         = 2026, month = apr,
+  url          = {https://github.com/roastercode/beamfs},
+}
+
+% Le Cam Poisson approximation theorem
+@article{lecam1960poisson,
+  author  = {Lucien {Le Cam}},
+  title   = {An approximation theorem for the {P}oisson binomial distribution},
+  journal = {Pacific Journal of Mathematics},
+  volume  = 10, number = 4, pages = {1181--1197}, year = 1960,
+}

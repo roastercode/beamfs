@@ -1,0 +1,24 @@
+\section{Conclusion}\label{sec:conclusion}
+
+We have presented the v1 mathematical scaffolding and empirical
+instantiation of RadFI, an algebraic fault injection operator for
+the falsification of filesystem resilience theorems. The
+contribution is twofold: a formal definition of the perturbation
+operator with a faithfulness theorem, and an empirical falsification
+of the BEAMFS v1 recovery soundness theorem dated 2026-04-28, which
+motivated the BEAMFS v2 EMR
+revision~\cite{desbrieres2026beamfsv2}.
+
+The position of the report is that filesystem resilience claims
+must be subject to empirical falsification, and that the
+falsification instrument must itself be a formally specified
+operator whose own faithfulness is theorem-bound. RadFI is the
+first such instrument we are aware of in the Linux filesystem
+ecosystem.
+
+This is also v1 in the same sense as~\cite{desbrieres2026beamfsv1}:
+it establishes authorship and fixes the scope. v2 will document
+the hook diagnostic resolution, multi-flip extension, MBU
+correlation modelling, and beam-time calibration at a recognized
+accelerator facility. v3 will explore proof-assistant mechanization
+of \cref{thm:faithfulness}.

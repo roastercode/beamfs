@@ -1,0 +1,135 @@
+% RadFI v1 -- Methodology Paper
+% Author: Aurelien DESBRIERES
+% License: CC-BY-4.0 (text), GPL-2.0 (code references)
+% Build: latexmk -lualatex paper.tex
+
+\documentclass[10pt,conference,a4paper]{IEEEtran}
+
+% --- LuaLaTeX font stack ---
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+\setmathfont{Latin Modern Math}
+
+% --- Math ---
+\usepackage{amsmath}
+\usepackage{mathtools}
+
+% --- Theorem environments ---
+\usepackage{amsthm}
+\usepackage{aliascnt}
+\newtheoremstyle{radfi-plain}%
+  {0.4em}{0.4em}{\itshape}{0pt}{\bfseries}{.}{0.5em}{}%
+\theoremstyle{radfi-plain}
+\newtheorem{definition}{Definition}[section]
+\newaliascnt{theoremaux}{definition}
+\newtheorem{theorem}[theoremaux]{Theorem}
+\aliascntresetthe{theoremaux}
+\newaliascnt{lemmaaux}{definition}
+\newtheorem{lemma}[lemmaaux]{Lemma}
+\aliascntresetthe{lemmaaux}
+\newtheoremstyle{radfi-remark}%
+  {0.4em}{0.4em}{}{0pt}{\bfseries}{.}{0.5em}{}%
+\theoremstyle{radfi-remark}
+\newtheorem*{remark}{Remark}
+
+% --- Tables ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% --- Figures ---
+\usepackage{graphicx}
+
+% --- Code listings ---
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  showstringspaces=false,
+  commentstyle=\itshape\color{gray!70!black},
+  keywordstyle=\bfseries,
+  language=C,
+  numbers=none,
+  xleftmargin=0.5em,
+}
+
+% --- URLs and breakable hashes ---
+\usepackage{xurl}
+\usepackage{seqsplit}
+
+% --- Bibliography ---
+\usepackage[backend=biber,style=ieee,sorting=none,maxbibnames=5,
+            doi=true,url=true,isbn=false]{biblatex}
+\addbibresource{refs.bib}
+
+% --- Cross-references ---
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black,
+  pdftitle={RadFI v1: An Algebraic Fault Injection Operator for Empirical Filesystem Resilience Validation},
+  pdfauthor={Aurelien DESBRIERES},
+  pdfsubject={Fault injection; SEU emulation; Filesystem resilience; Falsification; Linux kernel},
+  pdfkeywords={RadFI, fault injection, SEU emulation, filesystem resilience, falsification, BEAMFS, Reed-Solomon, Linux kernel, kprobe},
+}
+\usepackage[capitalize,noabbrev]{cleveref}
+\crefname{theoremaux}{Theorem}{Theorems}
+\Crefname{theoremaux}{Theorem}{Theorems}
+\crefname{lemmaaux}{Lemma}{Lemmas}
+\Crefname{lemmaaux}{Lemma}{Lemmas}
+
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{enumitem}
+\usepackage{placeins}
+\setlist{nosep,leftmargin=1.5em}
+
+% =====================================================================
+\title{\large\bfseries RadFI:\\
+       An Algebraic Fault Injection Operator for\\
+       Empirical Filesystem Resilience Validation\\
+       \normalsize\mdseries Falsifying Recovery Theorems through\\
+       Controlled SEU Emulation in the Linux Kernel\\
+       \small\itshape Technical Report -- Version 1}
+
+\author{%
+  \IEEEauthorblockN{Aur\'elien Desbri\`eres \textemdash{} Independent researcher}
+  \IEEEauthorblockA{\href{https://orcid.org/0009-0002-0912-9487}{ORCID:~0009-0002-0912-9487} \quad
+    \texttt{aurelien@hackers.camp}}
+}
+
+\begin{document}
+\maketitle
+
+\begin{IEEEkeywords}
+Fault injection, Single-event upset emulation, Filesystem resilience,
+Falsification, Reed--Solomon, Linux kernel, kprobe, Recovery calculus,
+BEAMFS, Empirical validation
+\end{IEEEkeywords}
+
+\begin{abstract}
+\input{sections/00-abstract}
+\end{abstract}
+
+\input{sections/01-introduction}
+\input{sections/02-threat-model}
+\input{sections/03-perturbation-operator}
+\input{sections/04-faithfulness-theorem}
+\input{sections/05-from-math-to-code}
+\input{sections/06-empirical-contribution}
+\input{sections/07-scope-limitations}
+\input{sections/08-conclusion}
+
+\onecolumn
+\small
+\input{sections/09-reproducibility}
+\input{sections/10-appendix-faithfulness-proof}
+
+\printbibliography
+\end{document}

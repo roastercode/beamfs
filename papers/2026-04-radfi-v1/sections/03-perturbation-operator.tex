@@ -1,0 +1,110 @@
+\section{Perturbation Operator: Formal Definition}\label{sec:operator}
+
+We now define formally the object on which the kernel implementation
+acts.
+
+\subsection{State Space and Perturbation Algebra}
+
+We adopt the BEAMFS-compatible state space
+\(\mathcal{S} = \mathcal{S}_V \times \mathcal{S}_P\)
+of~\cite{desbrieres2026beamfsv1}, where \(\mathcal{S}_V\) is the
+volatile component (kernel data structures, page cache, in-memory
+mirrors) and \(\mathcal{S}_P\) is the persistent component (on-disk
+data and metadata).
+
+\begin{definition}[Perturbation operator]\label{def:perturbation}
+The RadFI perturbation operator \(\varepsilon\) is a partial function
+\(\varepsilon : \mathcal{S} \times \Pi \to \mathcal{S}\),
+parameterized by a perturbation parameter set
+\(\Pi = \langle \mathit{filters}, \mathit{prob}, \mathit{seed} \rangle\),
+and defined by the following procedure on input \((s, \pi)\):
+\begin{enumerate}
+\item Intercept a bio submission \(b\) in transit through
+  \texttt{submit\_bio\_noacct} or \texttt{submit\_bh}.
+\item Apply the filter algebra \(\mathit{filters}(\pi)\) to \(b\).
+  If \(b\) is rejected, return \(s\) unchanged.
+\item Sample the PRNG seeded by \(\mathit{seed}(\pi)\). If the
+  sample exceeds \(\mathit{prob}(\pi)\), return \(s\) unchanged.
+\item Otherwise, select a byte in the first non-empty
+  \texttt{bio\_vec} segment of \(b\) uniformly at random, and flip
+  one bit at a uniformly sampled position \(0 \leq p < 8\).
+\item Return the modified state \(s'\).
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Filter algebra]\label{def:filter}
+The filter set \(\mathit{filters}\) is a tuple
+\(\langle \mathit{dev}, \mathit{inode}, \mathit{block}, \mathit{op} \rangle\)
+where each component is either a wildcard (admits any value) or a
+concrete value. A bio \(b\) passes the filter iff every non-wildcard
+component matches the corresponding attribute of \(b\):
+\begin{itemize}
+\item \(\mathit{dev}\): the encoded device number
+  \texttt{bio->bi\_bdev->bd\_dev} (kernel encoding
+  \texttt{(major << 8) | minor} for legacy minors).
+\item \(\mathit{inode}\): the inode number, available only on the
+  \texttt{submit\_bh} hook path where the buffer head carries
+  \texttt{b\_assoc\_map}.
+\item \(\mathit{block}\): the sector number
+  \texttt{bh->b\_blocknr}, available on the \texttt{submit\_bh} path.
+\item \(\mathit{op}\): the bio operation type, restricted to
+  \(\{\texttt{REQ\_OP\_READ}, \texttt{REQ\_OP\_WRITE}\}\) in v0.1.2;
+  other ops are filtered out.
+\end{itemize}
+\end{definition}
+
+The inode and block filters are bound to the \texttt{submit\_bh}
+hook because a \texttt{bio} may aggregate buffers from multiple
+inodes; RadFI v0.1.x does not attempt fine-grained per-buffer
+targeting on the bio path.
+
+\subsection{Probability Sampling and PRNG}
+
+The probability \(\mathit{prob}\) is expressed in parts per million
+(PPM): \(\mathit{prob} = 10^6\) flips every intercepted bio that
+passes the filter; \(\mathit{prob} = 10^3\) flips one bio in a
+thousand. The PRNG is a xoshiro256** generator~\cite{blackman2021xoshiro},
+seeded by the user-supplied \(\mathit{seed}\). A fixed seed produces
+a deterministic flip sequence, enabling regression on resilience
+properties: a recovery theorem that holds for seed \(S_1\) but not
+for \(S_2\) is a falsification, regardless of the absolute flip
+count.
+
+\subsection{The Five Invariants of a Faithful SEU Emulator}\label{ssec:invariants}
+
+The faithfulness theorem (\cref{thm:faithfulness}) requires the
+following invariants of the perturbation operator. They are minimal
+and stated separately so that an implementation can be audited
+against them line by line.
+
+\begin{description}
+\item[F1 -- Single-bit primitive.] Each invocation of
+  \(\varepsilon\) that produces a perturbation flips exactly one
+  bit. Multi-flip is by repeated invocation, not by single-call
+  amplification. This matches the canonical single-event abstraction
+  of~\cite{dodd2003seu,baumann2005softerrors}.
+\item[F2 -- Targeting independence from data content.] The byte and
+  bit position selected by \(\varepsilon\) are sampled from the bio
+  payload's geometry, not from its contents. A flip at offset 17 in
+  a bio is not statistically correlated with the value at offset 17.
+\item[F3 -- Filter monotonicity.] Adding a non-wildcard filter
+  component to \(\mathit{filters}\) can only reduce the set of
+  intercepted bios, never enlarge it. A filtered injection is always
+  a sub-distribution of an unfiltered one.
+\item[F4 -- Replay determinism.] Given fixed
+  \((\mathit{filters}, \mathit{prob}, \mathit{seed})\) and a fixed
+  I/O sequence, \(\varepsilon\) produces the same flip sequence
+  across runs.
+\item[F5 -- Counter accounting.] \(\varepsilon\) maintains atomic
+  counters \((\mathit{call\_count}, \mathit{flip\_count},
+  \mathit{skipped\_disabled}, \mathit{skipped\_prob})\) such that
+  the sum
+  \(\mathit{flip\_count} + \mathit{skipped\_disabled} + \mathit{skipped\_prob}\)
+  equals the number of post-filter intercepted bios.
+\end{description}
+
+F1 grounds the SEU semantics. F2 is the absence-of-bias property.
+F3 is the algebraic well-formedness of the filter lattice. F4 is
+what makes RadFI a falsification instrument rather than a stochastic
+noise source. F5 is the audit surface that allows an empirical run
+to be self-validated against the expected statistics.

@@ -1,0 +1,46 @@
+We present RadFI, an algebraic fault injection operator for the
+empirical validation of filesystem resilience theorems. RadFI is the
+falsification counterpart to the BEAMFS recovery
+calculus~\cite{desbrieres2026beamfsv1}: where BEAMFS defines a
+recovery operator \(\mathcal{G}\) that drives a corrupted filesystem
+state back to consistency or to fail-closed, RadFI defines a
+perturbation operator \(\varepsilon\) that injects controlled
+bit-flips into the bio-layer payload of an instrumented filesystem,
+modelling the action of a Single-Event Upset on volatile memory
+transit between user space and storage.
+
+We define \(\varepsilon\) formally over the same state space
+\(\mathcal{S}\) used by BEAMFS, formulate a faithfulness property as
+the statistical indistinguishability of \(\varepsilon\) from the
+canonical SEU model under stated hypotheses, and derive a Linux
+kernel implementation path through kprobe-based runtime
+instrumentation. Three families of perturbation are treated:
+write-side bit-flips on bio payloads bound for storage, read-side
+bit-flips on bio payloads returning from storage (DRAM-bidirectional
+model), and targeted block-level injection through a
+sector-granularity filter.
+
+This Technical Report v1 reports two empirical results obtained with
+RadFI v0.1.0 to v0.1.2 against the BEAMFS implementation lineage.
+First, on 2026-04-28, RadFI v0.1.0 produced a controlled bit-flip
+pattern that the BEAMFS v1 recovery operator failed to correct,
+exhibiting a state \(s\) such that
+\(\mathcal{G}(\varepsilon(s)) \not\models\) and
+\(\mathcal{G}(\varepsilon(s)) \neq \bot\). This is a counter-example
+to the soundness theorem of~\cite{desbrieres2026beamfsv1} under the
+actual perturbation distribution implementable by RadFI, which led
+the BEAMFS author to retract Theorem IV.1 and revise the threat
+model from radiation-only (v1) to full electromagnetic resilience
+(v2 EMR). Second, on 2026-04-29, byte-level disk corruption of a
+BEAMFS v2 INLINE-formatted filesystem
+(\(\mathrm{RS}(255,239) \times 16\) per-block protection scheme)
+was successfully recovered by the kernel module's
+\texttt{read\_folio} path, with autonomic in-place repair persisting
+the correction byte-perfect to disk. This is corroboration, not
+proof, of the revised v2 recovery properties pending formal Theorem
+v2.1 in~\cite{desbrieres2026beamfsv2}.
+
+The reference implementation source is held in a private repository
+(\texttt{roastercode/radfi}) pending coordinated public release
+with this methodology paper. A reproducibility statement is provided in
+Section~\ref{sec:repro}.
