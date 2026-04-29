@@ -300,22 +300,31 @@ void beamfs_log_rs_event(struct super_block *sb,
 		return;
 
 	/* Invariant guards: surface bug at WARN_ON_ONCE without panicking.
-	 * The journal entry is silently skipped if invariants are violated. */
-	if (WARN_ON_ONCE(!positions))
+	 * The journal entry is silently skipped if invariants are violated.
+	 *
+	 * Two valid call shapes (see Documentation/format-v4.md sec 6.5):
+	 *   (a) correctable: positions != NULL, 1 <= n_positions <= RS/2
+	 *   (b) uncorrectable: positions == NULL, n_positions == 0
+	 */
+	if (WARN_ON_ONCE(n_positions > BEAMFS_RS_PARITY / 2))
 		return;
-	if (WARN_ON_ONCE(n_positions == 0 ||
-			 n_positions > BEAMFS_RS_PARITY / 2))
+	if (WARN_ON_ONCE((n_positions == 0) != (positions == NULL)))
 		return;
 	if (WARN_ON_ONCE(code_len_bytes == 0 ||
 			 code_len_bytes > BEAMFS_SUBBLOCK_DATA))
 		return;
 
-	/* Forensic policy: single-sample event yields a mathematically
-	 * defined but non-significant entropy (H=0). Per Documentation/
-	 * format-v4.md and threat-model.md section 6.4, we clear the
-	 * ENTROPY_VALID flag in that case so a forensic analyst sees
-	 * "no usable entropy estimate, fall back to timestamp clustering". */
-	if (n_positions >= 2) {
+	/* Forensic policy: see Documentation/format-v4.md sections 6.4-6.6.
+	 *   n_positions >= 2  -> entropy computed, ENTROPY_VALID set
+	 *   n_positions == 1  -> entropy zero, ENTROPY_VALID cleared
+	 *                       (single-sample, not forensically significant)
+	 *   n_positions == 0  -> UNCORRECTABLE set, entropy zero,
+	 *                       symbol_count zero (codeword exceeded RS
+	 *                       correction radius; data unrecoverable)
+	 */
+	if (n_positions == 0) {
+		flags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
+	} else if (n_positions >= 2) {
 		entropy_q16 = beamfs_rs_compute_entropy_q16_16(positions,
 							      n_positions,
 							      code_len_bytes);
@@ -605,6 +614,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		goto out_put_root;
 	}
 
+	sbi->s_scheme = le32_to_cpu(fsb->s_data_protection_scheme);
+
 	pr_info("beamfs: mounted v%u (blocks=%llu free=%lu inodes=%llu scheme=%u feat=0x%016llx/0x%016llx/0x%016llx)\n",
 		le32_to_cpu(fsb->s_version),
 		le64_to_cpu(fsb->s_block_count),
@@ -719,7 +730,7 @@ static int __init beamfs_init(void)
 		return ret;
 	}
 
-	pr_info("beamfs: module loaded (BEAMFS Fault-Tolerant Radiation-Robust FS)\n");
+	pr_info("beamfs: module loaded (BEAMFS Beam Electromagnetic File System, EM resilience)\n");
 	return 0;
 }
 

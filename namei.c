@@ -8,6 +8,7 @@
 
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
+#include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/time.h>
 #include "beamfs.h"
@@ -261,9 +262,23 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode)
 		inode->i_fop = &beamfs_dir_operations;
 		set_nlink(inode, 2);
 	} else {
-		inode->i_op  = &beamfs_file_inode_operations;
-		inode->i_fop = &beamfs_file_operations;
-		inode->i_mapping->a_ops = &beamfs_aops;
+		struct beamfs_sb_info *sbi = BEAMFS_SB(inode->i_sb);
+
+		inode->i_op = &beamfs_file_inode_operations;
+		if (sbi->s_scheme == BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE) {
+			/*
+			 * v2 INLINE: per-block RS FEC requires gather/scatter
+			 * across 16 subblocks per disk block. Single-page
+			 * folios only; large folios deferred to v2.1.
+			 */
+			inode->i_fop = &beamfs_inline_file_operations;
+			inode->i_mapping->a_ops = &beamfs_inline_aops;
+			mapping_set_folio_order_range(inode->i_mapping, 0, 0);
+		} else {
+			/* legacy iomap path (scheme=5 INODE_UNIVERSAL) */
+			inode->i_fop = &beamfs_file_operations;
+			inode->i_mapping->a_ops = &beamfs_aops;
+		}
 		set_nlink(inode, 1);
 	}
 

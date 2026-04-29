@@ -5,13 +5,21 @@
 
 obj-$(CONFIG_BEAMFS_FS) += beamfs.o
 
-beamfs-y := super.o \
-            inode.o \
-            dir.o   \
-            file.o  \
-            edac.o  \
-            alloc.o \
+beamfs-y := super.o      \
+            inode.o      \
+            dir.o        \
+            file.o       \
+            file_inline.o \
+            edac.o       \
+            alloc.o      \
             namei.o
+
+# Strip absolute build paths from __FILE__ macros so the resulting .ko
+# binary does not embed TMPDIR (Yocto buildpaths QA fix).
+ccflags-y += -fmacro-prefix-map=$(src)/=
+ccflags-y += -fmacro-prefix-map=$(srctree)/=
+ccflags-y += -ffile-prefix-map=$(src)/=
+ccflags-y += -ffile-prefix-map=$(srctree)/=
 
 
 ifneq ($(KERNELRELEASE),)

@@ -27,13 +27,6 @@ const struct inode_operations beamfs_file_inode_operations = {
 };
 
 /*
- * BEAMFS_INDIRECT_PTRS: number of block pointers per indirect block.
- * Each pointer is a u64 (8 bytes), so 4096 / 8 = 512 entries.
- * Single indirect capacity: 512 blocks = 2 MiB.
- */
-#define BEAMFS_INDIRECT_PTRS (BEAMFS_BLOCK_SIZE / sizeof(__le64))
-
-/*
  * beamfs_iomap_begin -- map a file range to disk blocks for iomap.
  * Handles read (no allocation) and write (allocate on demand).
  * Supports direct blocks (iblock 0..11) and single indirect

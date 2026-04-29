@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * BEAMFS — Fault-Tolerant Radiation-Robust Filesystem
+ * BEAMFS — Beam Electromagnetic File System (Electromagnetic Resilience)
  * Based on: Fuchs, Langer, Trinitis — ARCS 2015
  *
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
@@ -34,6 +34,80 @@
 /* On-disk bitmap block layout (RS FEC protected) */
 #define BEAMFS_BITMAP_SUBBLOCKS  16   /* subblocks per bitmap block */
 #define BEAMFS_BITMAP_DATA_BYTES (BEAMFS_BITMAP_SUBBLOCKS * BEAMFS_SUBBLOCK_DATA) /* 3824 */
+
+/*
+ * On-disk data block layout under BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
+ *
+ * Each user data block (4096 bytes on disk) holds 16 RS(255,239) shortened
+ * subblocks, identical layout to bitmap blocks. Per subblock: 239 data bytes
+ * followed by 16 parity bytes (sb total = 255). The 16 subblocks together
+ * occupy 16 * 255 = 4080 bytes; the last 16 bytes of the block are zero pad.
+ *
+ * Logical capacity per disk block: 16 * 239 = 3824 bytes.
+ * Correction capacity per disk block: 16 * (16/2) = 128 bytes corrigeable
+ * (8 byte symbols per subblock, 16 subblocks).
+ *
+ * file_size_logical = N user-visible bytes
+ * disk_blocks_used  = ceil(N / BEAMFS_DATA_INLINE_BYTES)
+ *
+ * Selected and validated against RadFI v0.1.0 (1-bit flip per submit_bio).
+ */
+#define BEAMFS_DATA_INLINE_SUBBLOCKS  16
+#define BEAMFS_DATA_INLINE_BYTES      (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_SUBBLOCK_DATA)  /* 3824 */
+#define BEAMFS_DATA_INLINE_TOTAL      (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_SUBBLOCK_TOTAL) /* 4080 */
+#define BEAMFS_DATA_INLINE_PAD        (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL)         /* 16  */
+
+/*
+ * Conformance fixture (canary block) -- v4 INLINE only.
+ *
+ * Under BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE, mkfs.beamfs writes a
+ * deterministic canary block immediately after the root directory
+ * block. The canary block is RS-encoded exactly like a regular INLINE
+ * data block (16 interleaved subblocks of 239+16 bytes plus 16 bytes
+ * pad) and contains a fixed 64-byte ASCII header followed by a
+ * deterministic 3760-byte payload. The byte layout is reproducible
+ * across mkfs invocations; its sha256 is published in
+ * Documentation/format-v4.md section 13.
+ *
+ * Purpose: validate the on-disk RS encode chain end-to-end without
+ * relying on user-written content. Stage 1 (Palier 1) writes the
+ * block and exposes it on-disk only. Stage 2 (Palier 2) will add an
+ * immutable VFS alias inode for kernel read-path validation.
+ */
+#define BEAMFS_CANARY_HEADER_LEN      64
+#define BEAMFS_CANARY_PAYLOAD_LEN     (BEAMFS_DATA_INLINE_BYTES - BEAMFS_CANARY_HEADER_LEN) /* 3760 */
+#define BEAMFS_CANARY_USER_BYTES      BEAMFS_DATA_INLINE_BYTES                              /* 3824 */
+#define BEAMFS_CANARY_HEADER_STR      "BEAMFS-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
+
+/*
+ * Translation helpers for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
+ *
+ * The user-visible file_offset (in bytes) maps to a logical block index
+ * iblock_logical = file_offset / BEAMFS_DATA_INLINE_BYTES (= /3824).
+ * Each logical block backs exactly one physical disk block of
+ * BEAMFS_BLOCK_SIZE (4096) bytes, holding 3824 user bytes interleaved
+ * with 16*16=256 RS parity bytes plus 16 bytes of pad.
+ *
+ * For schemes other than UNIVERSAL_INLINE, translation is the legacy
+ * 1:1 with BEAMFS_BLOCK_SIZE granularity; callers must guard on
+ * sbi->s_scheme before invoking these helpers.
+ */
+static inline u64 beamfs_inline_logical_to_iblock(u64 file_offset)
+{
+	return file_offset / BEAMFS_DATA_INLINE_BYTES;
+}
+
+static inline u32 beamfs_inline_offset_in_logical(u64 file_offset)
+{
+	return (u32)(file_offset % BEAMFS_DATA_INLINE_BYTES);
+}
+
+static inline u64 beamfs_inline_size_to_blocks(u64 size)
+{
+	return (size + BEAMFS_DATA_INLINE_BYTES - 1) / BEAMFS_DATA_INLINE_BYTES;
+}
+
+
 
 /*
  * Superblock RS layout (stage 3 item 4, v4 format).
@@ -86,7 +160,17 @@
 #define BEAMFS_DINDIRECT_BLOCKS 1
 
 /*
- * Radiation Event Journal entry -- 40 bytes (v4 format).
+ * BEAMFS_INDIRECT_PTRS: number of block pointers per indirect block.
+ * Each pointer is a u64 (8 bytes), so 4096 / 8 = 512 entries.
+ * Single indirect capacity: 512 blocks = 2 MiB.
+ *
+ * Shared between the legacy iomap path (file.c, scheme=5) and the
+ * v2 INLINE block-mapping helpers (file_inline.c, scheme=2).
+ */
+#define BEAMFS_INDIRECT_PTRS (BEAMFS_BLOCK_SIZE / sizeof(__le64))
+
+/*
+ * Electromagnetic Resilience Journal entry -- 40 bytes (v4 format).
  *
  * Records each RS FEC correction event persistently in the superblock.
  * 64 entries give operators a map of physical degradation over time.
@@ -110,23 +194,39 @@ struct beamfs_rs_event {
 	__le32  re_symbol_count;      /* 16..19  symbols corrected (renamed
 	                                 *         from re_error_bits in v3) */
 	__le32  re_entropy_q16_16;    /* 20..23  Shannon H, Q16.16, [0,3*65536) */
-	__le32  re_flags;             /* 24..27  bit 0 = entropy_valid       */
+	__le32  re_flags;             /* 24..27  see BEAMFS_RS_EVENT_FLAG_*  */
 	__le32  re_reserved;          /* 28..31  zero, structural sentinel   */
 	__le32  re_crc32;             /* 32..35  CRC32 over bytes [0..32)    */
 	__le32  re_pad;               /* 36..39  zero, alignment + sentinel  */
 } __packed;                       /* 40 bytes */
 
-#define BEAMFS_RS_JOURNAL_SIZE  64   /* entries in the radiation event journal */
+#define BEAMFS_RS_JOURNAL_SIZE  64   /* entries in the EM resilience journal   */
 
 /*
- * Flags for beamfs_rs_event::re_flags.
+ * Flags for beamfs_rs_event::re_flags. See Documentation/format-v4.md
+ * section 6.5 for the normative contract.
  *
  * ENTROPY_VALID -- the re_entropy_q16_16 field carries a meaningful
  *                  Shannon estimate. Cleared by zero-init (mkfs);
  *                  set by beamfs_log_rs_event() when entropy is computed
  *                  from the position list returned by RS decode.
+ *
+ * UNCORRECTABLE -- the codeword exceeded the RS correction radius
+ *                  (more than BEAMFS_RS_PARITY/2 = 8 symbols in error
+ *                  within a single subblock). Data could not be
+ *                  recovered; the read returned -EIO. When this flag
+ *                  is set, re_symbol_count MUST be zero and
+ *                  ENTROPY_VALID MUST be cleared. The flag is
+ *                  orthogonal to Family A / Family B classification
+ *                  (TM section 2): an uncorrectable event may originate
+ *                  from either family; discrimination is performed
+ *                  post-process by clustering analysis on re_block_no
+ *                  and re_timestamp, not in-kernel.
+ *
+ * Bits (1U << 2) and higher are reserved and MUST be zero on write.
  */
 #define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  (1U << 0)
+#define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  (1U << 1)
 
 /*
  * Shannon entropy parameters for the RS journal forensic estimator.
@@ -325,6 +425,7 @@ struct beamfs_sb_info {
 	spinlock_t                s_lock;     /* Superblock lock */
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
+	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
 };
 
 /*
@@ -359,24 +460,35 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc);
  * @sb:           mounted superblock (sbi must be initialized)
  * @block_no:     block number where correction occurred, OR a SB
  *                sub-block sentinel (see BEAMFS_RS_BLOCK_NO_SB_MARKER)
- * @positions:    array of byte positions corrected within the codeword;
- *                MUST be non-NULL, MUST be valid for n_positions entries
- * @n_positions:  number of corrections; MUST be in [1, BEAMFS_RS_PARITY/2].
- *                Equal to the symbol count, written verbatim into
- *                re_symbol_count.
+ * @positions:    array of byte positions corrected within the codeword.
+ *                MUST be non-NULL when n_positions >= 1, valid for
+ *                n_positions entries. MAY be NULL when n_positions == 0
+ *                (uncorrectable event, see UNCORRECTABLE policy below).
+ * @n_positions:  number of corrections; MUST be in [0, BEAMFS_RS_PARITY/2].
+ *                When >= 1, equals the symbol count and is written
+ *                verbatim into re_symbol_count. When == 0, denotes an
+ *                uncorrectable event (see UNCORRECTABLE policy below).
  * @code_len_bytes: data length of the codeword that produced @positions
  *                  (BEAMFS_INODE_RS_DATA for inodes, BEAMFS_SUBBLOCK_DATA
  *                  for bitmap subblocks, BEAMFS_SB_RS_DATA_LEN for SB
  *                  subblocks). Required by the entropy estimator to
  *                  compute the bin index from each byte position.
+ *                  MUST be non-zero even for uncorrectable events.
  *
- * Forensic policy:
- *   n_positions >= 2  -> entropy computed, ENTROPY_VALID flag set
- *   n_positions == 1  -> entropy zeroed, ENTROPY_VALID cleared
- *                        (single-sample event is not forensically
- *                        significant; Family A vs B distinction
- *                        relies on timestamp clustering for these
- *                        entries; see Documentation/format-v4.md).
+ * Forensic policy (see Documentation/format-v4.md sections 6.4-6.6):
+ *   n_positions >= 2  -> entropy computed, ENTROPY_VALID flag set,
+ *                        re_symbol_count = n_positions
+ *   n_positions == 1  -> entropy zeroed, ENTROPY_VALID cleared,
+ *                        re_symbol_count = 1 (single-sample event is
+ *                        not forensically significant; Family A vs B
+ *                        distinction relies on timestamp clustering
+ *                        for these entries)
+ *   n_positions == 0  -> UNCORRECTABLE flag set, ENTROPY_VALID cleared,
+ *                        re_symbol_count = 0, re_entropy_q16_16 = 0.
+ *                        re_block_no and re_timestamp retain their
+ *                        normal meaning, allowing the entry to
+ *                        participate in temporal and spatial clustering
+ *                        analyses alongside correctable events.
  *
  * Computes the Shannon entropy estimate from @positions and stores it
  * in re_entropy_q16_16 with BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID set
@@ -392,6 +504,10 @@ void beamfs_log_rs_event(struct super_block *sb,
 			unsigned int n_positions,
 			size_t code_len_bytes);
 void beamfs_dirty_super(struct beamfs_sb_info *sbi);
+
+/* file.c — BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE data path (v2) */
+extern const struct address_space_operations beamfs_inline_aops;
+extern const struct file_operations          beamfs_inline_file_operations;
 
 /* inode.c */
 struct inode *beamfs_iget(struct super_block *sb, unsigned long ino);
