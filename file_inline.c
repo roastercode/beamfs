@@ -268,68 +268,73 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 }
 
 /* ------------------------------------------------------------------------- */
-/* read_folio (v2 INLINE) -- per-block RS(255,239) FEC on data blocks.       */
+/* beamfs_inline_decode_block_into_buf -- read disk block, RS-decode all 16  */
+/*                                        subblocks, copy a user-byte slice  */
+/*                                        into the supplied buffer.          */
 /*                                                                           */
-/* Each disk block is laid out as 16 interleaved subblocks of 255 bytes      */
-/* (239 user data || 16 parity), followed by 16 bytes of zero pad. We:       */
-/*   1) look up the physical block for folio->index                          */
-/*   2) handle HOLE (zero-fill, return 0)                                    */
-/*   3) sb_bread the disk block                                              */
-/*   4) RS-decode all 16 subblocks in place (corrects up to 8 byte symbols   */
-/*      per subblock, i.e. 128 bytes per disk block)                         */
-/*   5) on uncorrectable: -EIO, no folio uptodate marking                    */
-/*   6) on success: gather 16 * 239 bytes into the folio, zero the pad zone  */
-/*   7) if any subblock was corrected: write back the repaired disk block    */
-/*      synchronously (durable autonomic repair, mirrors alloc.c bitmap path)*/
+/* This helper is the algebraic decode operator Phi of Theorem v2.1: it      */
+/* maps (phys, slice) -> user_bytes union {bottom}. Reused by single-block   */
+/* read_folio (slice = full 0..3824) and the multi-block read/writeback      */
+/* paths added in subsequent sub-steps (slice = portion of a disk block      */
+/* covering one folio).                                                      */
 /*                                                                           */
-/* Single-page folios only (mapping_set_folio_order_range(0,0) in inode      */
-/* setup). MIL-STD-883 SEE coverage: validates BEAMFS resistance to RadFI    */
-/* single-bit and multi-byte payload corruption injected at submit_bio.      */
+/* Inputs:                                                                   */
+/*   sb                       superblock (used for sb_bread + journal)       */
+/*   phys                     non-zero physical disk block number to decode  */
+/*   inode                    inode (used for ino in pr_warn/journal)        */
+/*   iblock_logical_for_log   logical iblock identifier for log lines        */
+/*   dst_buf                  destination buffer; caller-allocated, must     */
+/*                            have at least slice_length bytes available     */
+/*   slice_offset             byte offset within the disk block user-area    */
+/*                            (0..BEAMFS_DATA_INLINE_BYTES-1)                */
+/*   slice_length             number of user bytes to copy into dst_buf      */
+/*                            (1..BEAMFS_DATA_INLINE_BYTES)                  */
+/*                                                                           */
+/* Slice contract: slice_offset + slice_length <= BEAMFS_DATA_INLINE_BYTES   */
+/* (3824). HOLE (phys == 0) is NOT handled here -- caller must check.        */
+/*                                                                           */
+/* On any subblock corrected: durable autonomic repair via mark_buffer_dirty */
+/* + sync_dirty_buffer before return, same pattern as alloc.c bitmap path.   */
+/* On any subblock uncorrectable: journal entry with UNCORRECTABLE flag,     */
+/* then -EIO; no slice copy is performed.                                    */
+/*                                                                           */
+/* Anti-NAK rationale: this isolates the RS decode + autonomic repair logic  */
+/* from folio lifecycle management. The folio lock and folio_end_read are    */
+/* the caller's responsibility.                                              */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
+static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
+					       u64 phys,
+					       struct inode *inode,
+					       u64 iblock_logical_for_log,
+					       u8 *dst_buf,
+					       u32 slice_offset,
+					       u32 slice_length)
 {
-	struct inode             *inode = folio->mapping->host;
-	struct super_block       *sb    = inode->i_sb;
-	struct buffer_head       *bh    = NULL;
-	u64                       iblock_logical;
-	u64                       phys = 0;
-	int                       rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
-	int                       rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
-					   (BEAMFS_RS_PARITY / 2)];
-	bool                      corrected = false;
-	bool                      uncorrectable = false;
-	u8                       *dst;
-	unsigned int              i;
-	int                       ret;
+	struct buffer_head *bh = NULL;
+	int                 rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	int                 rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
+				      (BEAMFS_RS_PARITY / 2)];
+	bool                corrected = false;
+	bool                uncorrectable = false;
+	unsigned int        i;
+	int                 ret = 0;
 
-	/* Single-page folios are guaranteed by mapping_set_folio_order_range. */
-	if (WARN_ON_ONCE(folio_size(folio) != BEAMFS_BLOCK_SIZE)) {
-		ret = -EIO;
-		goto out_unlock;
-	}
-
-	iblock_logical = folio->index;
-
-	ret = beamfs_inline_lookup_phys(inode, iblock_logical, &phys);
-	if (ret < 0)
-		goto out_unlock;
-
-	if (phys == 0) {
-		/* HOLE: zero the folio, mark uptodate, done. */
-		dst = kmap_local_folio(folio, 0);
-		memset(dst, 0, BEAMFS_BLOCK_SIZE);
-		flush_dcache_folio(folio);
-		kunmap_local(dst);
-		folio_end_read(folio, true);
-		return 0;
-	}
+	/* Defensive contract checks (cheap; helpful in audit and fuzzing). */
+	if (WARN_ON_ONCE(phys == 0))
+		return -EINVAL;
+	if (WARN_ON_ONCE(dst_buf == NULL))
+		return -EINVAL;
+	if (WARN_ON_ONCE(slice_length == 0))
+		return -EINVAL;
+	if (WARN_ON_ONCE((u64)slice_offset + slice_length >
+			 BEAMFS_DATA_INLINE_BYTES))
+		return -EINVAL;
 
 	bh = sb_bread(sb, phys);
 	if (!bh) {
 		pr_err_ratelimited("beamfs/inline: sb_bread failed phys=%llu\n",
 				   (unsigned long long)phys);
-		ret = -EIO;
-		goto out_unlock;
+		return -EIO;
 	}
 
 	/*
@@ -360,7 +365,7 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 				BEAMFS_SUBBLOCK_DATA);
 			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u uncorrectable\n",
 					   inode->i_ino,
-					   (unsigned long long)iblock_logical,
+					   (unsigned long long)iblock_logical_for_log,
 					   i);
 			uncorrectable = true;
 		} else if (rc > 0) {
@@ -372,7 +377,7 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 				np = BEAMFS_RS_PARITY / 2;
 			pr_warn_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u: %d symbol(s) corrected\n",
 					    inode->i_ino,
-					    (unsigned long long)iblock_logical,
+					    (unsigned long long)iblock_logical_for_log,
 					    i, rc);
 			beamfs_log_rs_event(sb,
 				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
@@ -388,27 +393,42 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 	}
 
 	/*
-	 * Gather: 16 segments of 239 user bytes from the buffer head into
-	 * the folio. Skip 16 parity bytes between subblocks. Zero the pad
-	 * zone (3824..4096) in the folio.
+	 * Slice gather: copy [slice_offset, slice_offset + slice_length)
+	 * of the user-byte view (16 segments of 239 bytes, parity stripped)
+	 * into dst_buf. Walk the relevant subblocks and copy the
+	 * intersecting portion of each into the destination.
 	 */
-	dst = kmap_local_folio(folio, 0);
-	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
-		memcpy(dst + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-		       (u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       BEAMFS_SUBBLOCK_DATA);
+	{
+		u32 slice_end = slice_offset + slice_length;
+		u32 sb_first  = slice_offset / BEAMFS_SUBBLOCK_DATA;
+		u32 sb_last   = (slice_end - 1) / BEAMFS_SUBBLOCK_DATA;
+		u32 dst_off   = 0;
+		u32 sb_idx;
+
+		for (sb_idx = sb_first; sb_idx <= sb_last; sb_idx++) {
+			u32 sb_user_start = sb_idx * BEAMFS_SUBBLOCK_DATA;
+			u32 sb_user_end   = sb_user_start + BEAMFS_SUBBLOCK_DATA;
+			u32 from_in_sb    = (slice_offset > sb_user_start)
+				? (slice_offset - sb_user_start) : 0;
+			u32 to_in_sb      = (slice_end < sb_user_end)
+				? (slice_end - sb_user_start)
+				: BEAMFS_SUBBLOCK_DATA;
+			u32 copy_len      = to_in_sb - from_in_sb;
+
+			memcpy(dst_buf + dst_off,
+			       (u8 *)bh->b_data
+				+ (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL
+				+ from_in_sb,
+			       copy_len);
+			dst_off += copy_len;
+		}
 	}
-	memset(dst + BEAMFS_DATA_INLINE_BYTES, 0, BEAMFS_DATA_INLINE_PAD +
-	       (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL -
-		BEAMFS_DATA_INLINE_PAD));
-	flush_dcache_folio(folio);
-	kunmap_local(dst);
 
 	/*
-	 * Durable autonomic repair: if RS corrected any subblock, write the
-	 * repaired disk block back synchronously so the on-disk image is
-	 * healed before the next read. Same pattern as the bitmap recovery
-	 * path in alloc.c.
+	 * Durable autonomic repair: if RS corrected any subblock, write
+	 * the repaired disk block back synchronously so the on-disk image
+	 * is healed before the next read. Same pattern as the bitmap
+	 * recovery path in alloc.c.
 	 */
 	if (corrected) {
 		mark_buffer_dirty(bh);
@@ -416,11 +436,83 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 	}
 
 	brelse(bh);
-	folio_end_read(folio, true);
 	return 0;
 
 out_brelse:
 	brelse(bh);
+	return ret;
+}
+
+/* ------------------------------------------------------------------------- */
+/* read_folio (v2 INLINE) -- per-block RS(255,239) FEC on data blocks.       */
+/*                                                                           */
+/* Single-block scope (v2.0): folio->index is treated as the disk block      */
+/* number directly. Multi-block coverage is the v2.x roadmap (see            */
+/* Documentation/roadmap.md and the INLINE multi-block design).              */
+/*                                                                           */
+/* Steps:                                                                    */
+/*   1) WARN if folio is not single-page (mapping_set_folio_order_range)     */
+/*   2) lookup_phys for folio->index                                         */
+/*   3) HOLE -> zero-fill folio, end_read, return 0                          */
+/*   4) decode disk block via beamfs_inline_decode_block_into_buf, slice =   */
+/*      full user area [0, BEAMFS_DATA_INLINE_BYTES)                         */
+/*   5) zero-pad the folio bytes [BEAMFS_DATA_INLINE_BYTES, BEAMFS_BLOCK_SIZE)*/
+/*   6) flush_dcache + folio_end_read                                        */
+/*                                                                           */
+/* MIL-STD-883 SEE coverage: validates BEAMFS resistance to RadFI            */
+/* single-bit and multi-byte payload corruption injected at submit_bio.      */
+/* ------------------------------------------------------------------------- */
+static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
+{
+	struct inode       *inode = folio->mapping->host;
+	struct super_block *sb    = inode->i_sb;
+	u64                 iblock_logical;
+	u64                 phys = 0;
+	u8                 *dst;
+	int                 ret;
+
+	/* Single-page folios are guaranteed by mapping_set_folio_order_range. */
+	if (WARN_ON_ONCE(folio_size(folio) != BEAMFS_BLOCK_SIZE)) {
+		ret = -EIO;
+		goto out_unlock;
+	}
+
+	iblock_logical = folio->index;
+
+	ret = beamfs_inline_lookup_phys(inode, iblock_logical, &phys);
+	if (ret < 0)
+		goto out_unlock;
+
+	if (phys == 0) {
+		/* HOLE: zero the folio, mark uptodate, done. */
+		dst = kmap_local_folio(folio, 0);
+		memset(dst, 0, BEAMFS_BLOCK_SIZE);
+		flush_dcache_folio(folio);
+		kunmap_local(dst);
+		folio_end_read(folio, true);
+		return 0;
+	}
+
+	dst = kmap_local_folio(folio, 0);
+
+	ret = beamfs_inline_decode_block_into_buf(sb, phys, inode,
+						  iblock_logical,
+						  dst, 0,
+						  BEAMFS_DATA_INLINE_BYTES);
+	if (ret < 0) {
+		kunmap_local(dst);
+		goto out_unlock;
+	}
+
+	/* Zero the pad zone (3824..4096) in the folio. */
+	memset(dst + BEAMFS_DATA_INLINE_BYTES, 0,
+	       BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_BYTES);
+	flush_dcache_folio(folio);
+	kunmap_local(dst);
+
+	folio_end_read(folio, true);
+	return 0;
+
 out_unlock:
 	folio_unlock(folio);
 	return ret;
