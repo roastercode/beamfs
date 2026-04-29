@@ -4,7 +4,7 @@
 #
 
 config BEAMFS_FS
-	tristate "BEAMFS fault-tolerant radiation-robust filesystem"
+	tristate "BEAMFS Beam Electromagnetic File System (EM resilience)"
 	depends on BLOCK
 	select CRC32
 	select REED_SOLOMON
@@ -12,25 +12,32 @@ config BEAMFS_FS
 	select REED_SOLOMON_DEC8
 	help
 	  BEAMFS is a POSIX-compatible filesystem designed for dependable
-	  storage in radiation-intensive environments. It provides:
+	  storage in electromagnetically harsh environments (radiation,
+	  IEMI, HPM, EMP, conducted EMI). It provides:
 
 	    - CRC32 checksumming per block and per inode
 	    - Reed-Solomon forward error correction (FEC) via lib/reed_solomon
-	    - Radiation Event Journal: persistent per-correction log in superblock
+	    - Electromagnetic Resilience Journal: persistent per-event log in superblock
 
 	  RS(255,239) over GF(2^8) corrects up to 8 symbol errors per 239-byte
 	  subblock in place, on a single device, without external redundancy.
-	  This addresses silent bit flips caused by single-event upsets (SEU)
-	  in MRAM or NOR flash on embedded systems in radiation environments.
+	  This addresses silent bit flips caused by stochastic EM perturbations
+	  (single-event upsets, retention loss, thermal stress) and adversarial
+	  EM events (IEMI, HPM, EMP) in MRAM or NOR flash on embedded systems
+	  in electromagnetically harsh environments.
 
-	  Target: embedded Linux on nanosatellites and CubeSats (MOVE-II,
-	  TU Munich), robotics in nuclear/industrial environments, space HPC.
+	  Target: embedded Linux on nanosatellites and CubeSats, robotics in
+	  nuclear/industrial environments, military and dual-use unmanned
+	  platforms, space HPC, EM-contested edge AI deployments.
 	  DO-178C / ECSS-E-ST-40C / IEC 61508 certification is an explicit
 	  design constraint: the codebase targets under 5000 auditable lines.
 
-	  Originally described in:
-	  Fuchs, Langer, Trinitis — ARCS 2015, TU Munich / MOVE-II CubeSat.
-	  https://www.cfuchs.net/chris/publication-list/ARCS2015/BEAMFS.pdf
+	  Scientific lineage:
+	  Fuchs, Langer, Trinitis — FTRFS: A Fault-Tolerant Radiation-Robust
+	  Filesystem for Space Use, ARCS 2015, TU Munich / MOVE-II CubeSat.
+	  https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf
+	  BEAMFS extends FTRFS from a radiation-only threat model to the
+	  unified electromagnetic resilience model (Documentation/threat-model.md).
 
 	  To compile as a module, choose M. The module will be called beamfs.
 

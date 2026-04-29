@@ -9,6 +9,11 @@ operators of safety- or mission-critical embedded Linux systems.
 
 ## 1. Purpose
 
+BEAMFS is the **B**eam **E**lectro**M**agnetic **F**ile **S**ystem. Its
+thesis: data-at-rest integrity on a single read-write device under the
+full spectrum of electromagnetic perturbations — stochastic and
+adversarial, ionizing and impulsive, background and burst.
+
 This document defines the failure modes BEAMFS is designed to mitigate,
 the threat actors it considers in scope, and the existing Linux/BSD
 storage stack capabilities it complements or extends. It is the
@@ -16,6 +21,17 @@ normative reference for design trade-offs in the on-disk format,
 the IO path, and the roadmap. Subsequent design documents (`design.md`,
 `roadmap.md`, `system-architecture.md`) refine this model; they do not
 override it.
+
+**Scientific lineage.** BEAMFS extends the FTRFS lineage (Fuchs, Langer,
+Trinitis, *BEAMFS: A Fault-Tolerant Radiation-Robust Filesystem for
+Space Use*, ARCS 2015) from a radiation-only threat model toward a
+**unified electromagnetic resilience** threat model. The motivation is
+empirical: the RadFI fault-injection tool (companion repository,
+v0.1.0, 2026-04-28) demonstrated that filesystems designed strictly for
+stochastic radiation upsets do not retain their soundness guarantees
+under adversarial electromagnetic events that produce correlated
+multi-byte bursts. This falsification motivates BEAMFS v2 and the
+broadened taxonomy below.
 
 A separate companion document — to be added — will define the
 verification and validation strategy aligned with this threat model
@@ -26,42 +42,52 @@ for DO-178C, ECSS-E-ST-40C, IEC 61508).
 
 ## 2. Failure model
 
-BEAMFS protects against two distinct families of failure that share a
-common technical signature — silent bit corruption in data at rest on
-a single storage device — but differ in their causal origin, statistical
-distribution, and operational implications.
+BEAMFS treats data-at-rest corruption on a single read-write device
+as a single physical phenomenon — **electromagnetic perturbation of
+stored charge or magnetic domains** — that manifests through two
+statistically distinct families. Both families are electromagnetic in
+origin; they differ in causal source, statistical signature, and
+operational consequence. A third sub-section describes the **Reed-
+Solomon saturation boundary**, an attribute that may be reached by
+either family and that BEAMFS records explicitly.
 
-### 2.1 Family A — Benign single-event upsets (SEU)
+### 2.1 Family A — Stochastic electromagnetic perturbations
 
-**Origin.** Cosmic rays, atmospheric neutrons, alpha particles from
-package contamination, MRAM cell aging, NOR flash retention loss,
-thermal stress in industrial environments. Effects are well documented
-in the literature on radiation-tolerant computing and on flash
-endurance.
+**Origin.** Background single-event upsets from cosmic rays,
+atmospheric neutrons, alpha particles from package contamination;
+MRAM cell aging; NOR/NAND flash retention loss; thermal stress in
+industrial environments; low-level RF environmental noise. All of
+these are electromagnetic in nature — ionizing radiation is
+high-energy EM, thermal stress is broadband EM, RF noise is
+narrowband EM — and produce indistinguishable signatures at the
+storage cell. Effects are well documented in the literature on
+radiation-tolerant computing, flash endurance, and EMC.
 
 **Statistical signature.**
 
 - Spatial: errors are uniformly random across the device surface.
   No correlation between adjacent blocks.
 - Temporal: errors occur as a Poisson process with a low constant
-  rate (per-bit error rate dominated by altitude, latitude, and
-  technology node).
+  rate (per-bit error rate dominated by altitude, latitude, technology
+  node, ambient temperature, and ambient EM field strength).
 - Magnitude per event: typically 1 to 8 bit flips per affected
   256-byte sub-block, well within the correction capacity of
   RS(255,239).
 
 **Operational implication.** Detection without correction (the
 ext4/btrfs/dm-verity-without-FEC posture) is sufficient to alert,
-but insufficient to keep the system running through long
-unattended missions. In-place correction is required.
+but insufficient to keep the system running through long unattended
+missions. In-place correction is required. This is the regime that
+FTRFS (Fuchs et al., 2015) was designed to address, and BEAMFS
+preserves all of FTRFS's guarantees within this regime.
 
 ### 2.2 Family B — Adversarial electromagnetic events
 
 **Origin.** Intentional electromagnetic interference (IEMI), high-power
 microwave (HPM) directed-energy weapons, electromagnetic pulse (EMP)
-from nuclear or non-nuclear sources, hostile EM jamming and pulsing
-in conflict zones, deliberate exposure of captured equipment to RF
-attack chambers.
+from nuclear or non-nuclear sources, hostile EM jamming and pulsing in
+conflict zones, deliberate exposure of captured equipment to RF
+attack chambers, conducted EMI from compromised power infrastructure.
 
 This family is no longer hypothetical. The convergence of small
 unmanned platforms with EM weapons has been analyzed publicly as a
@@ -70,7 +96,9 @@ The Convergence and Strategic Implications for Future Battlefields*,
 February 2026). EMP-resilient data storage is the subject of active
 academic research (Far, Qazani, Rad, *Emp-secure data storage through
 biohybrid and neuromorphic paradigms*, Discover Applied Sciences,
-2026).
+2026). The category is operationally distinct from Family A: it
+violates the Poisson assumption that radiation-only filesystems
+(including FTRFS) rely on for their soundness theorems.
 
 **Statistical signature, in contrast with Family A.**
 
@@ -79,7 +107,7 @@ biohybrid and neuromorphic paradigms*, Discover Applied Sciences,
   entire die, or all blocks accessed during a brief power transient.
 - Temporal: errors arrive in **bursts** rather than as a steady
   Poisson process. A single event may inject the equivalent of
-  months of background SEU in milliseconds.
+  months of background stochastic upsets in milliseconds.
 - Magnitude per event: may **exceed RS(255,239) correction capacity
   per sub-block** (more than 8 symbol errors per 256 bytes). Naive
   per-block FEC is insufficient.
@@ -104,12 +132,44 @@ provide:
    in the on-disk inode is only as robust as the inode itself; if
    the inode is corrupted by the same event, the protection
    evaporates.
-4. **Tamper-evident event journal.** The Radiation Event Journal
-   must record corrections in a way that allows a post-event
-   forensic distinction between background SEU and an
-   adversarial burst.
+4. **Tamper-evident event journal.** The Electromagnetic Resilience
+   Journal must record corrections in a way that allows a post-event
+   forensic distinction between Family A and Family B regimes.
 
-### 2.3 What BEAMFS explicitly does not address
+### 2.3 Reed-Solomon saturation boundary
+
+Both Family A and Family B can produce events whose magnitude **exceeds
+the correction capacity** of a single RS(255,239) shortened codeword
+(more than 8 symbol errors within a single 256-byte subblock). At the
+saturation boundary, the codeword is uncorrectable and the affected
+data is irretrievable from the on-disk image alone.
+
+Saturation is **not a third family**: it is an **attribute** that may
+be reached from either family. A burst from Family B is the most
+common cause, but a coincident cluster of Family A events within a
+single subblock during a long-duration deployment can also reach the
+boundary. Discrimination of cause is performed post-process by the
+operator or forensic analyst, using temporal and spatial clustering
+of adjacent journal entries; it is not in-kernel.
+
+**Empirical motivation.** The RadFI fault-injection tool (companion
+repository v0.1.0, 2026-04-28) was designed to drive a BEAMFS v1 image
+into the saturation regime under controlled, reproducible parameters.
+It empirically falsified the v1 soundness theorem on data blocks under
+single-bit flip injection at submit_bio_noacct, motivating the v2 INLINE
+scheme described in `Documentation/format-v4.md`. The saturation
+boundary is therefore not a theoretical concern: it is the
+experimentally validated frontier between recoverable and unrecoverable
+data, and it must be observable to operators.
+
+**Operational implication.** The on-disk event journal must record
+uncorrectable events alongside corrected events, with sufficient
+metadata (block number, timestamp) for clustering analysis. The
+filesystem must propagate `-EIO` to userspace on uncorrectable read
+(no silent data loss). See `Documentation/format-v4.md` section 6.5
+for the on-disk encoding (`BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE`).
+
+### 2.4 What BEAMFS explicitly does not address
 
 This threat model is restricted to integrity of data at rest. The
 following are out of scope and addressed by other layers of a
@@ -162,14 +222,16 @@ to an existing class of system observed in the field as of 2026.
 
 Constellations such as Starlink, OneWeb, and Project Kuiper have
 filed with the U.S. FCC plans deploying thousands of satellites in
-LEO using COTS processors running Linux. Soft-error rates on
-14 nm and 40 nm SoCs under proton irradiation have been measured
-publicly (e.g., arXiv 2503.03722, *When Radiation Meets Linux*).
+LEO using COTS processors running Linux. Soft-error rates on 14 nm
+and 40 nm SoCs under proton irradiation have been measured publicly
+(e.g., arXiv 2503.03722, *When Radiation Meets Linux*) and constitute
+the canonical empirical baseline for Family A in space deployments.
 Existing reliability mitigations on these platforms are limited to
 ECC memory; filesystem-level correction is absent from the stack.
 
-This is Family A territory at scale. BEAMFS provides the missing
-filesystem layer.
+This is Family A territory at scale, and historically the regime FTRFS
+was designed for. BEAMFS provides the missing filesystem layer with
+a strict superset of FTRFS's guarantees.
 
 ### 4.2 Military and dual-use unmanned platforms
 
@@ -189,13 +251,17 @@ or autonomous secure erase) handle the destruction-on-capture case.
 
 Robots and instrumentation deployed inside reactor containments,
 spent-fuel handling cells, particle accelerator tunnels, and certain
-medical imaging facilities operate under continuous neutron and
-gamma flux. Mission durations span months to years; in-situ
-maintenance is impossible or extremely costly.
+medical imaging facilities operate under continuous neutron and gamma
+flux — high-energy electromagnetic and particle environments where
+Family A rates are several orders of magnitude above background.
+Mission durations span months to years; in-situ maintenance is
+impossible or extremely costly.
 
-This is sustained Family A territory with elevated rates. The
-operational requirement is identical to space: in-place correction,
-persistent event log for predictive maintenance.
+This is sustained Family A territory with elevated rates and a
+non-negligible probability of reaching the saturation boundary (sec
+2.3) over mission lifetime. The operational requirement: in-place
+correction, persistent event journal for predictive maintenance, and
+explicit recording of saturation events for end-of-life planning.
 
 ### 4.4 Critical infrastructure exposed to grid-scale EMP
 
@@ -326,21 +392,39 @@ the architecture can claim Family B coverage. These items are not
 currently called out as Must-have in `roadmap.md`; this document
 elevates them.
 
-### 6.4 Tamper-evident event journal
+### 6.4 Electromagnetic Resilience Journal
 
-**Constraint.** The Radiation Event Journal must record sufficient
-information to distinguish a Poisson-distributed background rate
-(Family A) from a burst (Family B). Per-entry timestamp at
-nanosecond precision is in place. Per-entry Shannon entropy
-estimate is on the roadmap.
+**Constraint.** The on-disk event journal (named the **Electromagnetic
+Resilience Journal** in v4 of the format; previously "Radiation Event
+Journal" in v1–v3 nomenclature) must record sufficient information
+across three regimes:
 
-**Rationale.** Section 2.2, point 4.
+1. **Multi-symbol corrections** (n_positions ≥ 2): per-entry timestamp
+   at nanosecond precision, per-entry Shannon entropy estimate over the
+   corrected positions. The entropy is the v4 forensic discriminator
+   between Family A (uniform position distribution, high entropy) and
+   Family B (clustered or polarised distribution, lower entropy).
+2. **Single-sample corrections** (n_positions == 1): timestamp recorded,
+   entropy explicitly cleared (single sample is mathematically defined
+   but not forensically significant). Family A vs B discrimination on
+   these entries relies on temporal clustering across the journal.
+3. **Uncorrectable events** (n_positions == 0): timestamp and block
+   number recorded, the `BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE` flag is
+   set. These entries identify the saturation boundary (sec 2.3) and
+   are strictly more informative than correctable entries for
+   capacity planning and end-of-life analysis.
 
-**Consequence.** Shannon entropy field, currently in `roadmap.md`
-under "Nice to have", is reclassified as Must-have for Family B
-coverage. Implementation is small (a few lines per correction event)
-and the field already exists in the on-disk `beamfs_rs_event` reserved
-area or can be added in the journal-head padding.
+**Rationale.** Section 2.2 point 4 (Family A vs B discrimination) and
+section 2.3 (saturation boundary observability).
+
+**Consequence.** All three regimes are implemented in v4 and
+documented as the on-disk contract in `Documentation/format-v4.md`
+section 6. The Shannon entropy field, formerly classified as Nice-to-
+Have in `roadmap.md`, is reclassified as Must-have for Family B
+coverage and is present in v4. The UNCORRECTABLE flag is the v4
+addition that surfaces the saturation boundary to userspace forensic
+tooling without on-disk format breakage (it occupies a previously
+reserved bit of `re_flags`).
 
 ### 6.5 Bounded auditable code size
 
@@ -415,9 +499,12 @@ canonical primary sources for claims made in this document.
 Inclusion does not imply endorsement of any particular conclusion
 beyond the specific point cited.
 
-**On benign SEU and Linux on COTS SoCs.**
-- Fuchs, Langer, Trinitis. *BEAMFS: A Fault-Tolerant Radiation-Robust Filesystem for Space Use.* ARCS 2015, LNCS 9017. https://www.cfuchs.net/chris/publication-list/ARCS2015/BEAMFS.pdf
+**Scientific lineage and Family A baseline (radiation-tolerant filesystems).**
+- Fuchs, Langer, Trinitis. *FTRFS: A Fault-Tolerant Radiation-Robust Filesystem for Space Use.* ARCS 2015, LNCS 9017. https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf — BEAMFS extends this work from a radiation-only threat model to the unified electromagnetic resilience model of section 2.
 - *When Radiation Meets Linux: Analyzing Soft Errors in Linux on COTS SoCs under Proton Irradiation.* arXiv 2503.03722.
+
+**Empirical falsification tooling for the saturation boundary (sec 2.3).**
+- RadFI — Reed-Solomon Adversarial Fault Injection. Companion repository, v0.1.0, 2026-04-28. Drives a BEAMFS image into the saturation regime under controlled parameters; falsified BEAMFS v1 Theorem IV.1 on data blocks. Not for upstream (dual-use); methodology fully documented for reproducibility.
 
 **On adversarial EM and storage.**
 - Far, Qazani, Rad. *Emp-secure data storage through biohybrid and neuromorphic paradigms.* Discover Applied Sciences, 2026. DOI 10.1007/s42452-026-08627-9.

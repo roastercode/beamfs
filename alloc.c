@@ -37,7 +37,7 @@
  *
  * Block bitmap: loaded from the on-disk bitmap block (s_bitmap_blk).
  * Each 239-byte subblock is RS(255,239) FEC-protected. If a subblock
- * is corrected, the event is logged to the Radiation Event Journal and
+ * is corrected, the event is logged to the Electromagnetic Resilience Journal and
  * the corrected bitmap is written back immediately.
  *
  * Inode bitmap: reconstructed by scanning the inode table for free slots
