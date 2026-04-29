@@ -1,8 +1,9 @@
 \section{Soundness and Saturation Theorems}\label{sec:soundness}
 
 % Override theorem numbering for this section: v2.1, v2.2 explicit
-\renewcommand{\thetheorem}{v2.\arabic{theorem}}
-\setcounter{theorem}{0}
+% (uses thedefinition because aliascnt makes definition the real counter)
+\renewcommand{\thedefinition}{v2.\arabic{definition}}
+\setcounter{definition}{0}
 
 We state two theorems. \cref{thm:soundness-v21} (Theorem v2.1)
 covers the recovery of states perturbed by an EMR event whose
