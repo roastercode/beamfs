@@ -129,12 +129,66 @@ demonstrated on the conformance fixture canary block (see
 format-v4.md sec 11). Full INLINE write path is part of the v2.x
 roadmap (post-Zenodo, ~250 LOC kernel estimate).
 
-INLINE read latency is reported separately in the next bench (B3).
+INLINE read latency is reported separately in B3 below.
+
+## B3 -- INLINE read sanity (canary, hot path)
+
+Workload: read on the conformance fixture canary block (3824 user
+bytes, single INLINE block, scheme=2 UNIVERSAL_INLINE), bs=512,
+ioengine=psync, iodepth=1, time_based runtime=5s. drop_caches=3
+between runs only; within a run, the folio remains page cache
+resident after first miss, so this measures hot-path read latency
+including BEAMFS read_folio dispatch and (no-op) RS decode.
+
+Metric: clat_ns percentiles (completion latency, ns).
+Sample size: ~38000 reads per run, 10 runs = ~380000 measurements total.
+
+| Run | p50 (ns) | p95 (ns) | p99 (ns) |   IOs  | mean (ns) |
+|----:|---------:|---------:|---------:|-------:|----------:|
+|   1 |   23168  |  561152  |  610304  |  38915 |    98541  |
+|   2 |   23424  |  569344  |  610304  |  38228 |   100352  |
+|   3 |   23680  |  569344  |  634880  |  37976 |   100950  |
+|   4 |   23680  |  577536  |  626688  |  37899 |   101391  |
+|   5 |   23424  |  569344  |  618496  |  38494  |   99826  |
+|   6 |   23424  |  569344  |  626688  |  38214 |   100482  |
+|   7 |   23168  |  577536  |  634880  |  37885 |   101502  |
+|   8 |   23424  |  569344  |  643072  |  37626 |   101318  |
+|   9 |   23424  |  577536  |  634880  |  38025 |   100978  |
+|  10 |   23680  |  569344  |  618496  |  37997 |   100585  |
+
+### Summary B3 (median of 10 runs)
+
+| Metric                    | Value     |
+|---------------------------|----------:|
+| p50 median                |  23424 ns |
+| p95 median                | 569344 ns |
+| p99 median                | 626688 ns |
+| mean (avg over 10 runs)   | 100593 ns |
+| Run-to-run p50 variance   |    < 2%   |
+
+**INLINE read latency is consistent with B1.** p50 = 23.4 us (INLINE) vs
+24.8 us (BEAMFS scheme=5) vs 24.8 us (ext4). The BEAMFS read_folio
+dispatch and Reed-Solomon verification path adds no measurable overhead
+on cache-hit reads compared to the inode-universal protection scheme
+or to ext4 baseline.
+
+**Zero RS correction events recorded.** dmesg shows no `beamfs/inline:
+... corrected` or `... uncorrectable` messages over the ~380000 reads.
+The canary block is clean; RS decode runs but has nothing to correct.
+This complements Palier 3 results, which demonstrate the same RS
+decode path *under deliberate corruption* (dd-based byte flip) and
+recover byte-perfect content with one symbol corrected per affected
+subblock.
+
+**Canary fixture stable.** sha256sum after 10 runs of ~38000 reads
+each remains `ced446d9bf5e6682a48e8782ce5ad33f575f08921451afaa127f26dc37515bab`,
+matching the format-v4.md sec 11 normative fixture.
 
 ## Reproducibility
 
 Raw fio JSON outputs: empirical/raw/b{1,2}-{inode,ext4}-r{1..10}.json
-(40 files, ~280 KB total, byte-identical re-runs not guaranteed but
++ empirical/raw/b3-inline-r{1..10}.json
+(50 files, ~346 KB total, byte-identical re-runs not guaranteed but
 distributions are stable).
 
 fio command lines (B1 read):
@@ -148,6 +202,13 @@ fio command lines (B2 write):
       --rw=write --bs=4k --direct=0 \
       --ioengine=psync --iodepth=1 --size=2088960 \
       --fsync=1 --end_fsync=1 \
+      --output-format=json
+
+fio command lines (B3 INLINE read sanity):
+  fio --name=b3-inline-rN --filename=mnt-inline/canary \
+      --rw=read --bs=512 --direct=0 \
+      --ioengine=psync --iodepth=1 --size=3824 \
+      --time_based --runtime=5s \
       --output-format=json
 
 Pre-bench setup:
