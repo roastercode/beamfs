@@ -1,0 +1,58 @@
+We present BEAMFS v2, a Linux filesystem providing autonomic
+recovery from electromagnetic perturbations of persistent storage,
+including stochastic single-event upsets, multi-bit upsets, and
+adversarial high-power electromagnetic events. BEAMFS v2 follows
+the FTRFS lineage of Fuchs et al.~\cite{fuchs2015ftrfs} and
+extends it with two contributions:
+\textbf{(i)}~an INLINE protection scheme applying Reed--Solomon
+\(\mathrm{RS}(255,239)\) per 255-byte subblock with sixteen
+subblocks per 4\,KiB disk block, recovering up to eight symbol
+errors per subblock and up to one hundred and twenty-eight symbol
+errors per block, on the read path, in place, and persisted to
+disk byte-perfect (\emph{autonomic in-place repair});
+\textbf{(ii)}~an explicit \emph{saturation observability} contract:
+when a perturbation exceeds the per-subblock correction capacity,
+the recovery operator returns fail-closed and emits a journal entry
+flagged uncorrectable, making the saturation event observable
+post-mortem rather than silent.
+
+The threat model is restated in electromagnetic terms (\emph{EMR
+threat model}) covering both stochastic perturbations
+(Family\,A, modelled by canonical SEU/MBU rate calculations) and
+adversarial perturbations (Family\,B, IEMI/HPM/EMP regimes per
+IEC\,61000-2-13 and 61000-4-36), bounded by a transverse saturation
+boundary at the per-subblock correction capacity.
+
+The recovery soundness theorem of the v1 report (Theorem\,IV.1)
+was empirically falsified by the companion fault injection
+operator RadFI~\cite{desbrieres2026radfi} on 2026-04-28. The
+present report retracts that theorem, reformulates the recovery
+calculus, and presents two replacement statements:
+\textbf{Theorem v2.1} (recovery under bounded EMR perturbation),
+which retains the termination/safety/coverage structure of
+Theorem\,IV.1 with an EMR-stated hypothesis on the perturbation
+family; and \textbf{Theorem v2.2} (saturation observability),
+which formalizes the contract that fail-closed recovery emits an
+auditable uncorrectable-flagged journal entry at the affected
+\((\text{block},\text{subblock})\) coordinates.
+
+Empirical results are reported on a Yocto-built aarch64 research
+image: byte-level disk corruption of an INLINE-formatted volume is
+recovered byte-perfect (\emph{Stage 3}, recovery validation
+milestone); read latency on the
+INODE\_UNIVERSAL protection scheme matches \texttt{ext4} on median
+and 95th percentile, with a 1.85\(\times\) p99 tail (\emph{Stage 4 / B1}, performance
+evaluation milestone); write+fsync latency carries an
+\(\sim\)8\(\times\) median
+overhead versus \texttt{ext4} due to per-block RS encoding, with a
+tighter overall distribution (1.74\(\times\) p50/p99 spread for
+BEAMFS versus 5.00\(\times\) for \texttt{ext4}, Stage 4 / B2);
+INLINE read on the conformance fixture canary block, ten runs of
+\(\sim\)38{,}000 reads each, exhibits zero RS correction events
+and a stable fixture SHA-256 (Stage 4 / B3). The kernel module
+totals 2{,}198 lines of C, well under the 5{,}000-line audit
+budget targeted for safety-critical certification regimes.
+
+The reference implementation is publicly available at
+\texttt{roastercode/beamfs}~\cite{beamfs-impl}, GPG-signed, with
+all empirical results reproducible from the tagged commit.

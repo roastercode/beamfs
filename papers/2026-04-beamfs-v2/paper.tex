@@ -1,0 +1,143 @@
+% BEAMFS v2 Technical Report
+% Author: Aurelien DESBRIERES
+% License: CC-BY-4.0
+% Build: latexmk -lualatex paper.tex
+
+\documentclass[10pt,conference,a4paper]{IEEEtran}
+
+% --- LuaLaTeX font stack ---
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+\setmathfont{Latin Modern Math}
+
+% --- Math (NB: amssymb removed, conflicts with unicode-math) ---
+\usepackage{amsmath}
+\usepackage{mathtools}
+
+% --- Theorem environments ---
+\usepackage{amsthm}
+\usepackage{aliascnt}
+\newtheoremstyle{beamfs-plain}%
+  {0.4em}{0.4em}{\itshape}{0pt}{\bfseries}{.}{0.5em}{}%
+\theoremstyle{beamfs-plain}
+\newtheorem{definition}{Definition}[section]
+\newaliascnt{propositionaux}{definition}
+\newtheorem{proposition}[propositionaux]{Proposition}
+\aliascntresetthe{propositionaux}
+\newaliascnt{lemmaaux}{definition}
+\newtheorem{lemma}[lemmaaux]{Lemma}
+\aliascntresetthe{lemmaaux}
+\newaliascnt{theoremaux}{definition}
+\newtheorem{theorem}[theoremaux]{Theorem}
+\aliascntresetthe{theoremaux}
+\newaliascnt{corollaryaux}{definition}
+\newtheorem{corollary}[corollaryaux]{Corollary}
+\aliascntresetthe{corollaryaux}
+\newtheoremstyle{beamfs-remark}%
+  {0.4em}{0.4em}{}{0pt}{\bfseries}{.}{0.5em}{}%
+\theoremstyle{beamfs-remark}
+\newtheorem*{remark}{Remark}
+
+% --- Tables ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% --- Figures ---
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,shapes,arrows.meta,calc}
+
+% --- Code listings ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  showstringspaces=false,
+  commentstyle=\itshape\color{gray!70!black},
+  keywordstyle=\bfseries,
+}
+
+% --- URLs and breakable hashes ---
+\usepackage{xurl}
+\usepackage{seqsplit}
+
+% --- Bibliography ---
+\usepackage[backend=biber,style=ieee,sorting=none,maxbibnames=5,
+            doi=true,url=true,isbn=false]{biblatex}
+\addbibresource{refs.bib}
+
+% --- Cross-references ---
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black,
+  pdftitle={BEAMFS v2: A Linux Filesystem with Electromagnetic Resilience and Reed-Solomon Recovery},
+  pdfauthor={Aurelien DESBRIERES},
+  pdfsubject={Filesystem; Electromagnetic Resilience; Reed-Solomon; Linux Kernel; Falsification},
+  pdfkeywords={BEAMFS, electromagnetic resilience, Reed-Solomon, filesystem, Linux kernel, RadFI, falsification},
+}
+\usepackage[capitalize,noabbrev]{cleveref}
+\crefname{theoremaux}{Theorem}{Theorems}
+\Crefname{theoremaux}{Theorem}{Theorems}
+\crefname{lemmaaux}{Lemma}{Lemmas}
+\Crefname{lemmaaux}{Lemma}{Lemmas}
+\crefname{propositionaux}{Proposition}{Propositions}
+\Crefname{propositionaux}{Proposition}{Propositions}
+\crefname{corollaryaux}{Corollary}{Corollaries}
+\Crefname{corollaryaux}{Corollary}{Corollaries}
+
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{enumitem}
+\usepackage{placeins}
+\setlist{nosep,leftmargin=1.5em}
+
+% =====================================================================
+\title{\large\bfseries BEAMFS v2:\\
+       A Linux Filesystem with Electromagnetic Resilience\\
+       and Reed--Solomon Recovery\\
+       \normalsize\mdseries Recovery Calculus revised after\\
+       empirical falsification of the radiation-only model\\
+       \small\itshape Technical Report -- Version 2}
+
+\author{%
+  \IEEEauthorblockN{Aur\'elien Desbri\`eres \textemdash{} Independent researcher}
+  \IEEEauthorblockA{\href{https://orcid.org/0009-0002-0912-9487}{ORCID:~0009-0002-0912-9487} \quad
+    \texttt{aurelien@hackers.camp}}
+}
+
+\begin{document}
+\maketitle
+
+\begin{IEEEkeywords}
+Electromagnetic resilience, Filesystem, Reed--Solomon, Linux kernel,
+Empirical falsification, Recovery calculus, RadFI, FTRFS lineage,
+Single-event upset, Multi-bit upset, IEMI, OIV
+\end{IEEEkeywords}
+
+\begin{abstract}
+\input{sections/00-abstract}
+\end{abstract}
+
+\input{sections/01-introduction}
+\input{sections/02-emr-threat-model}
+\input{sections/03-state-and-invariants}
+\input{sections/04-soundness-theorem}
+\input{sections/05-from-math-to-code}
+\input{sections/06-empirical-corroboration}
+\input{sections/07-limitations}
+\input{sections/08-conclusion}
+
+\onecolumn
+\small
+\input{sections/09-reproducibility}
+\input{sections/10-appendix-soundness-proof}
+
+\printbibliography
+\end{document}

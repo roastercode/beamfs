@@ -1,0 +1,137 @@
+\section{Filesystem State Space and Invariants}\label{sec:state}
+
+We define the object on which the recovery operator acts. The
+mathematical scaffolding of this section is preserved from the v1
+report~\cite{desbrieres2026ftrfs}: the state space, the layout
+abstraction, the consistency relation, and the five invariants
+\textbf{I1}--\textbf{I5} are unchanged. What changes between v1
+and v2 is the perturbation family quantified over by the
+soundness theorem in \cref{sec:soundness}; the layout
+substrate on which that theorem is stated is the same.
+
+\subsection{State Space}
+
+\begin{definition}[Layered state]\label{def:state}
+The BEAMFS state space~\(\mathcal{S}\) is the Cartesian product
+\[
+  \mathcal{S} \;=\; \mathcal{S}_V \times \mathcal{S}_P,
+\]
+where~\(\mathcal{S}_V\) is the volatile component (kernel data
+structures, page cache, in-memory superblock copy, in-memory
+bitmap) and~\(\mathcal{S}_P\) is the persistent component (on-disk
+superblock, inode table, allocation bitmap, data blocks, RS event
+journal).
+\end{definition}
+
+\begin{definition}[Layout]\label{def:layout}
+A \emph{layout}~\(\Lambda\) is a finite map from named regions
+(\texttt{sb}, \texttt{inode\_table}, \texttt{bitmap},
+\texttt{rs\_journal}, \texttt{data}) to byte ranges in their
+hosting layer, together with a redundancy specification (CRC
+algorithm, RS parameters) per region.
+\end{definition}
+
+The FTRFS layout~\cite{fuchs2015ftrfs,desbrieres2026ftrfs} is one
+instance of~\(\Lambda\). BEAMFS v2 instantiates an extended
+layout: in the INLINE scheme (s\_data\_protection\_scheme =
+\textsc{universal\_inline}), every region is RS-protected, and
+each data block is partitioned into sixteen RS subblocks
+\(\mathrm{RS}(255, 239)\) carrying user content plus parity
+symbols. The on-disk format is normatively specified in the
+companion document \texttt{Documentation/format-v4.md} of the
+implementation~\cite{beamfs-impl}.
+
+\subsection{Consistency Relation}
+
+\begin{definition}[Per-region consistency]
+Let~\(R\) be a region of~\(\Lambda\) with redundancy
+specification~\(r\). A state~\(s\) is \emph{R-consistent}, written
+\(s \models_R\), iff applying~\(r\) to the bytes of~\(R\) in~\(s\)
+yields a zero syndrome (CRC valid and Reed--Solomon syndromes all
+zero across all subblocks of \(R\)).
+\end{definition}
+
+\begin{definition}[Consistency]\label{def:consistent}
+A state~\(s = (s_V, s_P) \in \mathcal{S}\) is \emph{consistent},
+written~\(s \models\), iff:
+\begin{enumerate}
+\item For every region~\(R\) of~\(\Lambda_V\) (the volatile-side
+  layout), \(s \models_R\).
+\item For every region~\(R\) of~\(\Lambda_P\) (the persistent-side
+  layout), \(s \models_R\).
+\item For every region~\(R\) that has both volatile and persistent
+  representations (the superblock, the bitmap, recently accessed
+  inodes), the canonical serialization of~\(s_V|_R\) equals
+  \(s_P|_R\) byte-for-byte (\emph{coherence}).
+\item Every structural sentinel (the zero pads of \texttt{re\_reserved}
+  and \texttt{re\_pad} in the v4 RS event journal entry, the
+  validity range of \texttt{s\_data\_protection\_scheme}, the high
+  zero bytes of feature flags) is at its canonical value.
+\end{enumerate}
+We write~\(\bot\) for the explicit fail-closed state, distinct
+from every consistent state.
+\end{definition}
+
+\subsection{The Five Invariants}\label{sub:invariants}
+
+The recovery soundness theorem (\cref{thm:soundness-v21}) requires
+the following invariants to hold of the layout~\(\Lambda\) and of
+the operator~\(\mathcal{G}\). They are minimal and stated
+separately so that an implementation can be audited against them
+line by line.
+
+\begin{description}
+\item[I1 -- Total redundancy.] Every region of~\(\Lambda\) is
+  covered by a redundancy specification (CRC for detection, RS for
+  correction) whose correction power equals or exceeds the maximum
+  per-subblock symbol-error budget targeted by the layout. For
+  \(\mathrm{RS}(n, k)\) with \(n - k\) parity symbols and
+  per-subblock correction capacity \(t = \lfloor (n-k)/2 \rfloor\),
+  the layout's stated EMR perturbation family must contain only
+  events whose per-subblock symbol-error count does not exceed
+  \(t\). For BEAMFS v2 INLINE: \(\mathrm{RS}(255, 239)\) with
+  \(t = 8\) per subblock and 16 subblocks per 4\,KiB block, the
+  per-block budget is 128 symbol errors.
+\item[I2 -- Sentinel separation.] Each region carries at least one
+  byte whose canonical value is fixed and whose corruption is
+  detectable in the redundancy syndrome alone, without semantic
+  interpretation.
+\item[I3 -- Coherence checkpoint.] For any region present in both
+  layers, the canonical serialization map is total, deterministic,
+  and bijective on its domain of valid values. This rules out
+  ambiguous in-memory representations of an on-disk byte sequence.
+\item[I4 -- Idempotence.] For every consistent~\(s\),
+  \(\mathcal{G}(s) = s\). The recovery operator is the identity on
+  consistent states.
+\item[I5 -- Fail-closed monotonicity.] If
+  \(\mathcal{G}(s) = \bot\) for some~\(s\), then
+  \(\mathcal{G}(\bot) = \bot\). Once the operator declares
+  fail-closed, no subsequent application reverses that decision.
+\end{description}
+
+The first three are properties of the layout; the last two are
+properties of the operator. The soundness theorem couples them
+under the EMR family.
+
+\begin{remark}
+The space overhead of \(\mathrm{RS}(n, k)\) is \((n-k)/k\). For
+\(\mathrm{RS}(255, 239)\), this is 6.7\%. The INLINE scheme
+applies this overhead per 4\,KiB disk block (sixteen
+\(\mathrm{RS}(255,239)\) subblocks of 255 bytes each cover the
+4\,096-byte block plus parity), with 4\,080 bytes of user content
+per block. The space overhead is preserved across the v1 and v2
+designs; what differs is per-subblock granularity (16 subblocks
+per block versus FTRFS's per-region granularity), enabling
+recovery up to \(t \cdot 16 = 128\) symbol errors per block.
+\end{remark}
+
+\begin{remark}
+The v1 report acknowledged that I1 is unrealistically strong as a
+universal requirement; the present report retains that
+acknowledgement. A future v3 may explore selective redundancy
+under a probabilistic relaxation of the soundness statement (with
+bounded silent-corruption risk quantified rather than zero by
+construction). The conservative v2 statement is what allows the
+soundness theorems of \cref{sec:soundness} to be stated
+\emph{absolutely} on the EMR-bounded family, not statistically.
+\end{remark}

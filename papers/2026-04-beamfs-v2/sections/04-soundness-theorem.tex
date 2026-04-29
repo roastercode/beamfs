@@ -1,0 +1,161 @@
+\section{Soundness and Saturation Theorems}\label{sec:soundness}
+
+% Override theorem numbering for this section: v2.1, v2.2 explicit
+\renewcommand{\thetheorem}{v2.\arabic{theorem}}
+\setcounter{theorem}{0}
+
+We state two theorems. \cref{thm:soundness-v21} (Theorem v2.1)
+covers the recovery of states perturbed by an EMR event whose
+per-subblock symbol-error count is within the Reed--Solomon
+correction capacity. \cref{thm:saturation-v22} (Theorem v2.2)
+covers the saturation regime: an event whose per-subblock count
+exceeds the capacity yields fail-closed recovery with an auditable
+journal entry flagged uncorrectable.
+
+\subsection{Theorem v2.1: recovery under bounded EMR perturbation}
+
+\begin{theorem}[Recovery under bounded EMR perturbation]\label{thm:soundness-v21}
+Let~\(\Lambda\) be a layout satisfying invariants
+\textbf{I1}--\textbf{I3} of \cref{sub:invariants}, with the INLINE
+protection scheme applying \(\mathrm{RS}(n, k)\) per subblock with
+\(m\) subblocks per disk block (\(m = 16\) for BEAMFS v2 INLINE). Let~\(\mathcal{G}\) be the recovery
+operator of \cref{sec:m2c}, satisfying \textbf{I4}--\textbf{I5}.
+Let~\(\mathcal{E}_{\mathrm{EMR}}\) be the family of electromagnetic
+perturbation events such that, for every \(e \in \mathcal{E}_{\mathrm{EMR}}\)
+and every state~\(s\), the number of corrupted symbols in any single
+RS subblock of~\(e(s)\) does not exceed the per-subblock correction
+capacity \(t = \lfloor (n-k)/2 \rfloor\) declared by~\(\Lambda\).
+Then for every initial consistent state~\(s_0\) (i.e.\ \(s_0 \models\) per \cref{def:consistent}) and every
+\(e \in \mathcal{E}_{\mathrm{EMR}}\), there exists~\(K \le |\Lambda|\)
+such that
+\[
+  \mathcal{G}^{K}\bigl(e(s_0)\bigr) \models
+  \quad\text{or}\quad
+  \mathcal{G}^{K}\bigl(e(s_0)\bigr) = \bot,
+\]
+where~\(|\Lambda|\) denotes the number of regions in~\(\Lambda\).
+\end{theorem}
+
+The full proof appears in \cref{app:proof}. The argument is the
+same termination/safety/coverage structure as in the v1 retracted
+theorem; what changes is the family quantified over.
+
+\paragraph{Termination.}
+By Lemma~\ref{lem:descent} (\cref{app:proof}), the function~\(N\)
+counting non-consistent regions strictly decreases on each
+non-fail-closed iteration. Since~\(N \in \{0, 1, \dots, |\Lambda|\}\)
+and~\(N = 0\) implies consistency by \cref{def:consistent}, the
+recursion terminates in at most~\(|\Lambda|\) iterations.
+
+\paragraph{Safety.}
+At every iteration, if any step of \(\mathcal{G}\) detects a CRC
+mismatch after RS decode or a sentinel violation,~\(\bot\) is
+returned. By \cref{prop:absorb} (\cref{app:proof}), fail-closed is
+absorbing: no subsequent iteration can return a state that
+silently masks the violation.
+
+\paragraph{Coverage of the perturbation family.}
+The hypothesis on~\(\mathcal{E}_{\mathrm{EMR}}\) (no event corrupts
+more than~\(t\) symbols in any single subblock) is exactly the RS
+code's correction capacity. Events that violate this hypothesis
+are addressed by \cref{thm:saturation-v22}.
+
+\subsection{Theorem v2.2: saturation observability}
+
+\begin{theorem}[Saturation observability]\label{thm:saturation-v22}
+Let~\(\Lambda\) and~\(\mathcal{G}\) be as in
+\cref{thm:soundness-v21}. Let~\(\mathcal{E}_{\mathrm{sat}}\) be the
+family of electromagnetic perturbation events such that, for some
+\(e \in \mathcal{E}_{\mathrm{sat}}\) and some state~\(s\), there
+exists at least one RS subblock of~\(e(s)\) whose symbol-error
+count exceeds~\(t\). Then for every consistent~\(s_0\) and every
+\(e \in \mathcal{E}_{\mathrm{sat}}\):
+\begin{enumerate}
+\item \(\mathcal{G}\bigl(e(s_0)\bigr) = \bot\); and
+\item the persistent journal region of~\(\Lambda\) contains, after
+  the application of~\(\mathcal{G}\), an entry tagged with
+  \texttt{BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE} whose
+  \((\text{block},\text{subblock})\) coordinates identify a
+  saturating subblock of~\(e(s_0)\).
+\end{enumerate}
+\end{theorem}
+
+The proof appears in \cref{app:proof}. The argument has two parts.
+
+\paragraph{Fail-closed.}
+The recovery operator's RS decode step on a saturating subblock
+returns a non-zero residual syndrome after decode (the canonical
+behaviour of an RS decoder beyond its capacity~\cite{kernelrslib}).
+The operator interprets this residual as a saturation event,
+returning~\(\bot\) by I5.
+
+\paragraph{Observability.}
+Before returning~\(\bot\), the operator emits a journal entry by
+calling \texttt{beamfs\_log\_rs\_event} with positions \(=\)
+\texttt{NULL} and \texttt{n\_positions} \(=\) 0, accepted by the
+on-disk format v4 specification as the canonical encoding of a
+saturating event. The entry includes the affected
+\((\text{block},\text{subblock})\) coordinates and the
+\texttt{BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE} flag (bit 1 of
+\texttt{re\_flags}~\cite{beamfs-impl}). The entry is committed to
+persistent storage before the operator returns.
+
+\subsection{Discussion}
+
+\paragraph{What these theorems do, and do not, prove.}
+\Cref{thm:soundness-v21,thm:saturation-v22} establish that the
+recovery operator either returns to consistency or to fail-closed
+in a bounded number of steps under the EMR-bounded hypothesis,
+and that fail-closed is auditable, in the sense that a subsequent
+inspection of the journal identifies the saturating coordinates.
+They do \emph{not} prove that the kernel implementation of
+\(\mathcal{G}\) is bug-free: a buggy implementation can violate
+\textbf{I4} or \textbf{I5} even with a correct operator
+definition. \Cref{sec:m2c} provides a traceability table pairing
+each operator step with the kernel function that realizes it; an
+implementation audit against this table is a necessary condition
+for the theorems to apply to the implementation, not a sufficient
+one. A verified compilation chain (in the seL4~\cite{klein2009sel4}
+or FSCQ~\cite{chen2015fscq} sense) remains the only way to close
+the implementation gap; we mark this as v3+ work.
+
+\paragraph{Why the bound is~\(|\Lambda|\).}
+The bound scales with the number of regions because the worst
+case is a perturbation that corrupts every region simultaneously
+up to the per-subblock capacity. This worst case is unrealistic
+for Family A under environmental backgrounds: \cref{sec:emr-threat}
+establishes that simultaneous saturation of all regions requires
+fluences orders of magnitude beyond environmental SEU rates. For
+Family B, simultaneous saturation is the adversary's stated
+objective, so the conservative bound is appropriate. The
+per-iteration cost is dominated by a single \(\mathrm{RS}(255,239)\)
+decode of \(O(n^2)\) GF operations, sub-millisecond on
+contemporary CPUs.
+
+\paragraph{Comparison with crash-consistency proofs.}
+FSCQ~\cite{chen2015fscq} proves that a filesystem returns to a
+consistent state after a crash. The hypothesis there is that the
+storage substrate is \emph{benevolent}: it preserves whatever was
+written, exactly. The present soundness theorem assumes the
+substrate is \emph{adversarial} within the EMR-bounded family,
+and the filesystem must recover. The two proofs compose: a
+BEAMFS-compliant implementation satisfying
+\cref{thm:soundness-v21,thm:saturation-v22} \emph{and} satisfying
+crash-Hoare logic in the FSCQ sense recovers from the union of
+both threat models. Mechanizing this composition is left for
+future work.
+
+\paragraph{Falsifiability.}
+By construction, both theorems are falsifiable: a counter-example
+is any RadFI~\cite{desbrieres2026radfi} run, or any equivalent
+fault-injection trace, that exhibits a state \(e(s_0)\) under
+\(e \in \mathcal{E}_{\mathrm{EMR}}\) for which
+\(\mathcal{G}^K(e(s_0)) \neq \models\) and
+\(\mathcal{G}^K(e(s_0)) \neq \bot\); or a state under
+\(e \in \mathcal{E}_{\mathrm{sat}}\) for which \(\mathcal{G}\) does
+not return \(\bot\) or fails to emit the
+\texttt{UNCORRECTABLE}-flagged journal entry. The empirical
+section (\cref{sec:empirical}) reports a corroboration of
+\cref{thm:soundness-v21} by direct disk corruption; saturation
+testing (Theorem v2.2 active falsification) is part of the
+post-Zenodo continuation.

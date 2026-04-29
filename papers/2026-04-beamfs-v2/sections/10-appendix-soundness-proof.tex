@@ -1,0 +1,126 @@
+\section{Appendix: proofs of \cref{thm:soundness-v21,thm:saturation-v22}}\label{app:proof}
+
+\subsection{Auxiliary results}
+
+\begin{lemma}[Strict descent]\label{lem:descent}
+Let \(s = (s_V, s_P) \in \mathcal{S}\) and let
+\(N(s) \;\stackrel{\mathrm{def}}{=}\; \#\{R \in \Lambda : s \not\models_R\}\),
+the number of layout regions that fail per-region consistency.
+If \(s \neq \bot\) and \(N(s) > 0\), then either
+\(\mathcal{G}(s) = \bot\) or \(N(\mathcal{G}(s)) < N(s)\).
+\end{lemma}
+
+\begin{proof}
+By construction of \(\mathcal{G}\) (\cref{def:G}). Step 1
+(decode) examines each inconsistent region. For each such region,
+either every subblock RS-decodes within capacity (no residual
+syndrome), in which case the region's syndrome becomes zero after
+the decoded content is installed and \(N\) decreases by one for
+that region; or at least one subblock yields a residual syndrome,
+in which case step 5 emits the journal entry and the operator
+returns \(\bot\) by I5. In either case, \(N\) cannot remain
+unchanged: an iteration that does not return \(\bot\) strictly
+decreases \(N\).
+\end{proof}
+
+\begin{proposition}[Fail-closed absorption]\label{prop:absorb}
+If \(\mathcal{G}(s) = \bot\) for some \(s\), then
+\(\mathcal{G}(\bot) = \bot\).
+\end{proposition}
+
+\begin{proof}
+Direct from invariant I5: fail-closed monotonicity. The proposition
+restates I5 in operator form.
+\end{proof}
+
+\subsection{Proof of \cref{thm:soundness-v21}}
+
+\begin{proof}[Proof of \cref{thm:soundness-v21}]
+Fix a consistent initial state \(s_0 \models\), an event
+\(e \in \mathcal{E}_{\mathrm{EMR}}\), and let \(s_1 = e(s_0)\).
+Define the iteration \(s_{i+1} = \mathcal{G}(s_i)\) for
+\(i \geq 1\), with the convention that if \(s_i = \bot\) then
+\(s_{i+1} = \bot\) (by \cref{prop:absorb}, this is consistent
+with the operator's behaviour).
+
+By the EMR-bounded hypothesis on \(\mathcal{E}_{\mathrm{EMR}}\),
+no subblock of \(s_1\) carries more than \(t\) symbol errors. The
+RS decoder is well-defined within capacity, returning the unique
+codeword within Hamming distance~\(t\) of the received word
+(MacWilliams--Sloane~\cite{macwilliams1977}, Ch.~9); the kernel
+\texttt{lib/reed\_solomon}~\cite{kernelrslib} implements this. Hence step 1 of \cref{def:G} succeeds
+on every region of \(\Lambda\) on which \(s_1\) differs from
+\(s_0\), without invoking the saturation handling of step 5.
+
+By \cref{lem:descent}, if \(s_i \neq \bot\) and \(N(s_i) > 0\),
+then \(N(s_{i+1}) < N(s_i)\) and \(s_{i+1} \neq \bot\) (because
+the decoder is within capacity by hypothesis). Since
+\(N(s_i) \in \{0, 1, \dots, |\Lambda|\}\), there exists a least
+\(K \le |\Lambda|\) such that either \(N(s_K) = 0\) or
+\(s_K = \bot\). The first case implies \(s_K \models\) by
+\cref{def:consistent}; the second is the fail-closed exit.
+
+The fail-closed exit is reached only if a sentinel verification
+(step 4) failed, which is a violation of I2 not covered by the
+RS-decode hypothesis. Such a violation can occur if the EMR
+event corrupted a region in a way that bypasses the RS protection
+(for instance, by writing canonical-looking bytes whose CRC
+happens to validate, an event of probability bounded by \(2^{-c}\) for a \(c\)-bit
+CRC; BEAMFS v2 uses CRC-32, so this probability is approximately
+\(2.3 \cdot 10^{-10}\) per region per RS-decode event); the
+operator's response is the designed safe failure. This case is bounded by I2's sentinel separation
+property and does not affect the termination claim.
+\end{proof}
+
+\subsection{Proof of \cref{thm:saturation-v22}}
+
+\begin{proof}[Proof of \cref{thm:saturation-v22}]
+Fix a consistent \(s_0\) and an event
+\(e \in \mathcal{E}_{\mathrm{sat}}\). Let \(s_1 = e(s_0)\). By
+hypothesis, there exists at least one subblock of \(s_1\) whose
+symbol-error count exceeds \(t\). Apply \(\mathcal{G}\) to \(s_1\).
+
+Step 1 of \cref{def:G} (decode) invokes the RS decoder on every
+subblock of every inconsistent region. On the saturating
+subblock, the decoder returns a non-zero residual syndrome (the
+canonical out-of-capacity behaviour~\cite{kernelrslib}). The
+operator detects the residual and proceeds to step 5.
+
+Step 5 (saturation log) calls \texttt{beamfs\_log\_rs\_event}
+with \texttt{positions} \(=\) \texttt{NULL},
+\texttt{n\_positions} \(=\) 0, and
+\texttt{flags |= BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE}, with
+the affected \((\text{block}, \text{subblock})\) coordinates
+identified by the RS-decode failure. The journal entry is
+committed to persistent storage by the standard buffer-write
+sequence (\texttt{mark\_buffer\_dirty},
+\texttt{sync\_dirty\_buffer}). We assume the implementation commits the journal entry to
+persistent storage before returning, an assumption realized by the
+kernel function \texttt{beamfs\_log\_rs\_event} which calls
+\texttt{sync\_dirty\_buffer} before its return path; this is
+verifiable by audit and is the on-disk format v4
+contract~\cite{beamfs-impl}.
+
+The operator returns \(\bot\). Conclusion (1) holds. The journal
+entry committed in step 5 satisfies conclusion (2): it is tagged
+with \texttt{UNCORRECTABLE}, and its \((\text{block},
+\text{subblock})\) coordinates correspond to a saturating subblock
+of \(e(s_0)\) by construction.
+\end{proof}
+
+\subsection{Remark on falsification scope}
+
+Both proofs assume that the kernel implementation realizes the
+operator definition of \cref{def:G} faithfully. Implementation
+faithfulness is not the subject of the theorem and is addressed
+by the traceability table of \cref{tab:m2c-trace}, by
+\texttt{checkpatch.pl} compliance per \cref{sec:m2c}, and
+ultimately by mechanized verification (v3+ work). A
+counter-example to either theorem produced by RadFI or by an
+equivalent fault-injection methodology against the actual kernel
+binary may be either a counter-example to the theorem
+(\(\mathcal{E}_{\mathrm{EMR}}\) is too narrow,
+\(\mathcal{E}_{\mathrm{sat}}\) is mis-stated) or a counter-example
+to the implementation faithfulness (a kernel bug, not a
+mathematical defect). Distinguishing the two cases is the proper
+diagnosis task following any falsification report.

@@ -1,0 +1,78 @@
+\section{Limitations and Roadmap}\label{sec:limitations}
+
+The present report's contributions are bounded in five respects.
+We state the boundaries and indicate the remediation path for
+each.
+
+\paragraph{INLINE write path.}
+The INLINE scheme implements only the read path. The write side
+returns \texttt{-EOPNOTSUPP} at \texttt{write\_begin},
+\texttt{write\_end}, and \texttt{writepages}. Adding the write
+path requires implementing per-block RS encoding on the writeback
+path, RS journal entry on successful write, and proper
+interaction with the bitmap allocator and the inode metadata
+update. The estimated incremental kernel module size is
+\(\sim\)250 lines of C, comfortably within the remaining 2{,}802
+LOC of the 5{,}000-line audit budget. INLINE write is part of the
+v2.x roadmap, post the present technical report and Zenodo
+upload.
+
+\paragraph{Saturation falsification (Theorem v2.2).}
+The empirical section corroborates \cref{thm:soundness-v21} on a
+single-symbol-error event well within the
+correction capacity. \cref{thm:saturation-v22} (saturation
+observability) is stated in the present report but not yet
+exercised by an active falsification protocol. A saturation
+protocol would force \(>8\) symbol errors on a single subblock,
+verify that \(\mathcal{G}\) returns \(\bot\), and verify that the
+journal contains a \texttt{UNCORRECTABLE}-flagged entry with the
+correct \((\text{block}, \text{subblock})\) coordinates. The
+protocol is straightforward to derive from the Stage 3
+\texttt{dd}-based corruption template, by injecting nine or more
+distinct symbol-position flips in one subblock; we mark this as
+the immediate post-Zenodo experimental task.
+
+\paragraph{Companion fault injection diagnostic.}
+The companion fault injection module RadFI v0.1.2 exhibited a
+diagnostic anomaly during the present session: the kprobe
+pre-handler did not fire despite the kprobe being armed at the
+exact symbol address and the symbol being demonstrably called by
+the workload (verified by native kprobe events recorded directly
+through the tracefs interface). The hypotheses ruled out by
+direct inspection include kprobe blacklist, function inlining,
+\texttt{submit\_bh} versus \texttt{submit\_bio\_noacct} dispatch
+mismatch, and BEAMFS hook flag set. The remaining hypotheses
+under investigation include
+\texttt{CONFIG\_KPROBES\_ON\_FTRACE} dispatch interaction and
+\texttt{bd\_dev} encoding in the targeting algebra. Diagnosis is
+deferred to the post-Zenodo continuation; the empirical results
+of the present report use \texttt{dd}-based corruption as a
+direct, reproducible substitute. RadFI's own methodology paper
+remains the formal reference~\cite{desbrieres2026radfi}.
+
+\paragraph{Verified compilation.}
+The present report's recovery operator is defined and proved at
+the mathematical level (\cref{def:G,thm:soundness-v21,thm:saturation-v22});
+the kernel implementation is paired with the operator definition
+through the traceability table of \cref{tab:m2c-trace}. We do not
+claim that the implementation satisfies the operator definition
+in any machine-checked sense. Closing this gap requires either an
+extraction-based approach in the FSCQ
+tradition~\cite{chen2015fscq} or a refinement-based approach in
+the seL4 tradition~\cite{klein2009sel4}, applied to the BEAMFS
+recovery operator and the \texttt{lib/reed\_solomon} kernel
+substrate~\cite{kernelrslib}. We mark this as v3+ work.
+
+\paragraph{Linux fs-devel submission.}
+This report is intended for Zenodo upload and citation in
+academic and industrial contexts where electromagnetic resilience
+is a stated design constraint. The Linux kernel-tree submission
+to \texttt{linux-fsdevel} is a separate workstream with its own
+prerequisites: completion of the INLINE write path, an
+\texttt{xfstests} subset passing, strict \texttt{checkpatch.pl}
+on every modified file, formal LOC audit against the certification
+regimes (DO-178C, ECSS-E-ST-40C, IEC\,61508) targeting the
+sub-5{,}000-LOC budget, and a cover letter aligned with the
+threading model preferred by Linux maintainers. The estimated
+calendar time is two to three months from the date of the present
+report, conditional on review cycle responsiveness.

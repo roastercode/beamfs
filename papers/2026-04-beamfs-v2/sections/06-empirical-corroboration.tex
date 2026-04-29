@@ -1,0 +1,250 @@
+\section{Empirical Corroboration}\label{sec:empirical}
+
+We report empirical results in two parts. The first
+(\cref{ssec:stage3}) corroborates \cref{thm:soundness-v21} by a
+byte-level disk corruption that the INLINE read path recovers
+byte-perfect, with the autonomic in-place repair persisting the
+correction to disk. The second (\cref{ssec:stage4}) reports
+performance evaluation on three benchmarks: read cold latency on
+INODE\_UNIVERSAL versus \texttt{ext4}, write+fsync latency on the
+same pair, and INLINE read latency on the conformance fixture
+canary block. All results are reproducible from
+\texttt{roastercode/beamfs} at tag
+\texttt{v0.4.0-palier4-validated}, commit
+\texttt{7c30934}~\cite{beamfs-impl}.
+
+\subsection{Test harness}
+
+The harness is a Yocto-built aarch64 research image
+(\texttt{hpc-arm64-research-beamfs}) running on
+\texttt{qemu-system-aarch64} \texttt{cortex-a57}, kernel
+\texttt{linux-mainline} 7.0.1, with an OpenSSH-accessible HPC
+master node (\texttt{beamfs-master} at \texttt{192.168.56.10}).
+The filesystem under test is mounted on a loop-back image stored
+in a tmpfs-backed \texttt{/var/volatile} directory. The userspace
+formatter \texttt{mkfs.beamfs} produces images of either the
+\textsc{universal\_inline} scheme (\texttt{mkfs.beamfs -s inline}, scheme=2) or the
+\textsc{inode\_universal} scheme (\texttt{mkfs.beamfs -s inode-universal}, scheme=5)
+per the on-disk format v4 specification. The benchmarking tool is
+\texttt{fio}\,3.36 with \texttt{ioengine=psync},
+\texttt{iodepth=1}, JSON output. The page cache is dropped via
+\texttt{echo 3 > /proc/sys/vm/drop\_caches} before each run.
+
+\subsection{Stage 3: byte-level disk corruption recovery}\label{ssec:stage3}
+
+The conformance fixture canary block of the INLINE scheme is a
+4\,KiB disk block, normatively specified in
+\texttt{Documentation/format-v4.md}~\cite{beamfs-impl} \S 11, with
+SHA-256 fixture
+\texttt{\seqsplit{fb8a3b9e2704ce3fc11a0d0a4139d36c916cb5e7230acde8d2fa00ace739a91c}}
+on the raw disk and SHA-256 fixture
+\texttt{\seqsplit{ced446d9bf5e6682a48e8782ce5ad33f575f08921451afaa127f26dc37515bab}}
+on the user content (3{,}824 bytes accessible via the VFS alias
+inode \texttt{/canary}). Both fixtures are reproducible
+cross-platform: x86\_64 GCC native build versus aarch64 Yocto
+cross-build yields byte-identical output verified by \texttt{cmp -s}.
+
+The Stage 3 protocol is:
+
+\begin{enumerate}
+\item Mount the INLINE-formatted volume; verify the canary
+  user-content SHA-256 matches \texttt{ced446d9...} (read path,
+  baseline).
+\item Unmount; release the loop device.
+\item Apply \texttt{dd}-based byte-level corruption: read the
+  byte at offset 77{,}824 (canary block at byte index 19 of the
+  4\,KiB-block addressing, equal to \(19 \times 4096\)), XOR with
+  \texttt{0x01}, write the result back via \texttt{dd
+  conv=notrunc}. The on-disk byte transitions from \texttt{0x42}
+  (the leading byte of the canary header,
+  \texttt{BEAMFS-CANARY-v4}) to \texttt{0x43}. The raw disk
+  SHA-256 transitions from \texttt{fb8a3b9e...} to a distinct
+  value confirming corruption is applied to persistent storage.
+\item Remount. Drop caches.
+\item Read the canary; verify SHA-256.
+\item Inspect \texttt{dmesg}; verify the autonomic in-place repair
+  trace.
+\item Drop caches a second time; re-verify the user-content
+  SHA-256 (durability).
+\item Read the raw disk byte at offset 77{,}824; verify it is
+  back to \texttt{0x42}.
+\item Re-compute the raw disk SHA-256; verify it is back to
+  \texttt{fb8a3b9e...}.
+\end{enumerate}
+
+The protocol succeeds at every step. The relevant \texttt{dmesg}
+trace is \texttt{beamfs/inline: ino=2 iblock=0 subblock=0: 1
+symbol(s) corrected}, confirming the RS decoder corrected one
+symbol error on subblock 0 of the canary block. The post-recovery
+disk SHA-256 matches the pre-corruption fixture exactly. The
+autonomic in-place repair is therefore not merely a transient
+correction in the page cache: it is committed to persistent
+storage byte-perfect, and durability survives an explicit cache
+drop and re-read.
+
+This result corroborates \cref{thm:soundness-v21} for the
+hypothesis instance \(e \in \mathcal{E}_{\mathrm{EMR}}\) consisting
+of a single symbol-error perturbation on a single subblock,
+which is well within the per-subblock correction capacity \(t = 8\)
+of \(\mathrm{RS}(255, 239)\).
+
+\subsection{Stage 4: performance evaluation}\label{ssec:stage4}
+
+Three benchmark suites are reported, each consisting of ten runs
+per (filesystem, workload) configuration with
+\texttt{drop\_caches}\,=\,3 between runs. The metric is the
+completion-latency percentile \texttt{clat\_ns} reported by
+\texttt{fio}. Raw JSON outputs are committed under
+\texttt{empirical/raw/} for reproducibility. The matplotlib
+script \texttt{figures/bench-plot.py} regenerates
+Figs.~\ref{fig:b1-read}--\ref{fig:b3-inline} from the raw JSON.
+
+\paragraph{B1 read cold latency, INODE\_UNIVERSAL versus ext4.}
+A 2\,MiB deterministic file
+(\(2{,}088{,}960 = 512 \times 4{,}080\) bytes, \texttt{'A'} fill,
+chosen to fit exactly in 512 INLINE blocks of 4\,080 user bytes
+each, used identically across the three filesystems for
+comparability) is read sequentially via \texttt{fio} with
+\texttt{bs=4k}, ten runs per filesystem. \cref{tab:b1-summary}
+gives the median across the ten runs.
+
+\begin{table}[h]
+\caption{B1 read cold latency, median of 10 runs.}
+\label{tab:b1-summary}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Filesystem & p50 (ns) & p95 (ns) & p99 (ns) \\
+\midrule
+BEAMFS scheme=5  & 24{,}832 & 32{,}576 & 585{,}664 \\
+ext4 baseline    & 24{,}832 & 33{,}792 & 317{,}440 \\
+Ratio BEAMFS/ext4 & 1.00\(\times\) & 0.96\(\times\) & 1.85\(\times\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Read parity is observed on p50 and p95. The p99 ratio of
+1.85\(\times\) reflects the cost of the RS journal lookup on the
+read path; this overhead is paid only on the long tail and does
+not affect the median or the 95th-percentile experience.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{figures/bench-b1-read.png}
+\caption{B1 read cold latency, BEAMFS scheme=5 INODE\_UNIVERSAL
+versus \texttt{ext4} baseline. Boxplot of ten-run distribution at
+each percentile. Logarithmic y-axis.}
+\label{fig:b1-read}
+\end{figure}
+
+\paragraph{B2 write+fsync latency, INODE\_UNIVERSAL versus ext4.}
+The same 2\,MiB file is written sequentially with \texttt{fsync=1}
+(per-block fsync) and \texttt{end\_fsync=1}, ten runs per
+filesystem. \cref{tab:b2-summary} gives the median.
+
+\begin{table}[h]
+\caption{B2 write+fsync latency, median of 10 runs.}
+\label{tab:b2-summary}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Filesystem & p50 (ns) & p95 (ns) & p99 (ns) \\
+\midrule
+BEAMFS scheme=5  & 597{,}984 & 724{,}992 & 1{,}042{,}368 \\
+ext4 baseline    &  76{,}288 & 165{,}888 &   381{,}408 \\
+Ratio BEAMFS/ext4 & 7.84\(\times\) & 4.37\(\times\) & 2.73\(\times\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The 7.84\(\times\) median write penalty reflects the per-block
+\(\mathrm{RS}(255, 239) \times 16\) encoding cost (sixteen
+Reed--Solomon encodes per 4\,KiB block) plus the RS journal flush
+at fsync. The penalty is consistent with published
+FEC-protected filesystem overheads~\cite{fuchs2015ftrfs}. The
+spread of the latency distribution is narrower for BEAMFS than
+for \texttt{ext4}: the p50/p99 ratio is 1.74\(\times\) for BEAMFS
+versus 5.00\(\times\) for \texttt{ext4}, indicating that BEAMFS
+write latency is more predictable in absolute spread, a property
+relevant for deterministic-latency workloads in the design
+deployment context.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{figures/bench-b2-write.png}
+\caption{B2 write+fsync latency, BEAMFS scheme=5 INODE\_UNIVERSAL
+versus \texttt{ext4} baseline. Boxplot of ten-run distribution at
+each percentile. Logarithmic y-axis.}
+\label{fig:b2-write}
+\end{figure}
+
+\paragraph{B3 INLINE read sanity, conformance fixture canary.}
+The canary block of the INLINE scheme (single 4\,KiB disk block
+holding 3{,}824 bytes user content) is read in a tight loop for
+five seconds per run, ten runs total, with \texttt{bs=512},
+\texttt{time\_based=1}. Approximately 38{,}000 reads per run yield
+\(\sim\)380{,}000 measurements total. The configuration measures
+hot-path read latency: after the first miss the folio is page
+cache resident, so subsequent reads exercise the BEAMFS
+\texttt{read\_folio} dispatch and the cache-hit return path.
+\cref{tab:b3-summary} gives the median.
+
+\begin{table}[h]
+\caption{B3 INLINE canary read latency, median of 10 runs
+(\(\sim\)38{,}000 reads each).}
+\label{tab:b3-summary}
+\centering
+\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+Metric & Value (ns) \\
+\midrule
+p50 median               &  23{,}424 \\
+p95 median               & 569{,}344 \\
+p99 median               & 626{,}688 \\
+mean (avg over 10 runs)  & 100{,}593 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The p50 of 23{,}424\,ns matches B1's BEAMFS scheme=5 p50 of
+24{,}832\,ns and \texttt{ext4}'s 24{,}832\,ns within sample
+variance: the INLINE \texttt{read\_folio} dispatch and the (no-op)
+RS decode add no measurable overhead on cache-hit reads. Over the
+\(\sim\)380{,}000 reads, zero RS correction events are recorded
+in \texttt{dmesg}, and the canary user-content SHA-256 remains
+\texttt{ced446d9...} unchanged. The fixture is stable; the RS
+decode runs but has nothing to correct, complementing the Stage 3
+result that the same RS path \emph{under} deliberate corruption
+recovers byte-perfect.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{figures/bench-b3-inline.png}
+\caption{B3 INLINE read sanity on the canary fixture
+(scheme=2 UNIVERSAL\_INLINE, hot path). Boxplot of ten-run
+distribution at each percentile. Logarithmic y-axis.}
+\label{fig:b3-inline}
+\end{figure}
+
+\subsection{Trade-off summary}
+
+BEAMFS v2 offers read-path performance parity with \texttt{ext4}
+on median and 95th percentile across both protection schemes
+tested, with a moderate p99 tail premium from RS journal lookup.
+On the write path, the INODE\_UNIVERSAL scheme carries a
+\(\sim\)8\(\times\) median latency penalty versus \texttt{ext4} due
+to RS encoding, partly offset by a tighter latency distribution
+favourable for deterministic workloads. The INLINE scheme is
+read-only at present (write path \texttt{-EOPNOTSUPP}); INLINE
+read latency is at parity with the other configurations, and the
+RS decode runs without measurable overhead when nothing requires
+correction.
+
+These results corroborate \cref{thm:soundness-v21} on a single
+direct-corruption event and characterize the performance envelope
+of the two implemented protection schemes. Saturation testing
+under multi-symbol-error perturbation (Theorem v2.2 active
+falsification) is part of the post-Zenodo continuation.

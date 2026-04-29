@@ -1,0 +1,131 @@
+\section{Introduction}\label{sec:intro}
+
+Filesystems intended for deployment in environments where persistent
+storage is exposed to electromagnetic perturbation must, beyond the
+crash-consistency guarantees of the FSCQ school~\cite{chen2015fscq},
+provide a recovery contract that is empirically defensible. The
+contract is empirically defensible only if (i) the perturbation
+family is realizable by a documented physical model, (ii) the
+recovery operator's behaviour under that family is stated
+formally, and (iii) the formal statement is exposed to falsification
+by a documented adversarial instrument. This report defends a
+filesystem under all three conditions, after having retracted an
+earlier statement that did not survive (iii).
+
+\subsection{From radiation-only to electromagnetic resilience}
+
+The v1 report of this lineage~\cite{desbrieres2026ftrfs} defended a
+recovery calculus under a radiation-only model: the perturbation
+family was the canonical single-event upset (SEU) and multi-bit
+upset (MBU) regime of cosmic-ray and alpha-particle physics. The
+soundness theorem (v1 Theorem IV.1) quantified over events whose
+per-subblock symbol error count did not exceed the Reed--Solomon
+correction capacity \(t = \lfloor (n-k)/2 \rfloor\).
+
+On 2026-04-28, the companion fault injection operator
+RadFI~\cite{desbrieres2026radfi} produced a counter-example: a
+controlled perturbation pattern, formally an instance of the
+operator's stated targeting algebra, that the v1 implementation
+failed to recover and that did not return fail-closed. The
+counter-example was not in violation of any hypothesis stated in
+v1 Theorem IV.1 read literally; rather, it exhibited that the
+hypothesis was insufficiently tight in two respects: the v1 model
+assumed exclusively stochastic SEU, whereas RadFI implemented an
+algebraically targeted perturbation, and the v1 implementation
+lacked an explicit saturation boundary signalling.
+
+The retraction is accepted in the Popperian
+sense~\cite{popper1959logic}: a theorem retracted by empirical
+falsification is the success state of the scientific method, not
+its failure mode. The proper response is not to discard the
+calculus but to enlarge the perturbation family covered by the
+hypothesis, restate the recovery contract, and re-expose the
+revised statement to falsification.
+
+This report carries out that revision. The perturbation family is
+restated as \emph{electromagnetic resilience} (EMR), comprising
+both Family\,A stochastic perturbations (the v1 SEU/MBU regime,
+preserved) and Family\,B adversarial perturbations (intentional
+electromagnetic interference, high-power microwave, electromagnetic
+pulse, treated under IEC\,61000-2-13 and
+61000-4-36~\cite{iec61000-2-13,iec61000-4-36,radasky2004iemi}).
+The recovery contract is split into two theorems: Theorem v2.1
+covers the recovery of states perturbed by an event whose
+per-subblock corruption is within the Reed--Solomon capacity;
+Theorem v2.2 covers the saturation regime, formally requiring that
+events exceeding the capacity yield fail-closed recovery with an
+auditable journal entry flagging the uncorrectable
+\((\text{block},\text{subblock})\) coordinates.
+
+\subsection{Position with respect to neighbouring work}
+
+BEAMFS v2 sits between three traditions. From the FTRFS
+lineage~\cite{fuchs2015ftrfs} it inherits the principle of total
+per-region Reed--Solomon protection and the operational scenario
+of a CubeSat-grade filesystem; the present report's INLINE scheme
+extends FTRFS by per-subblock granularity within each disk block,
+yielding 128 symbol errors of correction capacity per 4\,KiB block
+versus FTRFS's per-region granularity. From the formal
+filesystem-verification tradition~\cite{chen2015fscq,klein2009sel4,sigurbjarnarson2016yggdrasil}
+it inherits the discipline of stating a recovery contract as a
+typed theorem with explicit hypotheses on the state space and the
+operator; the present report does not claim machine-checked
+verification, but it does state every hypothesis in a form that a
+later mechanization can target. From the radiation hardness
+assurance tradition~\cite{nasa-hdbk-4002a,esa-eccs60,milstd882e}
+it inherits the convention of reporting recovery in terms of
+correction capacity expressed in symbols and of bounding the
+analysis by a saturation regime stated as a physical hypothesis.
+
+\subsection{Contributions}
+
+This report's contributions are:
+
+\begin{enumerate}
+\item An EMR threat model
+  (\cref{sec:emr-threat}) decomposing electromagnetic perturbations
+  into a stochastic Family\,A and an adversarial Family\,B, with
+  explicit citation of the canonical physical and standardization
+  literature for each family, and a transverse saturation boundary
+  defined in Reed--Solomon symbol-count terms.
+\item A revised filesystem state space and consistency relation
+  (\cref{sec:state}), preserving the v1 invariants
+  \textbf{I1}--\textbf{I5} on the layout and the recovery
+  operator. The v1 mathematical scaffolding is preserved; only the
+  perturbation family hypothesis is restated.
+\item Two replacement theorems
+  (\cref{sec:soundness}). \textbf{Theorem v2.1} states recovery
+  under bounded EMR perturbation, with the
+  termination/safety/coverage proof structure of v1 Theorem IV.1
+  retained. \textbf{Theorem v2.2} states saturation observability,
+  formally requiring that the recovery operator on a saturating
+  event emits an auditable uncorrectable-flagged journal entry.
+\item A three-tier descent from mathematics to algorithm to kernel
+  implementation (\cref{sec:m2c}), with a traceability table
+  pairing each operator step with the corresponding kernel
+  function in the BEAMFS implementation, including the explicit
+  INLINE read path, the autonomic in-place repair via
+  \texttt{mark\_buffer\_dirty} and \texttt{sync\_dirty\_buffer},
+  and the journal entry emission on uncorrectable saturation.
+\item Empirical corroboration (\cref{sec:empirical}) including a
+  byte-level disk corruption recovered byte-perfect by the INLINE
+  read path (Palier 3), and three benchmark suites (Palier 4)
+  reporting read cold latency, write+fsync latency, and INLINE
+  read on the conformance fixture canary block, all reproducible
+  from a tagged GPG-signed commit on a Yocto-built aarch64
+  research image.
+\end{enumerate}
+
+\subsection{What this report does not claim}
+
+This report does not claim machine-checked verification of the
+recovery operator: the proofs in
+\cref{sec:soundness,app:proof} are conventional pen-and-paper
+arguments. It does not claim a write path for the INLINE scheme:
+INLINE write is currently \texttt{-EOPNOTSUPP} and is part of the
+v2.x roadmap (\cref{sec:limitations}). It does not claim
+exhaustive coverage of all conceivable EMR events: Family\,B is
+parametrized by IEC standards but real-world adversarial waveform
+synthesis exceeds the present model's scope. Finally, this report
+explicitly does not republish the v1 soundness theorem; the
+present Theorems v2.1 and v2.2 supersede it.

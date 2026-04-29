@@ -1,0 +1,90 @@
+\section{Reproducibility}\label{sec:repro}
+
+All empirical results in this report are reproducible from the
+public repository \texttt{roastercode/beamfs} at tag
+\texttt{v0.4.0-palier4-validated}, commit
+\texttt{7c30934}~\cite{beamfs-impl}, GPG-signed by key
+\texttt{319A8EAA89C7538AA9550E8BC35EE212519E4857}.
+
+\paragraph{Build environment.}
+The build environment is a Yocto image
+(\texttt{hpc-arm64-research-beamfs}) targeting
+\texttt{qemu-system-aarch64} on a Cortex-A57 core, with kernel
+\texttt{linux-mainline} 7.0.1 (SRCREV
+\texttt{3cb1fb7a56d2fd8011f5282bc170c0d23dc1f4b5}). The image
+includes \texttt{fio}\,3.36, \texttt{trace-cmd}\,3.1.5, and
+\texttt{perf}\,7.0.1 for benchmarking and tracing. The host
+build is from \texttt{poky-hardened} 1.0 on a Gentoo Linux 2.18
+machine.
+
+\paragraph{Test image construction.}
+The Yocto recipes for the test image are held in the
+\texttt{roastercode/yocto-beamfs} repository (private, lockstep
+with the public \texttt{roastercode/beamfs} kernel sources). A
+public reproduction requires either reconstructing the recipes
+from the on-disk format specification (normative,
+\texttt{Documentation/format-v4.md}) and the kernel sources, and the kernel sources;
+or requesting access to the private recipes for academic
+reproduction. The maintainer commits to share the private recipes
+on request to qualified academic researchers under a light NDA,
+mirroring the policy applied to the companion RadFI methodology
+paper. An independent rebuild from public artefacts alone is
+feasible (the on-disk format is normatively specified and the
+kernel sources are public at the cited tag), at the cost of
+reconstructing the Yocto build environment from the standard
+\texttt{poky-hardened} reference distribution.
+
+\paragraph{Conformance fixture.}
+The INLINE scheme conformance fixture is the canary block. Its
+SHA-256 digests are normatively specified at
+\texttt{Documentation/format-v4.md}\,\S\,11.5:
+raw 4{,}096-byte disk block
+\texttt{\seqsplit{fb8a3b9e2704ce3fc11a0d0a4139d36c916cb5e7230acde8d2fa00ace739a91c}},
+3{,}824-byte user content gathered through the VFS alias
+\texttt{/canary}
+\texttt{\seqsplit{ced446d9bf5e6682a48e8782ce5ad33f575f08921451afaa127f26dc37515bab}}.
+Cross-platform reproducibility is verified between an x86\_64 GCC
+local build and an aarch64 cross-build, byte-identical.
+
+\paragraph{Benchmark raw data.}
+The raw \texttt{fio} JSON outputs (50 files, \(\sim\)346\,KiB
+total) are committed under
+\texttt{papers/2026-04-beamfs-v2/empirical/raw/}:
+\texttt{b1-\{inode,ext4\}-r\{1..10\}.json} for B1,
+\texttt{b2-\{inode,ext4\}-r\{1..10\}.json} for B2,
+\texttt{b3-inline-r\{1..10\}.json} for B3. Re-run reproducibility
+is at the distribution level (median p50 within a few percent),
+not byte-identical, due to non-determinism in
+\texttt{qemu-system-aarch64} time-keeping.
+
+\paragraph{Figure generation.}
+The matplotlib script
+\texttt{papers/2026-04-beamfs-v2/figures/bench-plot.py}
+regenerates Figs.~\ref{fig:b1-read}--\ref{fig:b3-inline} from the
+raw JSON. The script requires Python 3.13 and matplotlib 3.10 or
+later, and is invoked as \texttt{python3.13
+papers/2026-04-beamfs-v2/figures/bench-plot.py}. The script reads
+from \texttt{empirical/raw/} and writes to the same
+\texttt{figures/} directory.
+
+\paragraph{LOC audit.}
+The 2{,}198 LOC count of \cref{tab:m2c-trace} is reproducible by
+the awk pipeline of
+\texttt{empirical/palier4-loc.md}, applied to the \texttt{*.c}
+and \texttt{*.h} files at the repository root.
+
+\paragraph{Companion paper artefacts.}
+The companion paper RadFI v1~\cite{desbrieres2026radfi} is held
+in the same repository at
+\texttt{papers/2026-04-radfi-v1/paper.md}, built via
+\texttt{pandoc} + \texttt{lualatex} per the
+\texttt{Makefile} provided. RadFI's reference implementation is
+held in \texttt{roastercode/radfi} (private, pending peer review
+of the methodology paper).
+
+\paragraph{License and distribution.}
+Source code is under the GPL-2.0 license. The present technical
+report is under CC-BY-4.0. Citation by tag and commit hash is
+preferred over DOI for the implementation, as commit hashes are
+strict identifiers of the audited state; DOI references for the
+present report are added at Zenodo upload time.

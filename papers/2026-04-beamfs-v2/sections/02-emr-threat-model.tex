@@ -1,0 +1,148 @@
+\section{Electromagnetic Resilience Threat Model}\label{sec:emr-threat}
+
+The threat model of this report is stated in electromagnetic terms.
+Persistent storage is exposed to perturbations whose proximate cause
+is electromagnetic energy deposition in the digital substrate. The
+model partitions the cause space into two families and defines a
+transverse saturation boundary that constrains the hypothesis of the
+recovery soundness theorem.
+
+\subsection{Family A: stochastic electromagnetic perturbations}
+
+Family A encompasses perturbations whose statistics are governed by
+non-adversarial physical processes: galactic and solar cosmic-ray
+ions, terrestrial neutron and alpha background, and thermal noise
+contributing to bit-error rates near design margins. The canonical
+treatment for digital microelectronics
+is~\cite{dodd2003,baumann2005}, with cross-section measurement and
+upset rate calculation conventions
+in~\cite{petersen1996,heinrich1977}, and the avionics-environment
+specification in~\cite{normand1996}. JEDEC~JESD89A~\cite{jedec89a}
+codifies measurement and reporting requirements for terrestrial
+soft errors. NAND flash storage substrates are governed by their
+own family-A statistics including read disturb, retention, and
+program-erase cycling effects~\cite{cai2017nand,mielke2017}.
+
+The Family A perturbation operator acts pointwise on each digital
+device exposed to the perturbation field. The relevant scalar
+parameter is the upset cross-section \(\sigma\), measured in cm\(^2\)
+per device, integrated over a fluence \(\Phi\), measured in
+particles per cm\(^2\). The expected number of upsets per device
+over an exposure interval is the product \(\sigma \cdot \Phi\). At
+device, board, and system level, the per-device statistics
+aggregate without correlation; this independence assumption
+underpins the SEU rate-calculation method of~\cite{heinrich1977}.
+
+For a filesystem state \(s\) and a Family A event \(e\), the
+relevant action is bit-level: each upset toggles one bit at a
+position determined by the energy deposition site, with
+multiplicity governed by the device's MBU pattern. For modern
+high-density CMOS substrates, MBU widths of two to eight bits
+within a single physical word are reported routinely under
+representative test
+beams~\cite{baumann2005,jedec89a,cai2017nand,mielke2017}.
+
+\subsection{Family B: adversarial electromagnetic perturbations}
+
+Family B encompasses perturbations whose source is intentional and
+whose waveform parameters are chosen to maximize coupling to the
+target. Three regimes are treated, in order of increasing peak
+intensity: intentional electromagnetic interference (IEMI),
+high-power microwave (HPM), and electromagnetic pulse (EMP). The
+foundational treatment is~\cite{radasky2004iemi}; the
+classification methodology of facilities is
+in~\cite{mansson2008iemi}; the standardization framework is
+IEC\,61000-2-13 (environment)~\cite{iec61000-2-13} and
+61000-4-36 (test methods)~\cite{iec61000-4-36}.
+
+Family B differs from Family A in three respects relevant to
+filesystem design: the perturbation field is correlated across
+devices on the same board (because the irradiating waveform is
+coherent over the target's spatial extent), the perturbation
+timing is choosable by the adversary (so the worst case is a
+perturbation timed to coincide with a critical kernel
+operation), and the per-event symbol-error count can be driven
+arbitrarily high within the propagation envelope of the
+adversarial waveform.
+
+For a filesystem state \(s\) and a Family B event \(e\), the
+filesystem cannot rely on per-region independence of the upset
+distribution as it can in Family A. The recovery operator must
+therefore treat each region's correction capacity as the
+fundamental design unit, and the threat model must explicitly
+acknowledge that an adversarial event with sufficient field
+strength saturates the correction capacity of any finite-width
+code.
+
+The deployment context for Family B is principally civilian and
+defense critical infrastructure: this report's design target is
+\emph{Op\'erateurs d'Importance Vitale} (OIV) under the French
+critical-infrastructure framework, and the EU NIS2 directive's
+essential and important entities~\cite{nis2}. The standardization
+context for these deployments includes
+MIL-STD-882E~\cite{milstd882e} for U.S. defense system safety,
+NASA-HDBK-4002A~\cite{nasa-hdbk-4002a} for in-space charging
+mitigation, and the ESA ECSS-Q-ST-60-15C~\cite{esa-eccs60} for
+European space radiation hardness assurance.
+
+\subsection{Saturation boundary}
+
+The saturation boundary is the transverse threshold at which the
+per-subblock symbol-error count of any single Reed--Solomon
+subblock exceeds the code's correction capacity. For
+\(\mathrm{RS}(n, k)\) with \(n - k\) parity symbols, the
+correction capacity is \(t = \lfloor (n-k)/2 \rfloor\). The BEAMFS v2
+\textsc{universal\_inline} scheme uses \(\mathrm{RS}(255, 239)\) with \(n - k = 16\)
+parity symbols, yielding \(t = 8\) symbol errors per
+subblock~\cite{kernelrslib}.
+
+The saturation boundary is stated as a hypothesis on the
+perturbation family, not as a property of the operator. A
+filesystem cannot, by any algorithm, recover a perturbation that
+saturates its code; the appropriate response is fail-closed with
+auditable signalling. Theorem v2.1 (\cref{sec:soundness}) covers
+the regime within the boundary; Theorem v2.2 covers the regime at
+or beyond the boundary, and formally requires the recovery
+operator to emit a journal entry flagged with
+\texttt{BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE} at the affected
+\((\text{block}, \text{subblock})\) coordinates before returning
+fail-closed.
+
+\subsection{Out of scope}
+
+The following classes of perturbation are explicitly outside the
+present model. Single-event functional interrupts (SEFI) on the
+storage controller firmware are not treated; recovery requires a
+controller reset cycle which is below the filesystem layer.
+Single-event latch-up (SEL) on the host system is not treated; it
+is a system-level fault requiring power cycling. Cumulative total
+ionizing dose (TID) and displacement damage (DDD) effects are not
+filesystem perturbations in the SEE sense and are governed by
+device qualification, not by recovery operators. Side-channel
+electromagnetic emanation (TEMPEST and similar) is a
+confidentiality concern, not an integrity concern, and is outside
+the recovery calculus' scope. Software supply-chain compromise of
+the recovery operator's binary is a separate threat model addressed
+by signed release artefacts and reproducible builds, not by the
+recovery contract.
+
+\subsection{Companion falsification instrument}
+
+The empirical instrument used to falsify v1 Theorem IV.1 and to
+test v2 candidates is RadFI~\cite{desbrieres2026radfi}, an
+algebraic fault injection operator implemented as a Linux kernel
+module. RadFI exposes a parametrized perturbation operator
+\(\varepsilon\) acting on the same state space \(\mathcal{S}\) as
+the BEAMFS recovery operator \(\mathcal{G}\), with stated
+faithfulness properties (RadFI Theorem IV.1, see~\cite{desbrieres2026radfi}).
+For the purposes of the present report, RadFI is used in two
+modalities. First, it produced the counter-example that retracted
+v1 Theorem IV.1, motivating the present revision. Second, it is
+the methodology under which any future revision of the present
+theorems must itself be exposed to falsification. The present
+report's empirical corroboration of v2 (\cref{sec:empirical}) uses
+\texttt{dd}-based byte-level disk corruption as a direct
+substitute for RadFI's bio-layer perturbation, equivalent under
+the SEU model and reproducible without requiring the RadFI
+instrument; the kernel-level RadFI hook diagnostic is deferred to
+work post-Zenodo.

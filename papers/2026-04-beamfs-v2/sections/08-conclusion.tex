@@ -1,0 +1,48 @@
+\section{Conclusion}\label{sec:conclusion}
+
+We have presented BEAMFS v2, a Linux filesystem with an
+electromagnetic-resilience recovery contract stated as two
+theorems: \cref{thm:soundness-v21} for recovery under bounded
+EMR perturbation, and \cref{thm:saturation-v22} for saturation
+observability through an auditable
+\texttt{UNCORRECTABLE}-flagged journal entry. The contract was
+stated after the previous version of this calculus was empirically
+falsified by the companion RadFI instrument and was retracted
+publicly. The revision retains the v1 mathematical scaffolding
+(state space, layout, consistency relation, invariants
+\textbf{I1}--\textbf{I5}) and replaces the perturbation family
+hypothesis with the EMR threat model of \cref{sec:emr-threat},
+covering both stochastic (Family A) and adversarial (Family B)
+electromagnetic perturbations bounded by a transverse saturation
+boundary at the Reed--Solomon per-subblock correction capacity.
+
+The implementation is 2{,}198 lines of C, 44\% of the 5{,}000-line
+audit budget targeted for safety-critical certification regimes,
+publicly released under
+\texttt{roastercode/beamfs}~\cite{beamfs-impl} with GPG-signed
+tagged commits. The empirical section reports byte-level disk
+corruption recovered byte-perfect by the INLINE read path with
+autonomic in-place repair (\cref{ssec:stage3}), read-path
+performance parity with \texttt{ext4} on median and 95th
+percentile (\cref{ssec:stage4}), and a stable conformance
+fixture canary block over \(\sim\)380{,}000 cache-hit reads with
+zero spurious RS correction events.
+
+The present report is, deliberately and explicitly, a
+falsifiable scientific statement. The recovery contract is
+testable, the implementation is auditable, and any subsequent
+counter-example produced by RadFI or an equivalent fault-injection
+methodology will lead to a v3 retraction-and-revision cycle
+(where v3 designates the next major revision following the
+present v2 of this calculus) rather than to a defensive patch. This is the methodological
+position we believe a filesystem intended for critical
+infrastructure deployment must adopt.
+
+The immediate continuation tasks, in approximate order, are: the
+INLINE write path, an active saturation falsification protocol
+for \cref{thm:saturation-v22}, the diagnostic of the deferred
+RadFI kprobe interaction, an \texttt{xfstests} subset, and
+preparation for \texttt{linux-fsdevel} submission. The longer
+horizon includes the v3 verified-compilation work and the
+extension of the EMR threat model with more targeted Family B
+adversarial waveforms.

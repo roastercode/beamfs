@@ -1,0 +1,151 @@
+\section{From Mathematics to Code}\label{sec:m2c}
+
+The implementation realizing the recovery operator
+\(\mathcal{G}\) is a Linux kernel module of 2{,}198 lines of
+C~\cite{beamfs-impl}, plus a userspace formatter
+\texttt{mkfs.beamfs} not described here. We present a three-tier
+descent: the operator at the mathematical level
+(\cref{ssec:m2c-tier1}), the algorithmic decomposition into kernel
+read and write paths (\cref{ssec:m2c-tier2}), and the kernel
+implementation with file/function-level traceability
+(\cref{ssec:m2c-tier3}).
+
+\subsection{Tier 1: operator-level definition}\label{ssec:m2c-tier1}
+
+\begin{definition}[Recovery operator \(\mathcal{G}\)]\label{def:G}
+The BEAMFS v2 recovery operator \(\mathcal{G} : \mathcal{S} \to \mathcal{S} \cup \{\bot\}\)
+is defined for a state \(s = (s_V, s_P)\) by the following ordered
+steps:
+\begin{enumerate}
+\item \textbf{Decode.} For each region \(R\) of \(\Lambda_P\)
+  flagged inconsistent by I1's CRC, apply RS decode subblock by
+  subblock. If a subblock decode returns a residual syndrome
+  (decode failure beyond capacity), proceed to step 5.
+  Otherwise, replace the in-memory copy of \(R\) with the
+  decoded content.
+\item \textbf{Repair.} If any subblock was corrected in step 1,
+  schedule the corrected disk block for write-back via
+  \texttt{mark\_buffer\_dirty} and \texttt{sync\_dirty\_buffer},
+  realizing autonomic in-place repair on the persistent layer.
+\item \textbf{Coherence.} For each region \(R\) of \(\Lambda\)
+  with both volatile and persistent representations, verify the
+  canonical serialization equality of \cref{def:consistent}
+  clause~3. If not equal, take \(s_P|_R\) as authoritative
+  and re-derive \(s_V|_R\).
+\item \textbf{Sentinel verification.} For each sentinel of
+  \cref{def:consistent} clause~4, verify the canonical value. If
+  not, return \(\bot\) (I5).
+\item \textbf{Saturation handling.} If step 1 detected a residual
+  syndrome on any subblock, emit a journal entry by calling
+  \texttt{beamfs\_log\_rs\_event} with
+  \texttt{positions = NULL}, \texttt{n\_positions = 0}, and
+  \texttt{flags |= BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE}, with
+  the affected \((\text{block}, \text{subblock})\) coordinates.
+  Commit the journal entry to persistent storage. Return \(\bot\).
+\item \textbf{Return.} Return the corrected state \(s'\). The
+  state satisfies \(s' \models\) by I1--I4.
+\end{enumerate}
+\end{definition}
+
+The operator is iterated by the calling read path until either a
+consistent state is reached or \(\bot\) is returned. By \cref{lem:descent} (\cref{app:proof}), the iteration count is
+bounded by \(|\Lambda|\).
+
+\subsection{Tier 2: algorithmic decomposition}\label{ssec:m2c-tier2}
+
+The read path of the INLINE scheme implements steps 1, 2, 5, and 6
+of \cref{def:G}. The kernel-level entry point is the \texttt{aops}
+member \texttt{read\_folio}, dispatched on the
+per-inode \texttt{i\_op} structure when the inode's
+\texttt{s\_data\_protection\_scheme} equals
+\textsc{universal\_inline}. The dispatch is performed at inode read-in time in
+\texttt{beamfs\_iget}~\cite{beamfs-impl} (using \texttt{iget\_locked}
+for VFS inode cache integration) for existing inodes and in
+\texttt{beamfs\_new\_inode} for new inodes; the dispatch
+structure assigns \texttt{beamfs\_inline\_aops} (containing the
+\texttt{beamfs\_inline\_read\_folio} pointer) and
+\texttt{beamfs\_inline\_file\_operations} to the inode and calls
+\texttt{mapping\_set\_folio\_order\_range(0, 0)} restricting to
+single-page folios (the only order BEAMFS v2 supports), in
+conformance with current Linux folio handling guidelines.
+
+The write path of the INLINE scheme is currently
+\texttt{-EOPNOTSUPP} at \texttt{write\_begin}, \texttt{write\_end},
+and \texttt{writepages}, returning the standard error to the VFS
+layer. The full write path realization (steps 1--6 on the write
+side, including new-block allocation, RS encoding, and journal
+entry on success) is part of the v2.x roadmap
+(\cref{sec:limitations}). The INODE\_UNIVERSAL scheme
+(\texttt{s\_data\_protection\_scheme} = \textsc{inode\_universal})
+implements the full write path and is the operational scheme for
+the empirical write benchmark of \cref{sec:empirical}.
+
+\subsection{Tier 3: kernel implementation}\label{ssec:m2c-tier3}
+
+The kernel implementation is partitioned across nine source files
+totalling 2{,}198 lines of C. \cref{tab:m2c-trace} lists the
+file/function realizing each step of \cref{def:G}, together with
+the lines-of-code count per file as audited by the LOC method of
+\texttt{empirical/palier4-loc.md}~\cite{beamfs-impl}.
+
+\begin{table*}[t]
+\caption{Traceability between operator definition and kernel
+implementation. LOC excludes block comments, line comments, and
+blank lines. Tag: \texttt{v0.4.0-palier4-validated}.}
+\label{tab:m2c-trace}
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Step (\cref{def:G}) & Kernel function & File (LOC) \\
+\midrule
+1. Decode               & \texttt{beamfs\_inline\_read\_folio}    & \texttt{file\_inline.c} (212) \\
+2. Repair (writeback)   & \texttt{mark\_buffer\_dirty},           & \texttt{file\_inline.c} (212) \\
+                        & \texttt{sync\_dirty\_buffer}            & \\
+3. Coherence            & \texttt{beamfs\_iget},                  & \texttt{inode.c} (117) \\
+                        & \texttt{beamfs\_fill\_super}            & \texttt{super.c} (479) \\
+4. Sentinel verify      & \texttt{beamfs\_validate\_format}       & \texttt{super.c} (479) \\
+5. Saturation log       & \texttt{beamfs\_log\_rs\_event}         & \texttt{super.c} (479) \\
+6. Return               & \texttt{folio\_end\_read}               & \texttt{file\_inline.c} (212) \\
+\midrule
+\multicolumn{2}{l}{Allocator (bitmap, RS-protected)} & \texttt{alloc.c} (274) \\
+\multicolumn{2}{l}{EDAC integration}                 & \texttt{edac.c} (176) \\
+\multicolumn{2}{l}{Directory entries}                & \texttt{dir.c} (107) \\
+\multicolumn{2}{l}{Path resolution}                  & \texttt{namei.c} (420) \\
+\multicolumn{2}{l}{Generic file ops (non-INLINE)}    & \texttt{file.c} (208) \\
+\multicolumn{2}{l}{Header definitions}               & \texttt{beamfs.h} (205) \\
+\midrule
+\multicolumn{2}{l}{\textbf{Total kernel module}}     & \textbf{2{,}198 LOC} \\
+\multicolumn{2}{l}{\textbf{Audit budget}}            & \textbf{5{,}000 LOC} \\
+\multicolumn{2}{l}{\textbf{Utilization}}             & \textbf{44\%} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The kernel-level RS decode is delegated to the in-tree
+\texttt{lib/reed\_solomon}~\cite{kernelrslib}: BEAMFS does not
+ship its own decoder. Memory allocations on the read path use
+\texttt{GFP\_KERNEL} (process context only); writeback paths in
+the INODE\_UNIVERSAL scheme use \texttt{GFP\_NOFS} to prevent
+filesystem reentrancy under memory pressure. The \texttt{beamfs\_inline\_read\_folio}
+function calls \texttt{decode\_rs8} once per subblock, sixteen
+times per disk block, on the \(\mathrm{GF}(2^8)\) RS(255,239)
+parameters declared by the layout. The autonomic in-place repair
+sequence (\texttt{mark\_buffer\_dirty} then
+\texttt{sync\_dirty\_buffer}) commits the corrected block to the
+storage substrate synchronously before \texttt{folio\_end\_read}
+returns; this is the empirical mechanism observed in Palier 3
+(\cref{sec:empirical}) where the post-correction disk SHA-256
+matches the pre-corruption disk SHA-256.
+
+\paragraph{Linux kernel review compliance.}
+The implementation follows the Linux kernel review guidelines that
+emerged from the FTRFS RFC thread on linux-fsdevel~\cite{ftrfs-rfc-thread}: no
+\texttt{BUG\_ON} on the data path (warn and \texttt{-EIO}), strict
+\texttt{-EIO} on uncorrectable errors with the journal entry
+emitted before the error returns,
+\texttt{mapping\_set\_folio\_order\_range(0, 0)} for explicit
+single-page folio scope, \texttt{folio\_end\_read(folio, true)} on
+success rather than the deprecated \texttt{folio\_set\_error}, and no internal symbol names
+aliasing legacy ext2 conventions. \texttt{checkpatch.pl} is run without warnings on every
+modified file before each commit.

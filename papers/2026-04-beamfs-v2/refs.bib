@@ -1,0 +1,230 @@
+% =====================================================================
+% BEAMFS v2 -- bibliography
+% =====================================================================
+
+% --- Sister publication: FTRFS lineage paper (BEAMFS v1 retraction notice) ---
+@misc{desbrieres2026ftrfs,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{FTRFS}: {B}ringing Radiation-Robust Filesystem Principles to Contemporary {L}inux},
+  year   = 2026, month = apr,
+  note   = {Technical Report v1 (lineage paper, archived as historical record)},
+  doi    = {10.5281/zenodo.19824442},
+  url    = {https://doi.org/10.5281/zenodo.19824442},
+}
+
+@misc{desbrieres2026radfi,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{RadFI} v1 -- {Methodology Paper}: {A}n Algebraic Fault Injection Operator
+            for Empirical Filesystem Resilience Validation},
+  year   = 2026, month = apr,
+  note   = {Companion methodology paper. \texttt{roastercode/beamfs} repository,
+            tag \texttt{v0.3.0-radfi-paper-public}, commit \texttt{eff67b7}.
+            Reference implementation source code held in private repository
+            \texttt{roastercode/radfi} pending peer review.},
+  url    = {https://github.com/roastercode/beamfs/tree/v0.3.0-radfi-paper-public/papers/2026-04-radfi-v1},
+}
+
+@inproceedings{fuchs2015ftrfs,
+  author = {Christian Fuchs and Daniel Langer and Carsten Trinitis},
+  title  = {{FTRFS}: {A} fault-tolerant radiation-robust filesystem for space applications},
+  booktitle = {Architecture of Computing Systems (ARCS)},
+  publisher = {Springer}, address = {Porto}, year = 2015,
+}
+
+% --- SEE physics: foundational ---
+@article{heinrich1977,
+  author = {W. Heinrich},
+  title  = {Calculation of cosmic ray induced single event upset rates},
+  journal = {Radiation Effects},
+  volume = 34, pages = {143--148}, year = 1977,
+}
+
+@article{petersen1996,
+  author = {E. L. Petersen},
+  title  = {Cross section measurements and upset rate calculations},
+  journal = {IEEE Transactions on Nuclear Science},
+  volume = 43, number = 6, pages = {2805--2813}, year = 1996,
+  doi = {10.1109/23.556870},
+}
+
+@article{dodd2003,
+  author = {P. E. Dodd and L. W. Massengill},
+  title  = {Basic mechanisms and modeling of single-event upset in digital microelectronics},
+  journal = {IEEE Transactions on Nuclear Science},
+  volume = 50, number = 3, pages = {583--602}, year = 2003,
+  doi = {10.1109/TNS.2003.813129},
+}
+
+@article{baumann2005,
+  author = {R. C. Baumann},
+  title  = {Radiation-induced soft errors in advanced semiconductor technologies},
+  journal = {IEEE Transactions on Device and Materials Reliability},
+  volume = 5, number = 3, pages = {305--316}, year = 2005,
+  doi = {10.1109/TDMR.2005.853449},
+}
+
+@article{normand1996,
+  author = {E. Normand},
+  title  = {Single-event effects in avionics},
+  journal = {IEEE Transactions on Nuclear Science},
+  volume = 43, number = 2, pages = {461--474}, year = 1996,
+  doi = {10.1109/23.490893},
+}
+
+% --- IEMI, HPM, EMP physics and standards ---
+@article{radasky2004iemi,
+  author = {William A. Radasky and Carl E. Baum and Manuel W. Wik},
+  title  = {Introduction to the special issue on high-power electromagnetics ({HPEM})
+            and intentional electromagnetic interference ({IEMI})},
+  journal = {IEEE Transactions on Electromagnetic Compatibility},
+  volume = 46, number = 3, pages = {314--321}, year = 2004,
+  doi = {10.1109/TEMC.2004.831899},
+}
+
+@misc{iec61000-2-13,
+  author = {{International Electrotechnical Commission}},
+  title  = {{IEC 61000-2-13}: Electromagnetic compatibility ({EMC}) --
+            Part 2-13: Environment -- High-power electromagnetic ({HPEM})
+            environments -- Radiated and conducted},
+  year   = 2005,
+}
+
+@misc{iec61000-4-36,
+  author = {{International Electrotechnical Commission}},
+  title  = {{IEC 61000-4-36}: Electromagnetic compatibility ({EMC}) --
+            Part 4-36: Testing and measurement techniques --
+            {IEMI} immunity test methods for equipment and systems},
+  year   = 2014,
+}
+
+@article{mansson2008iemi,
+  author = {Daniel M{\aa}nsson and Rajeev Thottappillil and Mats B{\"a}ckstr{\"o}m},
+  title  = {Methodology for classifying facilities with respect to intentional {EMI}},
+  journal = {IEEE Transactions on Electromagnetic Compatibility},
+  volume = 51, number = 1, pages = {46--52}, year = 2009,
+  doi = {10.1109/TEMC.2008.2008906},
+}
+
+% --- Standards (avionic, space, defense) ---
+@misc{jedec89a,
+  author = {{JEDEC Solid State Technology Association}},
+  title  = {{JESD89A}: {M}easurement and Reporting of Alpha Particle and
+            Terrestrial Cosmic Ray-Induced Soft Errors in Semiconductor Devices},
+  year   = 2006, month = oct,
+}
+
+@misc{nasa-hdbk-4002a,
+  author = {{NASA}},
+  title  = {{NASA-HDBK-4002A}: {M}itigating In-Space Charging Effects -- {A} Guideline},
+  year   = 2011, month = mar,
+}
+
+@misc{esa-eccs60,
+  author = {{European Space Agency}},
+  title  = {{ECSS-Q-ST-60-15C}: {S}pace Product Assurance --
+            Radiation Hardness Assurance for {EEE} Components},
+  year   = 2012,
+}
+
+@misc{milstd882e,
+  author = {{U.S. Department of Defense}},
+  title  = {{MIL-STD-882E}: {S}ystem Safety Standard Practice},
+  year   = 2012, month = may,
+}
+
+@misc{nis2,
+  author = {{European Parliament and Council}},
+  title  = {Directive ({EU}) 2022/2555 ({NIS2}): Measures for a high common level
+            of cybersecurity across the {Union}},
+  year   = 2022, month = dec,
+}
+
+% --- NAND flash physics ---
+@article{cai2017nand,
+  author = {Yu Cai and Saugata Ghose and Erich F. Haratsch and
+            Yixin Luo and Onur Mutlu},
+  title  = {Error Characterization, Mitigation, and Recovery in
+            Flash-Memory-Based Solid-State Drives},
+  journal = {Proceedings of the IEEE},
+  volume = 105, number = 9, pages = {1666--1704}, year = 2017,
+  doi = {10.1109/JPROC.2017.2713127},
+}
+
+@article{mielke2017,
+  author = {Neal R. Mielke and Robert E. Frickey and Ivan Kalastirsky and
+            Mike Quan and Dmitri Ustinov and Venkatesh J. Vasudevan},
+  title  = {Reliability of Solid-State Drives Based on {NAND} Flash Memory},
+  journal = {Proceedings of the IEEE},
+  volume = 105, number = 9, pages = {1725--1750}, year = 2017,
+  doi = {10.1109/JPROC.2017.2725738},
+}
+
+% --- Formal verification ---
+@inproceedings{chen2015fscq,
+  author = {Haogang Chen and Daniel Ziegler and Tej Chajed and
+            Adam Chlipala and M. Frans Kaashoek and Nickolai Zeldovich},
+  title  = {Using {C}rash {H}oare {L}ogic for Certifying the {FSCQ} File System},
+  booktitle = {Proc. 25th Symp. Operating Systems Principles ({SOSP})},
+  publisher = {ACM}, year = 2015,
+  doi = {10.1145/2815400.2815402},
+}
+
+@article{klein2009sel4,
+  author = {Gerwin Klein and others},
+  title  = {{seL4}: {F}ormal Verification of an {OS} Kernel},
+  journal = {Proc. 22nd ACM SIGOPS Symp. Operating Systems Principles ({SOSP})},
+  pages  = {207--220}, year = 2009,
+  doi = {10.1145/1629575.1629596},
+}
+
+@inproceedings{sigurbjarnarson2016yggdrasil,
+  author = {Helgi Sigurbjarnarson and James Bornholt and Emina Torlak and
+            Xi Wang},
+  title  = {Push-Button Verification of File Systems via Crash Refinement},
+  booktitle = {12th {USENIX} Symp. Operating Systems Design and Implementation ({OSDI})},
+  year   = 2016,
+}
+
+% --- Linux kernel facilities ---
+@misc{kernelrslib,
+  author = {{Linux kernel contributors}},
+  title  = {{lib/reed\_solomon}: {R}eed-{S}olomon error correction library},
+  howpublished = {Linux kernel source tree, \texttt{lib/reed\_solomon/}},
+  year   = 2026,
+  url    = {https://www.kernel.org/},
+}
+
+% --- Falsificationism ---
+@book{popper1959logic,
+  author = {Karl R. Popper},
+  title  = {The Logic of Scientific Discovery},
+  publisher = {Hutchinson},
+  address = {London}, year = 1959,
+}
+
+% --- BEAMFS v2 implementation reference ---
+@misc{beamfs-impl,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{BEAMFS} v2 reference implementation},
+  howpublished = {\texttt{roastercode/beamfs}, tag \texttt{v0.4.0-palier4-validated},
+                  commit \texttt{7c30934}},
+  year   = 2026, month = apr,
+  url    = {https://github.com/roastercode/beamfs},
+}
+
+@misc{ftrfs-rfc-thread,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{FTRFS} {RFC} thread on linux-fsdevel},
+  howpublished = {Public archive, lore.kernel.org},
+  year   = 2026, month = apr,
+  url    = {https://lore.kernel.org/linux-fsdevel/20260414120726.5713-1-aurelien@hackers.camp/T/},
+}
+
+% --- Coding theory canonical reference ---
+@book{macwilliams1977,
+  author    = {F. J. MacWilliams and N. J. A. Sloane},
+  title     = {The Theory of Error-Correcting Codes},
+  publisher = {North-Holland},
+  address   = {Amsterdam},
+  year      = 1977,
+}
