@@ -47,4 +47,9 @@ Thumbs.db
 .*.o.cmd
 .*.ko.cmd
 .*.mod.cmd
-context/
+# === RECADRAGE LINKAGE — DO NOT REMOVE ===
+# Claude must read context/context-recadrage.md FIRST in any new session.
+# This file is the operational contract for Claude on the BEAMFS project.
+# Versioned on roastercode/beamfs-devel (private) only, never on public.
+context/*
+!context/context-recadrage.md
