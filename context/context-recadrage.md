@@ -276,7 +276,8 @@ gh repo view <owner>/<repo> --json name,visibility
 git push <remote-name> <branch>
 ```
 
-**Conventions à appliquer sans exception sur les repos d'Aurélien :**
+**Conventions à appliquer sans exception sur les repos d'Aurélien**
+(état vérifié 2026-04-30 22:50 via `gh repo list roastercode`) :
 
 - `roastercode/beamfs` est PUBLIC ; `origin` y pointe ; n'y push QUE
   ce qui est destiné public (main code, README, docs publiques).
@@ -284,14 +285,24 @@ git push <remote-name> <branch>
   pointe ; y push tout ce qui est `context/`, `papers/*-findings/`,
   drafts pre-publication, et toute branche de travail (`devel`, autres
   topic branches).
-- `roastercode/yocto-beamfs` est PUBLIC ; pas de remote privé associé ;
-  ne jamais y commit de fichiers `context/` ni `papers/*-findings/`
-  (les gitignorer en amont).
-- `roastercode/beamfs-bench` est PRIVATE ; à créer avec `gh repo create
-  --private` ; outillage interne, jamais public sans review.
-- `roastercode/radfi` est PRIVATE ; convention identique.
-- Tous les autres repos `roastercode/*` (yocto-hardened, etc.) sont
-  PUBLIC sauf indication contraire dans ce fichier.
+- `roastercode/yocto-beamfs` est PRIVATE (lab layer interne, pas le
+  composant public). Pas de remote privé séparé puisque le repo est
+  déjà privé ; mais malgré ça, ne pas y commit de fichiers `context/`
+  ni `papers/*-findings/` (les gitignorer en amont) — l'idée est que
+  même un repo privé peut être ouvert plus tard, donc on garde la
+  séparation des couches.
+- `roastercode/beamfs-bench` est PRIVATE ; outillage interne (créé
+  2026-04-30 via subtree split de yocto-beamfs/beamfs-bench/), jamais
+  public sans review.
+- `roastercode/radfi` est PRIVATE ; companion to beamfs-devel ; jamais
+  public avant la coordonée release avec beamfs.
+- `roastercode/yocto-hardened` est PUBLIC (archive de hardening Yocto
+  général, sans lien BEAMFS).
+- `roastercode/FTRFS` est PUBLIC (archive du paper FTRFS d'origine,
+  ancestor du lineage BEAMFS).
+- Avant tout push, **toujours vérifier `gh repo view <owner>/<repo>
+  --json visibility`** plutôt que de se fier à cette liste qui peut
+  dériver.
 
 **Conséquence opérationnelle pour Claude** : quand le user demande
 "push", ne JAMAIS utiliser `git push origin <branch>` aveuglément.
