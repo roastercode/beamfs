@@ -133,6 +133,87 @@ caching artifacts to investigate.
 
 This is the second result that needs deeper analysis.
 
+## Capabilities matrix vs tests actually run
+
+The benchmark above tested ONE specific resilience axis: bit-flip
+corruption of user data injected at the bio layer during write and read.
+Each filesystem has additional resilience mechanisms that this benchmark
+did NOT exercise. This section makes that scope explicit so the result
+is not over-generalized.
+
+### Native capabilities claimed by each FS
+
+| Capability                       | ext4               | ext3               | btrfs               | squashfs           | BEAMFS v2          |
+|----------------------------------|--------------------|--------------------|---------------------|--------------------|--------------------|
+| Journal metadata                 | yes (jbd2)         | yes (jbd)          | no (COW instead)    | n/a (RO)           | no (planned v4)    |
+| Journal data (data=journal)      | yes (option)       | yes (option)       | n/a                 | n/a                | no                 |
+| Crash consistency                | journal replay     | journal replay     | COW + redundant SBs | n/a                | partial (sync)     |
+| Checksum metadata                | yes (metadata_csum)| no                 | yes (CRC32 all)     | yes (MD5/CRC32)    | indirect (RS)      |
+| Checksum data                    | no                 | no                 | yes (CRC32 extent)  | yes (compr header) | indirect (RS)      |
+| FEC / error correction on data   | no                 | no                 | no (detect only)    | no (detect only)   | yes RS(255,239)    |
+| Auto-repair via redundancy       | no                 | no                 | yes if RAID1+/DUP   | no                 | yes via RS-decode  |
+| fsck offline                     | yes (e2fsck)       | yes (e2fsck)       | yes (btrfs check)   | no (RO immutable)  | no (planned v3)    |
+| Online scrub                     | no                 | no                 | yes (btrfs scrub)   | no                 | no                 |
+| Snapshots                        | no                 | no                 | yes (subvolumes)    | no                 | no                 |
+| Compression FS                   | no                 | no                 | yes (zstd/lzo)      | yes (xz/zstd/lzo)  | no                 |
+| Internal RAID                    | no                 | no                 | yes (RAID0/1/10/5/6)| no                 | no (planned)       |
+| Bit-flip data tolerance          | no                 | no                 | detect (EIO)        | partial            | correct (transparent) |
+| dm-verity compatibility          | yes                | yes                | yes                 | yes                | yes (in theory)    |
+
+### What this benchmark actually exercised
+
+| Test path                          | Mechanism triggered     | FS that claim it     | FS that were stressed   |
+|------------------------------------|-------------------------|----------------------|-------------------------|
+| Bit-flip on bio I/O write          | Journal data + replay   | ext4, ext3           | ext4, ext3              |
+| Bit-flip on bio I/O read           | Detection via checksum  | btrfs, squashfs      | btrfs, squashfs partial |
+| Bit-flip on bio I/O read           | Correction via FEC      | BEAMFS only          | BEAMFS                  |
+| Saturation 100% prob               | Recovery limit          | all                  | ext4 panic, btrfs detect+reject, BEAMFS recover |
+
+### Per-FS: what was tested vs what is claimed
+
+| FS       | Tested by this bench                | Native capabilities NOT tested here                                                |
+|----------|-------------------------------------|------------------------------------------------------------------------------------|
+| ext4     | bit-flip data write+read (3 KB)     | metadata_csum, journal-targeted corruption, e2fsck recovery, barriers, fsync ordering |
+| ext3     | same                                | journal replay isolated, fsck recovery, ordered/writeback/journal modes            |
+| btrfs    | CRC32 detection per extent          | scrub auto-repair (DUP/RAID1), snapshot rollback, send/receive, compression integrity, RAID modes |
+| squashfs | Compression-header detection (3 KB) | dm-verity stack, root signing, multi-block compressed integrity, large-file streaming |
+| BEAMFS   | RS-decode INLINE 3 KB single-block  | extent-multiblock RS (not implemented), metadata RS isolated, crash consistency, dirty-block bitmap repair |
+
+### Honest scope of the result
+
+Under the specific attack tested (single-bit-flip on user data at
+`submit_bio_noacct`, target_block=0 wildcard, file size 3 KB INLINE),
+BEAMFS is the only filesystem in the comparison that corrects
+transparently and survives 100% probability injection. ext4 panics
+at saturation, btrfs detects and rejects (returns `-EIO` to userspace),
+ext3 and squashfs RECOVERED verdicts at the highest probability are
+suspect (see Caveats below).
+
+This validates the BEAMFS RS(255,239) inline correction layer for the
+tested workload. It does NOT establish BEAMFS superiority on any of
+the other axes listed in the capabilities matrix. A fair filesystem
+comparison for a kernel mailing-list submission needs at least:
+
+1. Metadata-targeted attack (Test A in the next-steps roadmap):
+   superblock, inode bitmap, journal range; verdicts where ext4
+   without `metadata_csum` should fail, btrfs should detect, BEAMFS
+   should correct via the inode RS protection.
+2. Crash consistency (Test B): `virsh destroy` mid-write, restart,
+   remount, integrity check; ext4/ext3 journal replay should win,
+   btrfs COW atomic should win, BEAMFS losing the in-flight write
+   is acceptable but must be measured.
+3. Bit-rot offline (Test C): write data, unmount, `dd` random bytes
+   directly on partition, remount, read; only btrfs (CRC) and BEAMFS
+   (RS) should detect or correct, ext4/ext3 are expected to silently
+   serve corrupted data.
+4. fsck recovery post-FS_PANIC (Test D): reproduce ext4 FS_PANIC at
+   100% prob, run `e2fsck -y`, compare hashes; measure the actual
+   recovery rate of a corrupted journal.
+
+These four tests are the scope of the next iteration of the harness
+(Tir-multifs-{metadata,crash,bitrot,fsck}.sh) and will be added to
+the bench v2 report.
+
 ## Caveats and limitations (honesty)
 
 1. **3 KB file size**: imposed by BEAMFS v2 INLINE scope. Mainstream
