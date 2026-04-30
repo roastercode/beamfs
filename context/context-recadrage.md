@@ -169,4 +169,65 @@ reproductible). Casser ça serait inacceptable.
 
 ---
 
+## R13 — Topologie cluster : ne jamais supposer la passivité d'un node
+
+Le cluster BEAMFS n'est PAS un système où `beamfs-master` est actif
+et les 3 `beamfs-compute0X` sont passifs. La réalité observée
+(2026-04-30) :
+
+- Chaque compute a sa propre instance BEAMFS sur `/dev/vdb`
+  montée sur `/data`
+- Chaque compute tourne le kernel 7.0.3 avec `beamfs.ko`,
+  `reed_solomon.ko`, et `radfi.ko` chargeables
+- Les 3 computes sont des **cibles à part entière**, pas des
+  observateurs ; toute capture forensique réelle doit les couvrir
+
+**Le fait qu'un script legacy (`Tir-multifs.sh`) ne touche que master
+ne signifie PAS que la topologie réelle est mono-node.** Cela signifie
+que ce script-là est partiel (head-to-head FS comparison sur les 5
+USB pass-through, qui sont effectivement attachés à master uniquement).
+Le vrai test système (HPC, `Tir.sh`) est multi-node : master + 3
+computes, iobench parallèle, RadFI armable sur chaque node.
+
+**Avant toute capture forensique ou test d'attaque cluster, vérifier
+read-only sur les 4 nodes :**
+
+```bash
+for ip in 192.168.56.10 192.168.56.11 192.168.56.12 192.168.56.13; do
+  echo "--- $ip ---"
+  ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+      -i ~/.ssh/hpclab_admin hpcadmin@$ip \
+      'lsmod | grep -E "radfi|beamfs|reed_solomon"; echo ---; \
+       mount | grep beamfs; echo ---; uname -r'
+done
+```
+
+**Pièges connus à vérifier en pré-flight :**
+
+- `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED` après rebuild
+  d'image VM. Symptôme : ssh refuse de se connecter même avec key.
+  Fix : `ssh-keygen -R <ip>` AVANT toute commande sur ce node.
+  Sinon toutes les actions multi-node échouent silencieusement et
+  on conclut à tort que les computes sont inactifs.
+- known_hosts désynchronisé peut donner l'illusion qu'un compute
+  est down ou ne répond pas, alors qu'il tourne normalement.
+- `lsmod | grep beamfs` qui ne retourne que `beamfs 45056 1` (sans
+  `radfi`) signifie que RadFI n'est pas chargé sur ce compute mais
+  ne signifie pas qu'il ne peut pas l'être : `insmod
+  /lib/modules/$(uname -r)/updates/radfi.ko` à faire avant l'attaque.
+
+**Conséquence pour la conception des outils** :
+
+- `beamfs-bench multifs` reste master-only (les 5 USB sont sur master
+  uniquement, c'est par construction)
+- `beamfs-bench analyse` doit pouvoir capturer **les 4 nodes** quand
+  le scope l'exige (default = master pour `analyse` qui enveloppe
+  `multifs`, mais `analyse --scope=full` couvre les 4)
+- `beamfs-bench bench` (port futur de `Tir.sh`) sera multi-node par
+  conception (HPC iobench)
+- Toute future règle "single-node" doit être justifiée par une raison
+  hardware (USB pass-through), pas par fainéantise de capture
+
+---
+
 **Fin du contrat de recadrage. Lecture obligatoire en début de session.**
