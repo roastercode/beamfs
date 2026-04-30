@@ -1,4 +1,4 @@
-# BEAMFS Known Limitations
+# beamfs Known Limitations
 
 **Status**: factual record of unresolved limitations in the current
 codebase (HEAD at the time of this document's last revision).
@@ -11,7 +11,7 @@ contributors, certification auditors.
 ## 1. Purpose and scope
 
 This document records what is **known to be incomplete, suboptimal,
-or absent** in the current BEAMFS implementation, with the intent of
+or absent** in the current beamfs implementation, with the intent of
 giving an honest baseline for anyone reading the source tree.
 
 It is the operational counterpart to two normative documents:
@@ -189,7 +189,7 @@ These are deliberate scope restrictions of the current
 implementation, documented for clarity. They are not defects in the
 sense that the implementation matches its current specification;
 they are gaps relative to a fully POSIX-compliant general-purpose
-filesystem, which BEAMFS does not currently aim to be.
+filesystem, which beamfs does not currently aim to be.
 
 | Feature | Status |
 |---------|--------|
@@ -217,7 +217,7 @@ Four `generic/*` tests have been validated: 002, 010, 098, 257.
 completion (the test creates 200 sequential copies of approximately
 3 MiB). On the current 512 MiB QEMU test image this exceeds the
 available space and the test exits early. This is an environment
-limit, not a defect in BEAMFS handling of the test workload.
+limit, not a defect in beamfs handling of the test workload.
 
 A full xfstests Yocto recipe with a sized scratch image is not yet
 in place. The four passing tests are run manually with a documented
@@ -225,7 +225,7 @@ procedure (`Documentation/testing.md`).
 
 ### 5.2 Fault injection
 
-There is no automated fault-injection harness for BEAMFS in tree.
+There is no automated fault-injection harness for beamfs in tree.
 The only on-disk corruption testing performed to date has been
 manual (single bit flips in the bitmap block, observed mount-time
 correction). The threat model requires demonstrated coverage of:
@@ -243,7 +243,7 @@ threat model. None exists at the time of writing.
 
 ### 5.3 Fuzzing
 
-No targeted fuzzing has been performed on BEAMFS to date. Both
+No targeted fuzzing has been performed on beamfs to date. Both
 syzkaller (kernel module syscall surface) and afl++ (mkfs and
 mount-time parsing of corrupted images) are appropriate tools and
 are part of the planned offensive-security review stage.
@@ -277,7 +277,7 @@ default mainline configuration is used.
 ### 6.3 Cross-project file separation
 
 A directory at `/tmp/bug-bounty-stash/` on the development host
-contains kernel research files unrelated to BEAMFS. These were
+contains kernel research files unrelated to beamfs. These were
 adjacent during earlier development sessions but are out of scope
 for this project. Their relocation to a separate repository (e.g.,
 a local `bug-bounty-rdma` tree) is pending.
@@ -395,6 +395,6 @@ require this process and may be applied at any time.
 |----------|------|
 | `Documentation/threat-model.md` | Normative architectural constraints. Section 6 lists the constraints whose unmet status is recorded in section 2 of the present document. |
 | `Documentation/roadmap.md` | Forward-looking work plan. Items in the present document are not roadmap items; the roadmap may or may not address a given limitation. |
-| `Documentation/system-architecture.md` | Positioning of BEAMFS in the Linux storage stack and reference deployment scenarios. |
+| `Documentation/system-architecture.md` | Positioning of beamfs in the Linux storage stack and reference deployment scenarios. |
 | `Documentation/design.md` | On-disk format specification. Limitations of the current format are reflected here. |
 | `Documentation/testing.md` | Current test procedures and results. Section 5 of the present document complements `testing.md` with the test coverage gaps. |

@@ -1,8 +1,8 @@
-# BEAMFS On-Disk Format Specification
+# beamfs On-Disk Format Specification
 
 ## Overview
 
-BEAMFS uses a simple, flat layout designed for auditability and certification.
+beamfs uses a simple, flat layout designed for auditability and certification.
 All multi-byte fields are little-endian. All structures are `__packed`.
 Structure sizes are enforced at compile time by `BUILD_BUG_ON`.
 

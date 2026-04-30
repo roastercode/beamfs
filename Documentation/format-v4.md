@@ -1,4 +1,4 @@
-# BEAMFS On-Disk Format Specification (v4)
+# beamfs On-Disk Format Specification (v4)
 
 **Status:** Authoritative specification for `BEAMFS_VERSION_V1` with
 `BEAMFS_FORMAT_V4` superblock layout.
@@ -21,8 +21,8 @@ described here are normative. The kernel implementation, the userspace
 
 ### 1.1 Scope
 
-BEAMFS v4 is the on-disk format produced by `mkfs.beamfs` and consumed by
-the BEAMFS kernel module starting from kernel module version 0.1.0. It
+beamfs v4 is the on-disk format produced by `mkfs.beamfs` and consumed by
+the beamfs kernel module starting from kernel module version 0.1.0. It
 extends the v3 layout with:
 
 1. A 24 → 40 byte enlargement of `struct beamfs_rs_event`, adding a
@@ -64,7 +64,7 @@ BEAMFS_VERSION_CURRENT  = BEAMFS_VERSION_V1 = 1
 
 
 The on-disk `s_magic` and `s_version` fields are the primary identifiers.
-`s_magic` distinguishes BEAMFS from the predecessor FTRFS format. Mount
+`s_magic` distinguishes beamfs from the predecessor FTRFS format. Mount
 policy is **strict equality** with `BEAMFS_VERSION_CURRENT`. There are
 no v2 or v3 disk images in the wild; the v2/v3 format names refer to
 intermediate code-internal layouts that never reached a release.
@@ -144,9 +144,9 @@ zone reserved for superblock Reed-Solomon parity. See §5.
 `s_crc32` is computed over **two non-contiguous regions** chained via
 `crc32_le()` without intermediate XOR:
 
-- **Region A:** `[0, offsetof(s_crc32))` — 64 bytes (header, counters,
+- **Region A:** `[0, offsetof(s_crc32))` - 64 bytes (header, counters,
   version, flags). This precedes the checksum.
-- **Region B:** `[offsetof(s_uuid), offsetof(s_pad))` — 2645 bytes (UUID,
+- **Region B:** `[offsetof(s_uuid), offsetof(s_pad))` - 2645 bytes (UUID,
   label, RS journal, journal head, bitmap block, feature fields,
   protection scheme).
 
@@ -161,9 +161,9 @@ contents, otherwise the volume will fail to mount.
 
 Three 64-bit feature bitmaps are present and consulted at mount time:
 
-- `s_feat_compat` — informational only. Unknown bits are tolerated.
-- `s_feat_incompat` — refuse mount entirely if any unknown bit is set.
-- `s_feat_ro_compat` — force read-only mount if any unknown bit is set.
+- `s_feat_compat` - informational only. Unknown bits are tolerated.
+- `s_feat_incompat` - refuse mount entirely if any unknown bit is set.
+- `s_feat_ro_compat` - force read-only mount if any unknown bit is set.
 
 In `BEAMFS_VERSION_V1` no feature bits are allocated; all three masks
 are zero on a freshly formatted volume. Future feature bits will be
@@ -257,15 +257,15 @@ broadened from radiation-only event recording (v1–v3 nomenclature) to
 the full electromagnetic resilience taxonomy (v4, see TM §2) without
 any change to the on-disk byte layout. It serves three audiences:
 
-1. **Operators** — observe the rate and severity of FEC events over time
+1. **Operators** - observe the rate and severity of FEC events over time
    to plan media replacement or environmental mitigation.
-2. **Forensic analysts** — discriminate Family A (stochastic EM
+2. **Forensic analysts** - discriminate Family A (stochastic EM
    perturbations, TM §2.1) from Family B (adversarial EM events,
    TM §2.2), and identify saturation-boundary events (TM §2.3),
    using temporal clustering, spatial clustering across `re_block_no`,
    the per-event Shannon entropy estimate, and the
    `BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE` flag.
-3. **Certification auditors** — document that the filesystem maintains
+3. **Certification auditors** - document that the filesystem maintains
    a tamper-evident record of every recovery action it has performed,
    per TM §6.4.
 
@@ -275,7 +275,7 @@ The journal contains exactly `BEAMFS_RS_JOURNAL_SIZE = 64` entries of
 40 bytes each, occupying 2560 bytes inside the superblock. The
 ring-buffer head index is the `s_rs_journal_head` field (`__u8`, modulo
 `BEAMFS_RS_JOURNAL_SIZE`). When the buffer wraps, the oldest entry is
-overwritten silently — operators are expected to drain the journal
+overwritten silently - operators are expected to drain the journal
 periodically to durable storage if long-term retention is required. The
 v4 enlargement (24 → 40 bytes per entry) increased the journal
 **information density**, not its entry count.
@@ -299,7 +299,7 @@ Layout invariants enforced at compile time:
 
 - `sizeof(struct beamfs_rs_event) == 40` (BUILD_BUG_ON in `super.c`)
 - `re_reserved` and `re_pad` MUST be zero on write
-- `re_crc32` covers bytes `[0..32)` — all fields except itself and the
+- `re_crc32` covers bytes `[0..32)` - all fields except itself and the
   trailing alignment pad
 
 ### 6.4 Symbol count semantics
@@ -307,25 +307,25 @@ Layout invariants enforced at compile time:
 `re_symbol_count` records the outcome of the Reed-Solomon decode for
 the codeword associated with this event:
 
-- `re_symbol_count == 0` AND `re_flags & UNCORRECTABLE == 0` —
+- `re_symbol_count == 0` AND `re_flags & UNCORRECTABLE == 0` -
   this combination MUST NOT appear in a written entry. It would mean
   "successful decode with zero corrections", which is a non-event and is
   not journaled. Readers MAY treat such an entry as corrupted.
 
-- `0 < re_symbol_count <= BEAMFS_RS_PARITY / 2` (i.e. `1..8`) —
+- `0 < re_symbol_count <= BEAMFS_RS_PARITY / 2` (i.e. `1..8`) -
   successful correction of `re_symbol_count` symbols within a single
   codeword. The byte positions of the corrections are summarised by
   `re_entropy_q16_16` (see §6.6) but not retained individually; the
   positions array is consumed at log time.
 
-- `re_symbol_count == 0` AND `re_flags & UNCORRECTABLE != 0` —
+- `re_symbol_count == 0` AND `re_flags & UNCORRECTABLE != 0` -
   uncorrectable event: the codeword exceeded the RS correction radius
   (more than 8 symbols in error within a single subblock). The data
   could not be recovered, the read returned `-EIO` to userspace, and
   this entry records the location and timestamp for forensic use. See
   §6.5.
 
-- `re_symbol_count > BEAMFS_RS_PARITY / 2` — reserved, MUST NOT be
+- `re_symbol_count > BEAMFS_RS_PARITY / 2` - reserved, MUST NOT be
   written by v4 writers, MUST be treated as corrupted by readers.
 
 ### 6.5 Flags
@@ -386,7 +386,7 @@ H_q16_16 = round(H * 65536)
 `re_entropy_q16_16` is in `[0, 3 << 16) = [0, 196608)`.
 
 **Single-sample policy:** when `n == 1`, the entropy is mathematically
-defined (`H = 0`) but **not significant** — a single sample carries no
+defined (`H = 0`) but **not significant** - a single sample carries no
 distributional information. To prevent forensic analysts from
 misinterpreting these zeros as "evidence of a perfectly clustered
 burst", `beamfs_log_rs_event()` clears `ENTROPY_VALID` for `n == 1`.
@@ -437,7 +437,7 @@ When mounting a v4 volume, the kernel:
    the discrepancy, the mount fails with `-EUCLEAN`.
 5. Allocates the in-memory `struct beamfs_sb_info` and links it to the
    buffer head.
-6. **Replays** the `pending[]` array through `beamfs_log_rs_event()` —
+6. **Replays** the `pending[]` array through `beamfs_log_rs_event()` -
    each subblock that was corrected at mount produces a journal entry
    with the SB sentinel and the timestamp of the mount. This ensures
    that recovery actions performed before the in-memory journal pointer
@@ -450,7 +450,7 @@ When mounting a v4 volume, the kernel:
 
 The replay step is critical: it is the only mechanism by which
 mount-time RS corrections become visible to userspace. A failure in
-this step is logged but not fatal — the volume mounts and is usable,
+this step is logged but not fatal - the volume mounts and is usable,
 but the operator loses the audit record of the mount-time recovery.
 
 ---
@@ -585,9 +585,9 @@ the kernel module.
 
 ## 9. Compatibility and migration
 
-BEAMFS v4 is a fresh format with no backward compatibility to FTRFS or
+beamfs v4 is a fresh format with no backward compatibility to FTRFS or
 to internal v2/v3 layouts. Volumes formatted as FTRFS (different magic)
-are not mountable as BEAMFS by design. There is no `fsck.beamfs --upgrade`
+are not mountable as beamfs by design. There is no `fsck.beamfs --upgrade`
 path because there are no v3-or-earlier volumes in the wild.
 
 A future v5 format MAY introduce features incrementally via the v3+
@@ -605,16 +605,16 @@ journal data; the kernel does not enforce this analysis.
 
 ### 10.1 Family A vs Family B discrimination (TM §2.1, §2.2)
 
-Per TM §2, BEAMFS treats data-at-rest corruption as a single
+Per TM §2, beamfs treats data-at-rest corruption as a single
 electromagnetic phenomenon manifesting through two statistically
 distinct families:
 
-- **Family A** — stochastic EM perturbations (background SEU,
+- **Family A** - stochastic EM perturbations (background SEU,
   thermal stress, retention loss, ambient RF noise). Inter-event
   times follow an exponential distribution; positions within a
   codeword are uniform. Expected entropy per event is high (close to
   `log2(BINS) = 3` bits).
-- **Family B** — adversarial EM events (IEMI, HPM, EMP, conducted EMI).
+- **Family B** - adversarial EM events (IEMI, HPM, EMP, conducted EMI).
   Inter-event times are clustered; positions within a codeword may be
   either tightly clustered (single point-source) or spread
   (broad-spectrum). Entropy per event varies.
@@ -673,7 +673,7 @@ The conformance fixture is a deterministic data block written to the
 directory block. Its purpose is to validate the on-disk RS encode
 chain end-to-end without relying on user-written content, and to
 provide a byte-deterministic regression target for any independent
-reimplementation of the BEAMFS v4 format.
+reimplementation of the beamfs v4 format.
 
 The fixture is **mandatory** for scheme = 2 volumes produced by
 `mkfs.beamfs` v0.1.0 and later. It is **absent** for scheme = 5
@@ -703,7 +703,7 @@ deterministic payload:
 
 ```
 offset  0..63    BEAMFS_CANARY_HEADER_LEN = 64 bytes
-                 = "BEAMFS-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
+                 = "beamfs-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
                    (45 bytes ASCII)
                  + zero pad to 64 bytes
 offset 64..3823  BEAMFS_CANARY_PAYLOAD_LEN = 3760 bytes
@@ -812,7 +812,7 @@ each invocation as a self-test of the on-disk format integrity.
 
 This document is normative for `BEAMFS_VERSION_V1` v4 layout. Changes
 to the on-disk format require a corresponding update to this document
-**before** the code change lands, per the BEAMFS development workflow.
+**before** the code change lands, per the beamfs development workflow.
 References from the kernel source to this document use the form
 `Documentation/format-v4.md` and are expected to remain stable across
 the v4 lifetime.
@@ -825,12 +825,12 @@ A successor format (v5) will produce a new document
 
 ## 13. References
 
-- `Documentation/threat-model.md` — failure model, certification
+- `Documentation/threat-model.md` - failure model, certification
   context, design constraints (TM §1–10).
-- `Documentation/design.md` — architectural overview, partially
+- `Documentation/design.md` - architectural overview, partially
   superseded by this document for v4 specifics.
-- `Documentation/known-limitations.md` — explicit non-goals.
-- `Documentation/testing.md` — empirical validation methodology.
-- `Documentation/EMPIRICAL-FINDINGS.md` — recorded test results.
-- `lib/reed_solomon` (Linux kernel) — RS(255,239) implementation.
-- `tools/gen_entropy_lut.py` — Shannon LUT generator (reproducible).
+- `Documentation/known-limitations.md` - explicit non-goals.
+- `Documentation/testing.md` - empirical validation methodology.
+- `Documentation/EMPIRICAL-FINDINGS.md` - recorded test results.
+- `lib/reed_solomon` (Linux kernel) - RS(255,239) implementation.
+- `tools/gen_entropy_lut.py` - Shannon LUT generator (reproducible).

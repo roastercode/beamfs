@@ -1,4 +1,4 @@
-# Session de validation BEAMFS v1 — 2026-04-28
+# Session de validation beamfs v1 - 2026-04-28
 
 ## Acquis empirique
 
@@ -10,7 +10,7 @@
 - SSH par clé `~/.ssh/hpclab_admin` (user hpcadmin)
 - vdb dédié par VM : `/var/lib/libvirt/images/hpc-arm64/beamfs-*.img` (64M)
 
-### Module BEAMFS
+### Module beamfs
 - `beamfs.ko` charge avec dépendance `reed_solomon.ko` chargé manuellement
   (auto-load TODO via modules.dep)
 - Magic on-disk confirmé : `4D 41 45 42` = "BEAM" little-endian
@@ -21,11 +21,11 @@
 ### Slurm cluster
 - munge + slurmctld + slurmd opérationnels sur 3 compute nodes
 - `sinfo` montre les nœuds en idle
-- S4 (BEAMFS write from Slurm) = PASS
+- S4 (beamfs write from Slurm) = PASS
 
-### Bench M1-M5 (parité FTRFS ↔ BEAMFS)
+### Bench M1-M5 (parité FTRFS ↔ beamfs)
 
-| Métrique | FTRFS baseline (28-04 20:58) | BEAMFS (28-04 22:33) |
+| Métrique | FTRFS baseline (28-04 20:58) | beamfs (28-04 22:33) |
 |---|---|---|
 | M1 write+fsync (MB/s) | 4.348 / 5.000 / 5.263 | 2.326 / 5.000 / 5.263 |
 | M2 read cold (MB/s) | 12.5 / 20 / 25 | 14.286 / 20 / 25 |
@@ -33,10 +33,10 @@
 | M5 small write (ms) | 22 / 23.5 / 27 | 21 / 22 / 31 |
 
 **Médianes M1/M2/M4 identiques. M5 médiane légèrement meilleure.**
-Migration FTRFS→BEAMFS = fonctionnellement neutre. Lecture A
+Migration FTRFS→beamfs = fonctionnellement neutre. Lecture A
 (rebadge mécanique) confirmée empiriquement.
 
-## Theorem IV.1 — différé
+## Theorem IV.1 - différé
 
 `inject_raf <dev> <block_no> <err_bits>` est un outil de simulation
 post-recovery hérité de FTRFS : il écrit un `beamfs_rs_event` (40 bytes)
@@ -61,7 +61,7 @@ injection algébrique modélisant correctement les SEU/MBU
 - README.md (positionnement scientifique, roadmap 5 phases)
 - papers/v1/paper.tex (préambule LuaLaTeX/IEEEtran/amsthm complet)
 - papers/v1/sections/00-12 (stubs avec TODO)
-- papers/v1/refs.bib (FTRFS + BEAMFS pré-cités)
+- papers/v1/refs.bib (FTRFS + beamfs pré-cités)
 - papers/v1/Makefile (latexmk -lualatex)
 - Documentation/design-notes.md
 
@@ -84,11 +84,11 @@ Pas de code kernel encore.
 
 ## Position scientifique honnête pour publication
 
-Le paper BEAMFS v1 doit être publié comme :
+Le paper beamfs v1 doit être publié comme :
 - Theorem IV.1 énoncé
 - Format implémenté (mkfs/mount/RW + Slurm + M1-M5 PASS)
 - **Validation empirique de IV.1 différée au paper RadFI compagnon**
 
 Pair publication : RadFI = problème (EM induces corruption),
-BEAMFS = solution (RS FEC survives same injection).
+beamfs = solution (RS FEC survives same injection).
 Pattern Spectre+KAISER, Meltdown+KPTI.

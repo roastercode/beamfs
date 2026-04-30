@@ -1,6 +1,6 @@
-# BEAMFS Threat Model and Market Positioning
+# beamfs Threat Model and Market Positioning
 
-**Status**: design document, normative for BEAMFS architectural decisions.
+**Status**: design document, normative for beamfs architectural decisions.
 **Audience**: kernel reviewers, certification auditors, downstream integrators,
 operators of safety- or mission-critical embedded Linux systems.
 **Last updated**: 2026-04-25.
@@ -9,12 +9,12 @@ operators of safety- or mission-critical embedded Linux systems.
 
 ## 1. Purpose
 
-BEAMFS is the **B**eam **E**lectro**M**agnetic **F**ile **S**ystem. Its
+beamfs is the **B**eam **E**lectro**M**agnetic **F**ile **S**ystem. Its
 thesis: data-at-rest integrity on a single read-write device under the
-full spectrum of electromagnetic perturbations — stochastic and
+full spectrum of electromagnetic perturbations - stochastic and
 adversarial, ionizing and impulsive, background and burst.
 
-This document defines the failure modes BEAMFS is designed to mitigate,
+This document defines the failure modes beamfs is designed to mitigate,
 the threat actors it considers in scope, and the existing Linux/BSD
 storage stack capabilities it complements or extends. It is the
 normative reference for design trade-offs in the on-disk format,
@@ -22,18 +22,18 @@ the IO path, and the roadmap. Subsequent design documents (`design.md`,
 `roadmap.md`, `system-architecture.md`) refine this model; they do not
 override it.
 
-**Scientific lineage.** BEAMFS extends the FTRFS lineage (Fuchs, Langer,
-Trinitis, *BEAMFS: A Fault-Tolerant Radiation-Robust Filesystem for
+**Scientific lineage.** beamfs extends the FTRFS lineage (Fuchs, Langer,
+Trinitis, *beamfs: A Fault-Tolerant Radiation-Robust Filesystem for
 Space Use*, ARCS 2015) from a radiation-only threat model toward a
 **unified electromagnetic resilience** threat model. The motivation is
 empirical: the RadFI fault-injection tool (companion repository,
 v0.1.0, 2026-04-28) demonstrated that filesystems designed strictly for
 stochastic radiation upsets do not retain their soundness guarantees
 under adversarial electromagnetic events that produce correlated
-multi-byte bursts. This falsification motivates BEAMFS v2 and the
+multi-byte bursts. This falsification motivates beamfs v2 and the
 broadened taxonomy below.
 
-A separate companion document — to be added — will define the
+A separate companion document - to be added - will define the
 verification and validation strategy aligned with this threat model
 (fault injection scenarios, acceptance thresholds, traceability matrix
 for DO-178C, ECSS-E-ST-40C, IEC 61508).
@@ -42,24 +42,24 @@ for DO-178C, ECSS-E-ST-40C, IEC 61508).
 
 ## 2. Failure model
 
-BEAMFS treats data-at-rest corruption on a single read-write device
-as a single physical phenomenon — **electromagnetic perturbation of
-stored charge or magnetic domains** — that manifests through two
+beamfs treats data-at-rest corruption on a single read-write device
+as a single physical phenomenon - **electromagnetic perturbation of
+stored charge or magnetic domains** - that manifests through two
 statistically distinct families. Both families are electromagnetic in
 origin; they differ in causal source, statistical signature, and
 operational consequence. A third sub-section describes the **Reed-
 Solomon saturation boundary**, an attribute that may be reached by
-either family and that BEAMFS records explicitly.
+either family and that beamfs records explicitly.
 
-### 2.1 Family A — Stochastic electromagnetic perturbations
+### 2.1 Family A - Stochastic electromagnetic perturbations
 
 **Origin.** Background single-event upsets from cosmic rays,
 atmospheric neutrons, alpha particles from package contamination;
 MRAM cell aging; NOR/NAND flash retention loss; thermal stress in
 industrial environments; low-level RF environmental noise. All of
-these are electromagnetic in nature — ionizing radiation is
+these are electromagnetic in nature - ionizing radiation is
 high-energy EM, thermal stress is broadband EM, RF noise is
-narrowband EM — and produce indistinguishable signatures at the
+narrowband EM - and produce indistinguishable signatures at the
 storage cell. Effects are well documented in the literature on
 radiation-tolerant computing, flash endurance, and EMC.
 
@@ -78,10 +78,10 @@ radiation-tolerant computing, flash endurance, and EMC.
 ext4/btrfs/dm-verity-without-FEC posture) is sufficient to alert,
 but insufficient to keep the system running through long unattended
 missions. In-place correction is required. This is the regime that
-FTRFS (Fuchs et al., 2015) was designed to address, and BEAMFS
+FTRFS (Fuchs et al., 2015) was designed to address, and beamfs
 preserves all of FTRFS's guarantees within this regime.
 
-### 2.2 Family B — Adversarial electromagnetic events
+### 2.2 Family B - Adversarial electromagnetic events
 
 **Origin.** Intentional electromagnetic interference (IEMI), high-power
 microwave (HPM) directed-energy weapons, electromagnetic pulse (EMP)
@@ -125,7 +125,7 @@ provide:
    one symbol error.
 2. **Universal coverage**, not opt-in. An adversary will not
    restrict attacks to files marked with an "RS-enabled" attribute.
-   All data blocks in a mounted BEAMFS volume must be protected by
+   All data blocks in a mounted beamfs volume must be protected by
    default.
 3. **No security-relevant flag readable from the storage device
    alone.** A protection scheme whose activation depends on a flag
@@ -153,7 +153,7 @@ operator or forensic analyst, using temporal and spatial clustering
 of adjacent journal entries; it is not in-kernel.
 
 **Empirical motivation.** The RadFI fault-injection tool (companion
-repository v0.1.0, 2026-04-28) was designed to drive a BEAMFS v1 image
+repository v0.1.0, 2026-04-28) was designed to drive a beamfs v1 image
 into the saturation regime under controlled, reproducible parameters.
 It empirically falsified the v1 soundness theorem on data blocks under
 single-bit flip injection at submit_bio_noacct, motivating the v2 INLINE
@@ -169,20 +169,20 @@ filesystem must propagate `-EIO` to userspace on uncorrectable read
 (no silent data loss). See `Documentation/format-v4.md` section 6.5
 for the on-disk encoding (`BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE`).
 
-### 2.4 What BEAMFS explicitly does not address
+### 2.4 What beamfs explicitly does not address
 
 This threat model is restricted to integrity of data at rest. The
 following are out of scope and addressed by other layers of a
 hardened system:
 
 - **Confidentiality.** Disk encryption (dm-crypt, LUKS) is
-  orthogonal and recommended below BEAMFS where required.
+  orthogonal and recommended below beamfs where required.
 - **Authenticated metadata against an active write-capable
   adversary.** A future extension may add per-block hash-based
   signatures (NIST FIPS 205 SLH-DSA / SPHINCS+); this is mentioned
   in the long-term roadmap and is not part of v1.
 - **Fault tolerance against device-level catastrophic failure**
-  (chip burn-out, controller failure). BEAMFS operates within a
+  (chip burn-out, controller failure). beamfs operates within a
   single device. Multi-device redundancy is the role of the block
   layer (mdraid, dm-integrity over multiple devices, ZFS, btrfs
   multi-device).
@@ -202,11 +202,11 @@ For Family B, the relevant adversary profile is:
 - **Motivation**: degrade or destroy data on captured, lost, or
   exposed assets; force fail-stop on critical infrastructure;
   contaminate evidence on forensic targets.
-- **Knowledge**: assumed to know the BEAMFS on-disk format, the
+- **Knowledge**: assumed to know the beamfs on-disk format, the
   RS parameters, and the mount-time recovery procedure. Security
   through obscurity is rejected.
 
-For Family A, there is no actor; the model is purely physical. BEAMFS
+For Family A, there is no actor; the model is purely physical. beamfs
 must remain operationally correct under both, simultaneously, without
 mode switching.
 
@@ -230,7 +230,7 @@ Existing reliability mitigations on these platforms are limited to
 ECC memory; filesystem-level correction is absent from the stack.
 
 This is Family A territory at scale, and historically the regime FTRFS
-was designed for. BEAMFS provides the missing filesystem layer with
+was designed for. beamfs provides the missing filesystem layer with
 a strict superset of FTRFS's guarantees.
 
 ### 4.2 Military and dual-use unmanned platforms
@@ -243,7 +243,7 @@ storage subsystem of a captured or downed asset is a target both
 for forensic recovery by the captor and for forensic denial by the
 operator.
 
-This is Family B territory. BEAMFS protects the integrity of the
+This is Family B territory. beamfs protects the integrity of the
 data partition through the EM event; complementary mechanisms (remote
 or autonomous secure erase) handle the destruction-on-capture case.
 
@@ -252,7 +252,7 @@ or autonomous secure erase) handle the destruction-on-capture case.
 Robots and instrumentation deployed inside reactor containments,
 spent-fuel handling cells, particle accelerator tunnels, and certain
 medical imaging facilities operate under continuous neutron and gamma
-flux — high-energy electromagnetic and particle environments where
+flux - high-energy electromagnetic and particle environments where
 Family A rates are several orders of magnitude above background.
 Mission durations span months to years; in-situ maintenance is
 impossible or extremely costly.
@@ -284,9 +284,9 @@ environments with dense RF, military and dual-use programs).
 
 ---
 
-## 5. Existing Linux and BSD storage capabilities — gap analysis
+## 5. Existing Linux and BSD storage capabilities - gap analysis
 
-The following table maps BEAMFS's threat model against the protections
+The following table maps beamfs's threat model against the protections
 provided by mainline Linux and BSD storage components as of April 2026.
 
 | Mechanism                | Detection | Correction | Single device | RW partition | In kernel | Auditable LOC |
@@ -297,16 +297,16 @@ provided by mainline Linux and BSD storage components as of April 2026.
 | dm-verity + FEC          | yes       | yes (Reed-Solomon) | yes (parity on same or other device) | **no, RO only** | yes | small |
 | dm-integrity standalone  | yes       | no         | yes           | yes          | yes       | small |
 | dm-integrity + mdraid    | yes       | yes        | **no, requires multiple devices** | yes | yes | medium |
-| EDAC kernel framework    | reporting only — for memory and caches, not block storage | n/a | n/a | n/a | yes | medium |
+| EDAC kernel framework    | reporting only - for memory and caches, not block storage | n/a | n/a | n/a | yes | medium |
 | rsbep / blkar / SeqBox   | yes       | yes        | yes           | yes via FUSE | **no, userspace** | n/a |
 | HAMMER2 (DragonFly BSD)  | yes       | only with dedup or copies>1 | partial | yes | yes | ~50k |
 | UFS2, FFS2 (BSD)         | minimal   | no         | yes           | yes          | yes       | medium |
 
 **Reading of the table.**
 
-The single combination of capabilities required by the BEAMFS threat
-model — **detection AND correction AND single device AND read-write
-AND in-kernel** — is not provided by any existing component. The
+The single combination of capabilities required by the beamfs threat
+model - **detection AND correction AND single device AND read-write
+AND in-kernel** - is not provided by any existing component. The
 closest match, dm-verity + FEC, fails on the read-write requirement
 (documented restriction: `target is read-only`). The next closest,
 dm-integrity + mdraid, fails on the single-device requirement (it
@@ -324,7 +324,7 @@ where the single-device constraint is imposed by physics (cost,
 mass, power, volume, sealing of the platform), and where fail-stop
 on a long-duration unattended mission is itself a mission failure.
 
-**BEAMFS occupies this specific gap by design.** It does not
+**beamfs occupies this specific gap by design.** It does not
 attempt to replace ext4, btrfs, ZFS, dm-verity, or dm-integrity in
 their respective domains. It complements them as the read-write
 data partition layer in a hardened embedded Linux system, as
@@ -332,7 +332,7 @@ described in `system-architecture.md`.
 
 ---
 
-## 6. Implications for BEAMFS architecture
+## 6. Implications for beamfs architecture
 
 This threat model has direct, normative consequences for design
 decisions. Each consequence is stated as a constraint that the
@@ -342,7 +342,7 @@ above.
 ### 6.1 Universal data block protection (no opt-in)
 
 **Constraint.** Reed-Solomon FEC, when applied to data blocks,
-must apply to all data blocks of a mounted BEAMFS volume by
+must apply to all data blocks of a mounted beamfs volume by
 default. A per-inode opt-in flag (such as a hypothetical
 `BEAMFS_INODE_FL_RS_ENABLED` controlling data block protection) is
 rejected.
@@ -376,8 +376,8 @@ distribution pattern.
 
 ### 6.3 Metadata correction, not only detection
 
-**Constraint.** Critical metadata structures — superblock, inode
-table, allocation bitmap, directory blocks — must be correctable,
+**Constraint.** Critical metadata structures - superblock, inode
+table, allocation bitmap, directory blocks - must be correctable,
 not only detectable. Currently the bitmap block has RS protection
 (implemented), the inode has optional RS via reserved bytes
 (implemented but per-inode opt-in), and the superblock has only
@@ -456,13 +456,13 @@ of routine SEU.
 **Consequence.** rsbep / blkar / SeqBox-style userspace approaches
 are unsuitable as the primary mechanism, regardless of their
 correction capacity. They may serve as offline forensic recovery
-tools complementing BEAMFS, not replacing it.
+tools complementing beamfs, not replacing it.
 
 ---
 
 ## 7. Relationship with the certification regimes
 
-| Regime           | Domain               | Code auditability requirement | BEAMFS posture |
+| Regime           | Domain               | Code auditability requirement | beamfs posture |
 |------------------|----------------------|-------------------------------|---------------|
 | DO-178C          | Civil avionics       | All software fully analyzed at the appropriate level (A through E) | Designed under 5000 LOC to make analysis tractable |
 | ECSS-E-ST-40C    | European space software | Process-based, traceability mandatory | Per-correction journal provides operational traceability |
@@ -470,7 +470,7 @@ tools complementing BEAMFS, not replacing it.
 | MIL-STD-882E     | U.S. military system safety | Hazard tracking, failure mode analysis | Family B explicitly enumerated above |
 | Common Criteria  | Security evaluation  | Functional + assurance components | Out of current scope; relevant only with future PQ extension |
 
-BEAMFS targets being **suitable for inclusion** in systems undergoing
+beamfs targets being **suitable for inclusion** in systems undergoing
 these evaluations. It does not pre-certify itself; certification is
 necessarily system-level and deployment-specific.
 
@@ -500,11 +500,11 @@ Inclusion does not imply endorsement of any particular conclusion
 beyond the specific point cited.
 
 **Scientific lineage and Family A baseline (radiation-tolerant filesystems).**
-- Fuchs, Langer, Trinitis. *FTRFS: A Fault-Tolerant Radiation-Robust Filesystem for Space Use.* ARCS 2015, LNCS 9017. https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf — BEAMFS extends this work from a radiation-only threat model to the unified electromagnetic resilience model of section 2.
+- Fuchs, Langer, Trinitis. *FTRFS: A Fault-Tolerant Radiation-Robust Filesystem for Space Use.* ARCS 2015, LNCS 9017. https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf - beamfs extends this work from a radiation-only threat model to the unified electromagnetic resilience model of section 2.
 - *When Radiation Meets Linux: Analyzing Soft Errors in Linux on COTS SoCs under Proton Irradiation.* arXiv 2503.03722.
 
 **Empirical falsification tooling for the saturation boundary (sec 2.3).**
-- RadFI — Reed-Solomon Adversarial Fault Injection. Companion repository, v0.1.0, 2026-04-28. Drives a BEAMFS image into the saturation regime under controlled parameters; falsified BEAMFS v1 Theorem IV.1 on data blocks. Not for upstream (dual-use); methodology fully documented for reproducibility.
+- RadFI - Reed-Solomon Adversarial Fault Injection. Companion repository, v0.1.0, 2026-04-28. Drives a beamfs image into the saturation regime under controlled parameters; falsified beamfs v1 Theorem IV.1 on data blocks. Not for upstream (dual-use); methodology fully documented for reproducibility.
 
 **On adversarial EM and storage.**
 - Far, Qazani, Rad. *Emp-secure data storage through biohybrid and neuromorphic paradigms.* Discover Applied Sciences, 2026. DOI 10.1007/s42452-026-08627-9.

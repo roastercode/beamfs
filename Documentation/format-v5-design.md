@@ -1,4 +1,4 @@
-# BEAMFS On-Disk Format v5 — Design Document
+# beamfs On-Disk Format v5 - Design Document
 
 **Status**: skeleton, populated phase by phase.
 **Last updated**: 2026-04-30.
@@ -8,7 +8,7 @@
 
 ## 1. Goals
 
-BEAMFS v5 satisfies the scope defined in
+beamfs v5 satisfies the scope defined in
 Documentation/mainline-scope.md. Concretely:
 
 - Single on-disk format, parameterised by feature flags.

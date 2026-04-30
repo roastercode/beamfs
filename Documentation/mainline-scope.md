@@ -1,4 +1,4 @@
-# BEAMFS Mainline Scope
+# beamfs Mainline Scope
 
 **Status**: scope formalised on the `mainline-prep` branch.
 **Last updated**: 2026-04-30.
@@ -8,7 +8,7 @@
 
 ## 1. Position
 
-BEAMFS is a read-write Linux filesystem with native inline
+beamfs is a read-write Linux filesystem with native inline
 Reed-Solomon error correction on the read path. It addresses a
 class of silent data corruption that the existing mainline
 filesystems do not correct: bit-flips of physical or adversarial
@@ -17,16 +17,16 @@ origin reaching the persistent storage layer.
 The Linux kernel currently provides Reed-Solomon error correction
 only via `dm-fec`, which is read-only and tied to `dm-verity`.
 There is no mainline mechanism that performs RS-FEC correction on
-read-write storage. BEAMFS proposes to fill that gap.
+read-write storage. beamfs proposes to fill that gap.
 
 This positioning is independent of any specific deployment market.
-The threat model addressed by BEAMFS is universal: any Linux
+The threat model addressed by beamfs is universal: any Linux
 storage subject to bit-flips of hardware, environmental, or
 adversarial origin.
 
 ## 2. Threat model
 
-The expanded threat model covered by BEAMFS includes:
+The expanded threat model covered by beamfs includes:
 
 - **SEU (Single-Event Upset)**: a single bit flip caused by an
   ionising particle hitting a memory cell. Present on any silicon,
@@ -60,18 +60,18 @@ These threats produce silent data corruption that:
 4. Triggers EIO with no automatic recovery in ext4, XFS, btrfs,
    bcachefs, F2FS, and all current mainline read-write filesystems.
 
-Validation of BEAMFS resilience to this threat model is provided
+Validation of beamfs resilience to this threat model is provided
 by the RadFI fault injection harness (companion repository),
 exercising bit-flips at sub-block, block, and inode granularity
 via `debugfs/radfi` interface.
 
 ## 3. Capabilities matrix
 
-The position of BEAMFS relative to mainline filesystems is the
+The position of beamfs relative to mainline filesystems is the
 following. Comparison restricted to features relevant to silent
 data corruption resistance.
 
-| Capability                  | ext4 | btrfs | XFS | bcachefs | f2fs | squashfs | EROFS | dm-fec     | BEAMFS v5 |
+| Capability                  | ext4 | btrfs | XFS | bcachefs | f2fs | squashfs | EROFS | dm-fec     | beamfs v5 |
 |-----------------------------|------|-------|-----|----------|------|----------|-------|------------|-----------|
 | Read-write                  | yes  | yes   | yes | yes      | yes  | no (RO)  | no    | no (RO)    | yes       |
 | Metadata CRC                | opt  | yes   | yes | yes      | yes  | yes      | yes   | n/a        | yes       |
@@ -85,13 +85,13 @@ data corruption resistance.
 `det.` = detection only, returns EIO on read.
 `opt` = optional, behind feature flag.
 
-The unique position of BEAMFS is the intersection of three
+The unique position of beamfs is the intersection of three
 properties: (a) read-write, (b) RS-FEC correction, (c) mainline
 candidate. No existing component covers this intersection.
 
 ## 4. Architecture v5
 
-BEAMFS v5 uses a single on-disk format with feature flags following
+beamfs v5 uses a single on-disk format with feature flags following
 the ext4 pattern (s_feat_compat, s_feat_incompat, s_feat_ro_compat).
 Three preconfigured mkfs profiles cover the spectrum of supported
 deployments without exposing the individual flags to end users.
@@ -118,13 +118,13 @@ provided the underlying storage supports the new requirements.
 
 ### 4.3 Block size policy
 
-BEAMFS v5 fixes the on-disk block size at 4096 bytes (page size on
+beamfs v5 fixes the on-disk block size at 4096 bytes (page size on
 x86-64 and aarch64 kernels in scope). Larger logical clusters are
 supported via the BIGALLOC flag (cluster_size = N * BLOCK_SIZE,
 N up to 256). This matches the ext4 `bigalloc` design and avoids
 the page cache pitfalls of native block_size > PAGE_SIZE.
 
-The BEAMFS v4 mismatch between user data per block (3824 bytes
+The beamfs v4 mismatch between user data per block (3824 bytes
 INLINE) and PAGE_SIZE (4096 bytes) is resolved in v5 by either:
 
 - option A: keeping the 3824/4096 layout with the multiblock
@@ -152,7 +152,7 @@ initial acceptance.
 
 ## 6. Out of scope
 
-BEAMFS v5 does NOT provide:
+beamfs v5 does NOT provide:
 
 - Native RAID at the filesystem level. Multi-device redundancy is
   delegated to dm-raid, mdraid, or hardware RAID below the FS.
@@ -162,7 +162,7 @@ BEAMFS v5 does NOT provide:
   fscrypt-style integration in a future v6+ if demand emerges.
 - Compression. Considered orthogonal to RS-FEC; may be added as a
   v6+ feature flag.
-- Network filesystem semantics. BEAMFS is a local filesystem.
+- Network filesystem semantics. beamfs is a local filesystem.
 - MTD/UBI native support. Block device only in v5; UBI integration
   considered for v6+ if demand emerges.
 
@@ -172,14 +172,14 @@ Subsequent features are added by patch series after acceptance.
 
 ## 7. Migration
 
-BEAMFS v5 supports two migration paths:
+beamfs v5 supports two migration paths:
 
 1. **Copy migration**: `mkfs.beamfs` + `rsync -aHAX` from any
    source filesystem. Always available.
 2. **In-place upgrade between profiles**: `tune.beamfs -O +flags`
-   on an unmounted BEAMFS volume. Available within the v5 format.
+   on an unmounted beamfs volume. Available within the v5 format.
 
-In-place migration from ext4/btrfs/xfs to BEAMFS is not provided
+In-place migration from ext4/btrfs/xfs to beamfs is not provided
 in v5. The format incompatibility is too deep to support in-place
 conversion without reserving twice the storage.
 

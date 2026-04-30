@@ -1,4 +1,4 @@
-# fsck.beamfs — Offline filesystem checker for BEAMFS
+# fsck.beamfs - Offline filesystem checker for beamfs
 
 **Status**: design document, MVP under construction.
 **Last updated**: 2026-04-30.
@@ -6,9 +6,9 @@
 
 ---
 
-## 1. Position relative to BEAMFS online recovery
+## 1. Position relative to beamfs online recovery
 
-BEAMFS provides **online**, **synchronous** Reed-Solomon error correction
+beamfs provides **online**, **synchronous** Reed-Solomon error correction
 on the read path inside the kernel module. This is the steady-state
 mechanism for surviving Single-Event Upsets (SEU), Multi-Bit Upsets (MBU),
 and adversarial electromagnetic perturbations as defined in the EMR
@@ -36,7 +36,7 @@ situations where the kernel cannot or should not act:
    the in-kernel RS event journal.
 
 This positioning is consistent with `Documentation/threat-model.md`
-section 6, which classifies offline tools as "complementing BEAMFS, not
+section 6, which classifies offline tools as "complementing beamfs, not
 replacing it".
 
 ---
@@ -49,7 +49,7 @@ replacing it".
 - run as a daemon or background service;
 - perform online repair on a mounted volume;
 - attempt cryptographic verification (that is dm-verity's job);
-- attempt journal replay in the ext4/jbd2 sense (BEAMFS has no
+- attempt journal replay in the ext4/jbd2 sense (beamfs has no
   metadata journal in v4; the RS journal is an event log, not a
   redo journal);
 - attempt fault injection or testing (that is RadFI's job);
@@ -79,7 +79,7 @@ Exit codes follow `fsck(8)` convention:
 |------|---------|
 | 0    | No errors |
 | 1    | Errors corrected (after `--repair`) |
-| 2    | System should reboot (not used by BEAMFS) |
+| 2    | System should reboot (not used by beamfs) |
 | 4    | Errors left uncorrected |
 | 8    | Operational error (cannot open device, etc.) |
 | 16   | Usage or syntax error |
@@ -117,7 +117,7 @@ tooling conventions:
 - the Reed-Solomon decoder is a copy of `lib/reed_solomon/` from the
   Linux kernel tree, adapted for userland (single-file, GPL-2.0). This
   guarantees byte-exact compatibility with the in-kernel decoder used
-  by the BEAMFS module;
+  by the beamfs module;
 - exit codes follow `fsck(8)` convention (see section 3.1);
 - standard error messages on `stderr`, progress on `stdout` only when
   invoked with `--verbose`;
@@ -132,7 +132,7 @@ tooling conventions:
 `fsck.beamfs` is the userland half of the `beamfs-bench fsck`
 subcommand (Test D in the beamfs-bench TODO). Each Test D run:
 
-1. Mounts a known-good BEAMFS volume.
+1. Mounts a known-good beamfs volume.
 2. Injects a fault sequence using RadFI that triggers FS_PANIC.
 3. Forces unmount.
 4. Invokes `fsck.beamfs --check-only` then `fsck.beamfs --repair`.
@@ -150,11 +150,11 @@ Verdicts: `RECOVERED`, `RECOVERED_AFTER_FSCK`, `FSCK_NEEDED`,
 |-------|-------|--------|--------|
 | 0 | Scope document (this file) | 1h | DONE |
 | 1 | Skeleton: Makefile + main.c + arg parsing | 2h | PENDING |
-| 2 | Pass 1 — Superblock check + RS-decode | 4-6h | PENDING |
-| 3 | Pass 2 — Bitmap check + RS-decode | 4-6h | PENDING |
-| 4 | Pass 3 — Inode table walk | 6-8h | PENDING |
-| 5 | Pass 4 — bitmap rebuild from inode-table | 8-12h | PENDING |
-| 6 | Pass 5 — RS journal validation | 4-6h | PENDING |
+| 2 | Pass 1 - Superblock check + RS-decode | 4-6h | PENDING |
+| 3 | Pass 2 - Bitmap check + RS-decode | 4-6h | PENDING |
+| 4 | Pass 3 - Inode table walk | 6-8h | PENDING |
+| 5 | Pass 4 - bitmap rebuild from inode-table | 8-12h | PENDING |
+| 6 | Pass 5 - RS journal validation | 4-6h | PENDING |
 | 7 | Manpage `fsck.beamfs.8` | 2h | PENDING |
 | 8 | Integration `beamfs-bench fsck` Test D | 2-3h | PENDING |
 
@@ -162,13 +162,13 @@ Verdicts: `RECOVERED`, `RECOVERED_AFTER_FSCK`, `FSCK_NEEDED`,
 
 ## 7. References
 
-- `Documentation/format-v4.md` — on-disk format reference.
-- `Documentation/threat-model.md` — sections 4, 6 (offline tool position).
-- `Documentation/roadmap.md` — Stage 4 (data block protection) close.
-- `lib/reed_solomon/` upstream Linux kernel — RS decoder implementation
+- `Documentation/format-v4.md` - on-disk format reference.
+- `Documentation/threat-model.md` - sections 4, 6 (offline tool position).
+- `Documentation/roadmap.md` - Stage 4 (data block protection) close.
+- `lib/reed_solomon/` upstream Linux kernel - RS decoder implementation
   to be vendored.
-- `e2fsprogs/e2fsck/` — reference for fsck CLI conventions.
-- `btrfs-progs/btrfs-check/` — reference for offline checker structure
+- `e2fsprogs/e2fsck/` - reference for fsck CLI conventions.
+- `btrfs-progs/btrfs-check/` - reference for offline checker structure
   in a non-journaled FS.
-- `xfs_repair` — reference for offline repair patterns.
+- `xfs_repair` - reference for offline repair patterns.
 
