@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
+ * BEAMFS - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
  *
  * Per-block Reed-Solomon FEC on user data: each 4096-byte disk block
  * holds 16 RS(255,239) shortened subblocks (3824 user bytes + 256 parity

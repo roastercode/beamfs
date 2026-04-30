@@ -33,7 +33,7 @@ config BEAMFS_FS
 	  design constraint: the codebase targets under 5000 auditable lines.
 
 	  Scientific lineage:
-	  Fuchs, Langer, Trinitis — FTRFS: A Fault-Tolerant Radiation-Robust
+	  Fuchs, Langer, Trinitis - FTRFS: A Fault-Tolerant Radiation-Robust
 	  Filesystem for Space Use, ARCS 2015, TU Munich / MOVE-II CubeSat.
 	  https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf
 	  BEAMFS extends FTRFS from a radiation-only threat model to the

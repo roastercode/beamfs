@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * BEAMFS — Beam Electromagnetic File System (Electromagnetic Resilience)
- * Based on: Fuchs, Langer, Trinitis — ARCS 2015
+ * BEAMFS - Beam Electromagnetic File System (Electromagnetic Resilience)
+ * Based on: Fuchs, Langer, Trinitis - ARCS 2015
  *
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
@@ -323,7 +323,7 @@ struct beamfs_rs_event {
 #define BEAMFS_FEAT_RO_COMPAT_SUPP   0ULL
 
 /*
- * On-disk superblock — block 0
+ * On-disk superblock - block 0
  * Total size: fits in one 4096-byte block
  */
 struct beamfs_super_block {
@@ -505,7 +505,7 @@ void beamfs_log_rs_event(struct super_block *sb,
 			size_t code_len_bytes);
 void beamfs_dirty_super(struct beamfs_sb_info *sbi);
 
-/* file.c — BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE data path (v2) */
+/* file.c - BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE data path (v2) */
 extern const struct address_space_operations beamfs_inline_aops;
 extern const struct file_operations          beamfs_inline_file_operations;
 

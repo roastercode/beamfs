@@ -1,4 +1,4 @@
-# BEAMFS v3 — Scientific findings captured 2026-04-30
+# BEAMFS v3 - Scientific findings captured 2026-04-30
 
 > **Status**: working draft / lab notebook for future v3 publication.
 > **NOT** part of v2 paper (already on Zenodo, published 2026-04-29).
@@ -39,11 +39,11 @@ already-published technical record. The published baseline is:
 | **BEAMFS v2** | **10.5281/zenodo.19886192** | INLINE RS(255,239) per-subblock; Theorems v2.1+v2.2; single-block single-node validated |
 
 The empirical scope of BEAMFS v2 (per Zenodo abstract) is summarised by:
-- Stage 3 — byte-level disk corruption recovered byte-perfect on INLINE volume.
-- Stage 4 B1 — read latency: median + p95 match ext4, p99 tail ratio 1.85x.
-- Stage 4 B2 — write+fsync: 8x p50 overhead vs ext4, but tighter distribution
+- Stage 3 - byte-level disk corruption recovered byte-perfect on INLINE volume.
+- Stage 4 B1 - read latency: median + p95 match ext4, p99 tail ratio 1.85x.
+- Stage 4 B2 - write+fsync: 8x p50 overhead vs ext4, but tighter distribution
   (1.74x p50/p99 spread vs 5.00x for ext4).
-- Stage 4 B3 — INLINE read on conformance fixture canary block, 10x ~38k
+- Stage 4 B3 - INLINE read on conformance fixture canary block, 10x ~38k
   reads, zero RS correction events, stable SHA-256.
 - Audit envelope: 2,198 lines of C in the kernel module (5,000-line budget
   for DO-178C / ECSS-E-ST-40C / IEC 61508 safety-critical certification).
@@ -191,7 +191,7 @@ each independently RS-coded).
 This is exactly what the v2 paper formalises: RS(255,239) corrects
 up to 8 symbol errors per sub-block, so a 1-symbol flip is fully
 recoverable. Two events on master out of 11 flips means 2 reads hit
-a flipped sub-block before the encode-rewrite overwrote it — the
+a flipped sub-block before the encode-rewrite overwrote it - the
 other 9 flips were neutralised silently.
 
 ---
