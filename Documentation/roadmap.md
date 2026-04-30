@@ -845,3 +845,58 @@ consists of:
 
 Editorial corrections (typos, dead links, formatting) do not
 require this process and may be applied at any time.
+
+## mkfs.beamfs userspace evolution
+
+Discovered during the multi-FS head-to-head bench (2026-04-30):
+mkfs.beamfs v1 only exposes two schemes via the `-s` option:
+
+- `inline`           = scheme=2 UNIVERSAL_INLINE, single-block scope,
+                       BEAMFS_DATA_INLINE_BYTES = 3824 user bytes max
+- `inode-universal`  = scheme=2 variant (same single-block scope)
+
+This is the **single-block scope limitation** documented in
+`file_inline.c` lines 658-664 (`-EFBIG` returned by
+`beamfs_inline_write_begin` if `pos + len > 3824`). It prevents fair
+comparison with mainstream FS (ext4, btrfs, squashfs) on files larger
+than 3824 bytes.
+
+### Required scheme evolution for v3+
+
+| Scheme name                 | Status | Use case                       |
+|-----------------------------|--------|--------------------------------|
+| `inline` (=2)               | v2 ✓   | Small data, RS-protected metadata |
+| `inode-universal` (=2)      | v2 ✓   | Variant of inline              |
+| `extent-multiblock` (planned) | v3   | Files > 3824 bytes (HPC, datasets) |
+| `extent-multiblock-rs` (planned) | v3 | Multi-block + RS FEC on data    |
+| `cow-snapshots` (planned)   | v4     | Snapshot-aware (compete with btrfs) |
+| `journal-replay` (planned)  | v4     | Crash-consistency journal       |
+
+Reference design exists in `context/INLINE-MULTIBLOCK-DESIGN.md`
+(1004 lines, 11-15h focused work estimate).
+
+## Multi-FS head-to-head bench requirements
+
+For BEAMFS scientific validation against mainstream filesystems
+(ext4, ext3, btrfs, squashfs) under RadFI live fault injection, the
+following user-visible features are required:
+
+1. mkfs.beamfs `-s extent-multiblock` for files > 3824 bytes
+2. mkfs.beamfs `--block-size=N` (currently fixed 4KB)
+3. mkfs.beamfs `-J / --journal-size` (planned for v4)
+4. beamfsd live mount/umount support (currently mount-only)
+5. `tune.beamfs` userspace for runtime FS introspection
+   (parity coverage, RS event journal, dirty block bitmap)
+
+Until these are available, the multi-FS bench is constrained to
+**files ≤ 3824 bytes** to maintain comparison fairness across all
+filesystems. This constraint is documented in test reports as a
+**v2 INLINE scope boundary**, not as a limitation of the bench
+methodology.
+
+## Other planned FS evolutions
+
+- ZFS comparison: requires meta-zfs Yocto layer (4-8h yocto work)
+- ext4 + dm-verity: read-only baseline with cryptographic integrity
+- ZFS-on-Linux DKMS: out-of-tree comparison point (CDDL/GPL caveat)
+
