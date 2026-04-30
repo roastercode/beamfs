@@ -1,13 +1,13 @@
-# BEAMFS — Beam-Resilient Filesystem
+# beamfs - Beam-Resilient Filesystem
 
 **Status: PRE-DEMO. Not for publication, not for push, not for Zenodo, not
 for kernel.org. This tree exists to validate the recovery calculus of the
 companion paper before any public release.**
 
-BEAMFS is the implementation successor to FTRFS. Where FTRFS reaches its
+beamfs is the implementation successor to FTRFS. Where FTRFS reaches its
 empirical ceiling (per the FTRFS v1 Technical Report,
 [doi:10.5281/zenodo.19824442](https://doi.org/10.5281/zenodo.19824442)),
-BEAMFS targets the formal recovery calculus described in the BEAMFS v1
+beamfs targets the formal recovery calculus described in the beamfs v1
 Technical Report (under `papers/2026-04-beamfs-v1/`).
 
 ## Lineage
@@ -22,7 +22,7 @@ The FTRFS name and original concept originates in:
 That work was developed at TU Munich (Institute for Astronautics) in the
 context of the MOVE-II CubeSat mission. FTRFS v1 (Desbrieres, 2026) is an
 independent open-source realization of the Fuchs et al. design with
-contemporary Linux kernel infrastructure. BEAMFS v1 (this repository)
+contemporary Linux kernel infrastructure. beamfs v1 (this repository)
 extends FTRFS v1 with a formal recovery operator and a soundness theorem
 (see `papers/2026-04-beamfs-v1/paper.tex`, Theorem IV.1).
 
@@ -34,7 +34,7 @@ extends FTRFS v1 with a formal recovery operator and a soundness theorem
   - `Documentation/`         design notes, threat model, roadmap, testing
   - `tools/`                 helper scripts (decode_raf_journal.py, etc.)
   - `papers/2026-04-beamfs-v1/`
-                             LaTeX source of the BEAMFS v1 paper.
+                             LaTeX source of the beamfs v1 paper.
                              Build via `cd papers/2026-04-beamfs-v1 && make`.
 
 ## Build (kernel module)
@@ -57,7 +57,7 @@ supported and is expected to fail on missing kernel APIs (such as
 
 ## Status flag
 
-- [ ] BEAMFS recovery calculus (Theorem IV.1) implemented in kernel
+- [ ] beamfs recovery calculus (Theorem IV.1) implemented in kernel
 - [ ] Bench M6 (corrupt-then-mount) implemented and passing
 - [ ] Bench M1/M2/M4/M5 reproducing FTRFS baseline within 5%
 - [ ] Yocto research image builds, mounts, runs benchmarks

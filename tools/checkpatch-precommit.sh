@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # checkpatch-precommit.sh -- run upstream Linux checkpatch.pl on staged
-# BEAMFS sources before allowing a commit.
+# beamfs sources before allowing a commit.
 #
 # This is a defensive layer against style drift and well-known bug patterns
 # (uninitialized stack variables, missing endianness conversions, locking

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — Block and inode allocator
+ * beamfs - Block and inode allocator
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Both block and inode allocators use in-memory bitmaps loaded at mount
@@ -31,7 +31,7 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * beamfs_setup_bitmap — allocate and initialize in-memory bitmaps
+ * beamfs_setup_bitmap - allocate and initialize in-memory bitmaps
  *
  * Called from beamfs_fill_super() after the superblock is read.
  *
@@ -210,7 +210,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 }
 
 /*
- * beamfs_write_bitmap — flush in-memory block bitmap to disk with RS FEC
+ * beamfs_write_bitmap - flush in-memory block bitmap to disk with RS FEC
  *
  * Encodes each 239-byte data subblock with 16 bytes of RS parity and
  * marks the bitmap buffer dirty. Called under s_lock.
@@ -251,7 +251,7 @@ int beamfs_write_bitmap(struct super_block *sb)
 }
 
 /*
- * beamfs_destroy_bitmap — free in-memory bitmaps at umount
+ * beamfs_destroy_bitmap - free in-memory bitmaps at umount
  */
 void beamfs_destroy_bitmap(struct super_block *sb)
 {
@@ -276,7 +276,7 @@ void beamfs_destroy_bitmap(struct super_block *sb)
 /* ------------------------------------------------------------------ */
 
 /*
- * beamfs_alloc_block — allocate a free data block
+ * beamfs_alloc_block - allocate a free data block
  *
  * Returns absolute block number (>= s_data_start) on success,
  * or 0 on failure (block 0 is the superblock, never a valid data block).
@@ -319,7 +319,7 @@ u64 beamfs_alloc_block(struct super_block *sb)
 }
 
 /*
- * beamfs_free_block — return a data block to the free pool
+ * beamfs_free_block - return a data block to the free pool
  */
 void beamfs_free_block(struct super_block *sb, u64 block)
 {
@@ -359,7 +359,7 @@ void beamfs_free_block(struct super_block *sb, u64 block)
 /* ------------------------------------------------------------------ */
 
 /*
- * beamfs_alloc_inode_num — allocate a free inode number
+ * beamfs_alloc_inode_num - allocate a free inode number
  *
  * Uses the in-memory inode bitmap. No I/O performed, no sb_bread under
  * spinlock.
@@ -407,7 +407,7 @@ u64 beamfs_alloc_inode_num(struct super_block *sb)
 }
 
 /*
- * beamfs_free_inode_num — return an inode number to the free pool
+ * beamfs_free_inode_num - return an inode number to the free pool
  *
  * Called from evict_inode path when nlink drops to 0.
  */

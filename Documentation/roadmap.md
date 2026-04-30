@@ -1,6 +1,6 @@
-# BEAMFS Roadmap
+# beamfs Roadmap
 
-This document is the staged plan for BEAMFS development. It complements
+This document is the staged plan for beamfs development. It complements
 two normative references and does not override them:
 
 - `Documentation/threat-model.md` (section 6) defines the architectural
@@ -36,7 +36,7 @@ table.
 
 ---
 
-## Stage 1.5 — On-disk bitmap with RS FEC (v2 format)
+## Stage 1.5 - On-disk bitmap with RS FEC (v2 format)
 
 **Status:** CLOSED 2026-04-17.
 
@@ -48,7 +48,7 @@ reads, verifies, and corrects the bitmap at mount time;
 `lib/reed_solomon`, validated byte-for-byte against the kernel
 encoder.
 
-This is the first BEAMFS stage that meets the threat model
+This is the first beamfs stage that meets the threat model
 constraint 6.3 partially: the allocation bitmap is now correctable,
 not only detectable. The superblock and inode table remain at
 detection-only at the close of this stage.
@@ -62,7 +62,7 @@ Predates the Sigstore signing infrastructure; no release tarball.
 
 ---
 
-## Stage 2 — Format extension points (v3 format)
+## Stage 2 - Format extension points (v3 format)
 
 **Status:** CLOSED 2026-04-26.
 **Tag:** `v0.2.0-format-stable` (commit 56b28c8, GPG-signed annotated).
@@ -98,7 +98,7 @@ Two latent build-time defects fixed in passing:
 
 Validated on the 4-node arm64 Slurm cluster on 2026-04-26: all 8
 phases of `bin/hpc-benchmark.sh` passed, v3 mount on all 4 nodes,
-distributed BEAMFS write via Slurm, zero BUG/WARN/Oops. 9-job
+distributed beamfs write via Slurm, zero BUG/WARN/Oops. 9-job
 throughput +6.7% above the 2026-04-21 reference, within the 20%
 regression policy. Latencies +69-83% due to a concurrent unrelated
 syzkaller campaign on the host, documented in the release note.
@@ -145,7 +145,7 @@ stage.
 
 ---
 
-## Stage 3 — Metadata hardening
+## Stage 3 - Metadata hardening
 
 **Status:** ACTIVE.
 
@@ -156,13 +156,13 @@ gap is tracked as a numbered item with its own status; items
 are sequenced so that earlier ones do not depend on later ones
 but later ones may consume artefacts of earlier ones.
 
-### Item 1 — Universal inode RS protection (CLOSED 2026-04-26)
+### Item 1 - Universal inode RS protection (CLOSED 2026-04-26)
 
 **Threat model reference:** 6.1 (no opt-in), 6.3 (correction not
 just detection) for the inode case.
 **Commits:**
-- BEAMFS `ee6b6ae beamfs: stage 3 item 1 -- universal inode RS protection (scheme 5)`
-- yocto-hardened `aaa1cca beamfs: sync layer sources from BEAMFS HEAD ee6b6ae`
+- beamfs `ee6b6ae beamfs: stage 3 item 1 -- universal inode RS protection (scheme 5)`
+- yocto-hardened `aaa1cca beamfs: sync layer sources from beamfs HEAD ee6b6ae`
 
 A new value `BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL = 5` is added
 to the `s_data_protection_scheme` enum (`BEAMFS_DATA_PROTECTION_MAX`
@@ -199,15 +199,15 @@ write/umount/remount cycle preserves counters, single-bit flip
 on inode 2 triggers RS recovery + log event + corrected
 writeback, subsequent remount succeeds, dmesg clean.
 
-### Item 2 — Superblock RS correction (CLOSED 2026-04-26)
+### Item 2 - Superblock RS correction (CLOSED 2026-04-26)
 
 **Threat model reference:** 6.3 (correction not just detection)
 for the superblock case.
 
 **Commits:**
-- BEAMFS `4227354` (commit A -- RS region helpers in edac.c)
-- BEAMFS `874dfdd` (commit B -- mkfs SB RS layout)
-- BEAMFS `584440e` (commit C -- kernel SB RS decode + dirty_super)
+- beamfs `4227354` (commit A -- RS region helpers in edac.c)
+- beamfs `874dfdd` (commit B -- mkfs SB RS layout)
+- beamfs `584440e` (commit C -- kernel SB RS decode + dirty_super)
 - yocto-hardened layer sync commits, lockstep
 
 Implementation followed the 3-commit plan A/B/C unchanged from
@@ -272,13 +272,13 @@ correctable in place at mount.
   `v0.3.0-metadata-hardening` expected **after** items 3
   and 4 are also closed.
 
-### Item 3 — Fix `beamfs_rs_decode` return convention (CLOSED 2026-04-26)
+### Item 3 - Fix `beamfs_rs_decode` return convention (CLOSED 2026-04-26)
 
 **Reference:** known-limitations 3.5.
 
 **Commits:**
-- BEAMFS `54f500c beamfs: stage 3 item 3 -- fix beamfs_rs_decode return convention (KL 3.5)`
-- yocto-hardened `451e0ad beamfs: sync layer sources from BEAMFS HEAD 54f500c`
+- beamfs `54f500c beamfs: stage 3 item 3 -- fix beamfs_rs_decode return convention (KL 3.5)`
+- yocto-hardened `451e0ad beamfs: sync layer sources from beamfs HEAD 54f500c`
 
 Resolution applied per option (1) of KL 3.5: `beamfs_rs_decode` now
 returns the symbol count on successful correction, keeps `-EBADMSG`
@@ -302,11 +302,11 @@ path in `inode.c`, superblock RS path from item 2). The new
 return contract is the prerequisite for item 4 (entropy uses
 the count).
 
-### Item 4a — Refactor SB serialization (CLOSED 2026-04-26)
+### Item 4a - Refactor SB serialization (CLOSED 2026-04-26)
 
 **Commits:**
-- BEAMFS `c75a067 beamfs: refactor SB serialization to offsetof + BUILD_BUG_ON + static_assert`
-- yocto-hardened `42a520f beamfs: sync layer sources from BEAMFS HEAD c75a067 + add invariants/validate scripts`
+- beamfs `c75a067 beamfs: refactor SB serialization to offsetof + BUILD_BUG_ON + static_assert`
+- yocto-hardened `42a520f beamfs: sync layer sources from beamfs HEAD c75a067 + add invariants/validate scripts`
 
 Refactored `beamfs_sb_serialize` and `beamfs_sb_deserialize` to use
 `offsetof()` macros throughout, with `BUILD_BUG_ON` sentinels at
@@ -317,14 +317,14 @@ verification when item 4 bumps `struct beamfs_rs_event` from 24
 to 40 bytes. Added `bin/beamfs-invariants.sh` (4 static invariants)
 and `bin/beamfs-validate.sh` (chains invariants + HPC bench).
 
-### Item 4b-dirent — Dirent slot reuse fix + research deployment (CLOSED 2026-04-26)
+### Item 4b-dirent - Dirent slot reuse fix + research deployment (CLOSED 2026-04-26)
 
 **Commits:**
-- BEAMFS `a7119c5 beamfs: fix directory entry slot reuse after deletion`
-- BEAMFS `aaa18d5 doc/roadmap: track userspace tooling integration as upstream prerequisite`
-- BEAMFS `85df057 doc/README: add 2026-04-26 HPC validation on research deployment`
+- beamfs `a7119c5 beamfs: fix directory entry slot reuse after deletion`
+- beamfs `aaa18d5 doc/roadmap: track userspace tooling integration as upstream prerequisite`
+- beamfs `85df057 doc/README: add 2026-04-26 HPC validation on research deployment`
 - yocto-hardened `0e3f9f3 beamfs: sync dirent slot reuse fix from upstream + inv5 regression guard`
-- yocto-hardened `8e3cac1 research image: hpc-arm64-research.bb + bench refactor for real /dev/vdb BEAMFS`
+- yocto-hardened `8e3cac1 research image: hpc-arm64-research.bb + bench refactor for real /dev/vdb beamfs`
 - yocto-hardened `f217af8 doc: 2026-04-26 baseline + README milestones for research deployment`
 
 Dirent slot reuse bug: `beamfs_del_dirent` zeroed the full 268-byte
@@ -340,7 +340,7 @@ added as pre-commit guard against regression.
 Research deployment: new Yocto recipe `hpc-arm64-research.bb`
 replaces `hpc-arm64-master.bb` + `hpc-arm64-compute.bb` with a
 single squashfs read-only rootfs image (~52 MB), real `/dev/vdb`
-BEAMFS partition (no more loopback), kernel cmdline-driven hostname,
+beamfs partition (no more loopback), kernel cmdline-driven hostname,
 `beamfs.ko` packaged in image (no manual injection). `hpc-benchmark.sh`
 phases 2-7 refactored. Architecture is now OIV-grade. Pre-v4 I/O
 baseline captured on this architecture and recorded in
@@ -351,7 +351,7 @@ write + fsync (10x64B) Med 24.000 ms. This baseline is the
 reference against which item 4 (v4 bump) will be compared
 (regression criterion: delta < 10 % on M1+M2).
 
-### Item 4 — Shannon entropy in RS journal (PENDING)
+### Item 4 - Shannon entropy in RS journal (PENDING)
 
 **Threat model reference:** 6.4 (tamper-evident journal).
 Reclassified as Must-have by threat-model section 8 §1.
@@ -467,7 +467,7 @@ under the same identity as `v0.1.0-baseline` and
 
 ---
 
-## Stage 4 — Universal data block protection
+## Stage 4 - Universal data block protection
 
 **Status:** PENDING.
 
@@ -507,7 +507,7 @@ choice is constrained by the LOC budget of threat-model 6.5
    write-path overhead is expected, the read-path overhead is
    expected to be small except on correction events.
 
-### RFC v4 readiness — exit conditions of stage 4
+### RFC v4 readiness - exit conditions of stage 4
 
 Per `Documentation/roadmap.md` history (the previous "Must-have
 before v4 submission" list, now incorporated here): RFC v4 to
@@ -536,7 +536,7 @@ linux-fsdevel happens immediately after this tag.
 
 ---
 
-## Stage 5 — Offensive security analysis
+## Stage 5 - Offensive security analysis
 
 **Status:** PENDING.
 
@@ -548,7 +548,7 @@ review.
 
 ### Scope
 
-- Targeted fuzzing with syzkaller against the BEAMFS module
+- Targeted fuzzing with syzkaller against the beamfs module
   syscall surface (mount, file ops, ioctls if any), and afl++
   against `mkfs.beamfs` and the mount-time parsing of corrupted
   images.
@@ -589,23 +589,23 @@ scheduled, none competes with stages 3 to 5 for attention.
 ### Read-only mode with compression
 
 A read-only mount mode combining RS FEC verification with
-optional block-level compression (lz4, zstd), positioning BEAMFS
+optional block-level compression (lz4, zstd), positioning beamfs
 as an alternative to squashfs for radiation-exposed read-only
-partitions: squashfs detects nothing, BEAMFS read-only mode
+partitions: squashfs detects nothing, beamfs read-only mode
 would detect and correct.
 
 ### Extended attributes and SELinux
 
 `security.selinux` and POSIX ACL xattrs, prerequisite for
-mandatory access control on BEAMFS partitions. Combined with the
-read-only mode above and symlink support below, makes BEAMFS
+mandatory access control on beamfs partitions. Combined with the
+read-only mode above and symlink support below, makes beamfs
 suitable as a hardened Linux rootfs.
 
 ### Symlinks and rootfs capability
 
 Required for any rootfs use. Combined with indirect blocks
 (already implemented), xattr, SB_RDONLY enforcement
-(known-limitations section 4), and the read-only mode, BEAMFS
+(known-limitations section 4), and the read-only mode, beamfs
 becomes deployable as both the root and the data partition of
 a hardened embedded Linux system.
 
@@ -622,7 +622,7 @@ threat-model 2.3.
 
 ## Userspace tooling integration (TODO)
 
-For BEAMFS to be a first-class filesystem in the Linux ecosystem
+For beamfs to be a first-class filesystem in the Linux ecosystem
 and a credible candidate for upstream submission to kernel.org,
 the userspace tooling layer needs work beyond the kernel module
 and the standalone `mkfs.beamfs` binary. The following items are
@@ -632,17 +632,17 @@ required for production-grade adoption.
 
 ### parted
 
-`parted` does not currently know about BEAMFS as a filesystem
-type. A partition formatted with BEAMFS shows up as `unknown`
+`parted` does not currently know about beamfs as a filesystem
+type. A partition formatted with beamfs shows up as `unknown`
 in `parted print` and cannot be created with `mkpart` using a
 fs-type argument of `beamfs`. Two approaches:
 
 1. Submit a patch to GNU parted (`libparted/fs/`) registering
-   BEAMFS as a known fs-type with its magic word and offset.
+   beamfs as a known fs-type with its magic word and offset.
 2. Until the patch lands upstream, ship a parted-beamfs.patch
    in this repository for downstream consumers to apply.
 
-Option 1 is the long-term play and the one that gives BEAMFS
+Option 1 is the long-term play and the one that gives beamfs
 visibility in the GNU/Linux toolchain.
 
 ### util-linux (blkid, lsblk, wipefs)
@@ -653,12 +653,12 @@ on a block device. The signature lives in
 `util-linux/libblkid/src/superblocks/`. A new
 `superblocks/beamfs.c` is required, registering:
 
-- The BEAMFS magic word `FTRF` at byte offset 0
+- The beamfs magic word `FTRF` at byte offset 0
 - The version field for `format_version` reporting
 - The UUID field for `UUID=` mount syntax
-- The label field if/when BEAMFS gains volume labels
+- The label field if/when beamfs gains volume labels
 
-Once `blkid` recognises BEAMFS, `lsblk -f`, `mount UUID=...`,
+Once `blkid` recognises beamfs, `lsblk -f`, `mount UUID=...`,
 `wipefs`, and udev rules all work transparently. This is the
 single most impactful upstream patch for end-user adoption.
 
@@ -677,7 +677,7 @@ A repair tool that can:
   explicit consent
 
 `fsck.beamfs` is invoked automatically by `fsck` from
-util-linux when the filesystem type is BEAMFS, provided the
+util-linux when the filesystem type is beamfs, provided the
 binary is named `/sbin/fsck.beamfs` per the fsck(8) convention.
 
 ### mount(8) integration
@@ -686,7 +686,7 @@ binary is named `/sbin/fsck.beamfs` per the fsck(8) convention.
 registers the filesystem type. What is missing:
 
 - An `fstab(5)` entry pattern documented in this repo
-- A udev rule to auto-mount BEAMFS partitions detected by
+- A udev rule to auto-mount beamfs partitions detected by
   blkid (once the blkid integration above lands)
 - Cleaner error messages on mount failure (currently relies
   on dmesg)
@@ -697,10 +697,10 @@ registers the filesystem type. What is missing:
 `mkfs-beamfs`, and `beamfsd`. Adding:
 
 - A `wic` plugin or kickstart fragment so Yocto images can
-  declare BEAMFS partitions natively in their `.wks` files
-- A `dm-verity`-equivalent for BEAMFS (the RS FEC layer is
+  declare beamfs partitions natively in their `.wks` files
+- A `dm-verity`-equivalent for beamfs (the RS FEC layer is
   already there at the FS level, but a verified-boot story
-  would tie BEAMFS to the trusted-boot chain)
+  would tie beamfs to the trusted-boot chain)
 
 ### Argument for kernel.org submission
 

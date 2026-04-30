@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# BEAMFS filesystem configuration
+# beamfs filesystem configuration
 #
 
 config BEAMFS_FS
-	tristate "BEAMFS Beam Electromagnetic File System (EM resilience)"
+	tristate "beamfs Beam Electromagnetic File System (EM resilience)"
 	depends on BLOCK
 	select CRC32
 	select REED_SOLOMON
 	select REED_SOLOMON_ENC8
 	select REED_SOLOMON_DEC8
 	help
-	  BEAMFS is a POSIX-compatible filesystem designed for dependable
+	  beamfs is a POSIX-compatible filesystem designed for dependable
 	  storage in electromagnetically harsh environments (radiation,
 	  IEMI, HPM, EMP, conducted EMI). It provides:
 
@@ -33,10 +33,10 @@ config BEAMFS_FS
 	  design constraint: the codebase targets under 5000 auditable lines.
 
 	  Scientific lineage:
-	  Fuchs, Langer, Trinitis — FTRFS: A Fault-Tolerant Radiation-Robust
+	  Fuchs, Langer, Trinitis - FTRFS: A Fault-Tolerant Radiation-Robust
 	  Filesystem for Space Use, ARCS 2015, TU Munich / MOVE-II CubeSat.
 	  https://www.cfuchs.net/chris/publication-list/ARCS2015/FTRFS.pdf
-	  BEAMFS extends FTRFS from a radiation-only threat model to the
+	  beamfs extends FTRFS from a radiation-only threat model to the
 	  unified electromagnetic resilience model (Documentation/threat-model.md).
 
 	  To compile as a module, choose M. The module will be called beamfs.

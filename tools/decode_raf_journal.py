@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """
-decode_raf_journal.py -- forensic decoder for the BEAMFS v4 RAF journal
+decode_raf_journal.py -- forensic decoder for the beamfs v4 RAF journal
 
-Reads a BEAMFS v4 image (raw block device dump or .img file), decodes the
+Reads a beamfs v4 image (raw block device dump or .img file), decodes the
 on-disk superblock, and dumps every entry of the 64-slot Radiation Event
 Journal (RAF) ring buffer in human-readable form.
 
@@ -297,7 +297,7 @@ def fmt_summary_text(hdr: dict, events: list, warnings: list) -> str:
     """Human-readable full report."""
     lines = []
     lines.append("=" * 76)
-    lines.append("BEAMFS v4 RAF Journal -- forensic decoder")
+    lines.append("beamfs v4 RAF Journal -- forensic decoder")
     lines.append("=" * 76)
     lines.append("")
     lines.append("Superblock header:")
@@ -353,9 +353,9 @@ def fmt_summary_text(hdr: dict, events: list, warnings: list) -> str:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
-        description="Forensic decoder for the BEAMFS v4 RAF journal")
+        description="Forensic decoder for the beamfs v4 RAF journal")
     p.add_argument("image", type=Path,
-                   help="path to BEAMFS v4 raw image (.img file or block dev dump)")
+                   help="path to beamfs v4 raw image (.img file or block dev dump)")
     p.add_argument("--json", action="store_true",
                    help="emit machine-readable JSON instead of text report")
     p.add_argument("--raw", type=int, metavar="N",

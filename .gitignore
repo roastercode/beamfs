@@ -48,3 +48,5 @@ Thumbs.db
 .*.ko.cmd
 .*.mod.cmd
 context/
+pn-buildlist
+task-depends.dot

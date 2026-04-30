@@ -1,4 +1,4 @@
-# BEAMFS Testing
+# beamfs Testing
 
 ## Test Environment
 
@@ -7,7 +7,7 @@
 - **Build system**: Yocto Styhead (5.1)
 - **Yocto layer**: https://github.com/roastercode/yocto-hardened/tree/arm64-beamfs
 - **Cluster**: Slurm 25.11.4, 1 master + 3 compute nodes
-- **BEAMFS partition**: loop image on /tmp (64 MiB) per node
+- **beamfs partition**: loop image on /tmp (64 MiB) per node
 
 ---
 
@@ -44,7 +44,7 @@ dmesg | grep beamfs | tail -5
 
 ```
 beamfs: loading out-of-tree module taints kernel.
-beamfs: module loaded (BEAMFS Fault-Tolerant Radiation-Robust FS)
+beamfs: module loaded (beamfs Fault-Tolerant Radiation-Robust FS)
 beamfs: bitmaps initialized (16377 data blocks, 16377 free; 64 inodes, 63 free)
 beamfs: mounted (blocks=16384 free=16377 inodes=64)
 beamfs: module unloaded
@@ -52,7 +52,7 @@ beamfs: module unloaded
 
 Any `uncorrectable` or `corrected` message in dmesg indicates an RS FEC
 event. `uncorrectable` at fresh mount after mkfs indicates a parity
-mismatch between mkfs and the kernel — rebuild `mkfs-beamfs`.
+mismatch between mkfs and the kernel - rebuild `mkfs-beamfs`.
 
 ---
 
@@ -69,8 +69,8 @@ for the full procedure.
 | Job submission latency (×3)  | ~0.25s   |
 | 3-node parallel job          | 0.34s    |
 | 9-job batch throughput       | 4.37s    |
-| BEAMFS mount (4 nodes)        | zero RS errors ✅ |
-| BEAMFS write from Slurm job   | ✅       |
+| beamfs mount (4 nodes)        | zero RS errors ✅ |
+| beamfs write from Slurm job   | ✅       |
 | 0 BUG/WARN/Oops              | ✅       |
 
 ### Results (2026-04-26, kernel 7.0, arm64 KVM/QEMU, post-refactor 4a)
@@ -85,8 +85,8 @@ context section below.
 | Job submission latency (×3)  | ~0.30s   |
 | 3-node parallel job          | 0.33s    |
 | 9-job batch throughput       | 4.49s    |
-| BEAMFS mount (4 nodes)        | zero RS errors ✅ |
-| BEAMFS write from Slurm job   | ✅       |
+| beamfs mount (4 nodes)        | zero RS errors ✅ |
+| beamfs write from Slurm job   | ✅       |
 | 0 BUG/WARN/Oops              | ✅       |
 
 ### Test load context
@@ -217,11 +217,11 @@ Match: True
 
 A Yocto recipe for xfstests is planned. Target tests:
 
-- `generic/001` — basic open/read/write/close
-- `generic/002` — file creation and removal
-- `generic/010` — hard links
-- `generic/098` — rename
-- `generic/257` — filesystem info (statfs)
+- `generic/001` - basic open/read/write/close
+- `generic/002` - file creation and removal
+- `generic/010` - hard links
+- `generic/098` - rename
+- `generic/257` - filesystem info (statfs)
 
 These will replace the current manual functional test sequence and provide
 reproducible results for the kernel submission cover letter.
@@ -232,7 +232,7 @@ reproducible results for the kernel submission cover letter.
 
 ### Symptom
 
-On an BEAMFS v3 image, the following sequence reproduces the bug:
+On an beamfs v3 image, the following sequence reproduces the bug:
 
 ```sh
 mkdir /data/test
@@ -271,7 +271,7 @@ the live entries that follow it within the same block. Symptoms cascade:
 
 ### Fix
 
-BEAMFS v3 uses fixed-size dirents (268 bytes packed). The fix advances
+beamfs v3 uses fixed-size dirents (268 bytes packed). The fix advances
 all scan loops by `sizeof(struct beamfs_dir_entry)` unconditionally and
 identifies free slots solely by `d_ino == 0`. The full block is always
 scanned. `d_rec_len` is preserved as a cosmetic field but no longer
@@ -298,7 +298,7 @@ inode pressure.
 ### Validation 2026-04-26: research deployment
 
 A second, stronger validation was performed on the new research
-deployment, where BEAMFS is no longer mounted from a loopback file
+deployment, where beamfs is no longer mounted from a loopback file
 (`/dev/loop0` <- `/tmp/beamfs.img`) but from a real virtio block
 device (`/dev/vdb`, 64 MB) on each of the four cluster VMs. The
 rootfs itself is a read-only squashfs (`hpc-arm64-research.bb`),

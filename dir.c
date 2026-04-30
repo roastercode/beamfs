@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — Directory operations
+ * beamfs - Directory operations
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 #include <linux/fs.h>
@@ -8,7 +8,7 @@
 #include "beamfs.h"
 
 /*
- * beamfs_readdir — iterate directory entries
+ * beamfs_readdir - iterate directory entries
  *
  * ctx->pos encoding:
  *   0, 1       : '.' and '..' (emitted by dir_emit_dots)
@@ -114,7 +114,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 }
 
 /*
- * beamfs_lookup — find dentry in directory
+ * beamfs_lookup - find dentry in directory
  */
 struct dentry *beamfs_lookup(struct inode *dir,
 			    struct dentry *dentry,

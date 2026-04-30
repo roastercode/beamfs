@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — EDAC layer: CRC32 + Reed-Solomon FEC
+ * beamfs - EDAC layer: CRC32 + Reed-Solomon FEC
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Reed-Solomon encoding/decoding uses the kernel's lib/reed_solomon
@@ -24,11 +24,11 @@
 #include <linux/rslib.h>
 #include "beamfs.h"
 
-/* RS codec handle — allocated once at module init */
+/* RS codec handle - allocated once at module init */
 static struct rs_control *beamfs_rs_ctrl;
 
 /*
- * beamfs_rs_init_tables — initialize the RS codec
+ * beamfs_rs_init_tables - initialize the RS codec
  * Called once from beamfs_init() before any mount.
  */
 void beamfs_rs_init_tables(void)
@@ -50,7 +50,7 @@ void beamfs_rs_init_tables(void)
 }
 
 /*
- * beamfs_rs_exit — release the RS codec at module exit
+ * beamfs_rs_exit - release the RS codec at module exit
  */
 void beamfs_rs_exit_tables(void)
 {
@@ -150,7 +150,7 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
 }
 
 /*
- * beamfs_rs_encode — encode @len data bytes, produce BEAMFS_RS_PARITY parity
+ * beamfs_rs_encode - encode @len data bytes, produce BEAMFS_RS_PARITY parity
  * @data:   input data (@len bytes, must be <= BEAMFS_SUBBLOCK_DATA)
  * @len:    number of data bytes (BEAMFS_SUBBLOCK_DATA for the bitmap path,
  *          BEAMFS_INODE_RS_DATA for inodes, etc.)
@@ -363,7 +363,7 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 }
 
 /*
- * beamfs_crc32 — compute CRC32 checksum
+ * beamfs_crc32 - compute CRC32 checksum
  * @buf: data buffer
  * @len: length in bytes
  *

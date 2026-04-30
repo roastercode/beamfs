@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — Inode operations
+ * beamfs - Inode operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
@@ -12,7 +12,7 @@
 #include "beamfs.h"
 
 /*
- * beamfs_iget — read inode from disk into VFS
+ * beamfs_iget - read inode from disk into VFS
  * @sb:  superblock
  * @ino: inode number (1-based)
  *

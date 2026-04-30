@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * BEAMFS — Beam Electromagnetic File System (Electromagnetic Resilience)
- * Based on: Fuchs, Langer, Trinitis — ARCS 2015
+ * beamfs - Beam Electromagnetic File System (Electromagnetic Resilience)
+ * Based on: Fuchs, Langer, Trinitis - ARCS 2015
  *
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
@@ -77,7 +77,7 @@
 #define BEAMFS_CANARY_HEADER_LEN      64
 #define BEAMFS_CANARY_PAYLOAD_LEN     (BEAMFS_DATA_INLINE_BYTES - BEAMFS_CANARY_HEADER_LEN) /* 3760 */
 #define BEAMFS_CANARY_USER_BYTES      BEAMFS_DATA_INLINE_BYTES                              /* 3824 */
-#define BEAMFS_CANARY_HEADER_STR      "BEAMFS-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
+#define BEAMFS_CANARY_HEADER_STR      "beamfs-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
 
 /*
  * Translation helpers for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
@@ -233,7 +233,7 @@ struct beamfs_rs_event {
  *
  * BINS    -- number of histogram bins over the codeword position range.
  *            Power of 2 chosen so that bin_index = pos * BINS / code_len
- *            fits in u32 arithmetic without overflow for any BEAMFS
+ *            fits in u32 arithmetic without overflow for any beamfs
  *            codeword length (max 239 bytes).
  * Q       -- fractional bits in the Q-format LUT (Q16.16 = 16 frac bits).
  *
@@ -270,9 +270,9 @@ struct beamfs_rs_event {
  *         (8 -> 13 subblocks). See Documentation/format-v4.md.
  *
  * Mount policy: strict equality with BEAMFS_VERSION_CURRENT.
- * BEAMFS is a fresh format (v1); no legacy v2/v3 images exist to
+ * beamfs is a fresh format (v1); no legacy v2/v3 images exist to
  * migrate from. Volumes created with mkfs.ftrfs (different magic)
- * are NOT mountable as BEAMFS by design (distinct filesystem).
+ * are NOT mountable as beamfs by design (distinct filesystem).
  */
 #define BEAMFS_VERSION_V1        1
 #define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V1
@@ -323,7 +323,7 @@ struct beamfs_rs_event {
 #define BEAMFS_FEAT_RO_COMPAT_SUPP   0ULL
 
 /*
- * On-disk superblock — block 0
+ * On-disk superblock - block 0
  * Total size: fits in one 4096-byte block
  */
 struct beamfs_super_block {
@@ -505,7 +505,7 @@ void beamfs_log_rs_event(struct super_block *sb,
 			size_t code_len_bytes);
 void beamfs_dirty_super(struct beamfs_sb_info *sbi);
 
-/* file.c — BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE data path (v2) */
+/* file.c - BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE data path (v2) */
 extern const struct address_space_operations beamfs_inline_aops;
 extern const struct file_operations          beamfs_inline_file_operations;
 

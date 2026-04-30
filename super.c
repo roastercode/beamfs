@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — Superblock operations
+ * beamfs - Superblock operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
@@ -18,7 +18,7 @@
 static struct kmem_cache *beamfs_inode_cachep;
 
 /*
- * alloc_inode — allocate a new inode with beamfs_inode_info embedded
+ * alloc_inode - allocate a new inode with beamfs_inode_info embedded
  */
 static struct inode *beamfs_alloc_inode(struct super_block *sb)
 {
@@ -38,7 +38,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 }
 
 /*
- * free_inode — return inode to slab cache (kernel 5.9+ uses free_inode)
+ * free_inode - return inode to slab cache (kernel 5.9+ uses free_inode)
  */
 static void beamfs_free_inode(struct inode *inode)
 {
@@ -46,7 +46,7 @@ static void beamfs_free_inode(struct inode *inode)
 }
 
 /*
- * statfs — filesystem statistics
+ * statfs - filesystem statistics
  */
 static int beamfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
@@ -66,7 +66,7 @@ static int beamfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 }
 
 /*
- * put_super — release superblock resources
+ * put_super - release superblock resources
  */
 static void beamfs_put_super(struct super_block *sb)
 {
@@ -82,7 +82,7 @@ static void beamfs_put_super(struct super_block *sb)
 }
 
 /*
- * evict_inode — called when inode nlink drops to 0 and last reference released
+ * evict_inode - called when inode nlink drops to 0 and last reference released
  * Frees the inode number back to the bitmap.
  */
 /*
@@ -380,7 +380,7 @@ struct beamfs_pending_rs_event {
 };
 
 /*
- * beamfs_fill_super — read superblock from disk and initialize VFS sb
+ * beamfs_fill_super - read superblock from disk and initialize VFS sb
  */
 int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
@@ -399,7 +399,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		return -EINVAL;
 	}
 
-	/* Read block 0 — superblock */
+	/* Read block 0 - superblock */
 	bh = sb_bread(sb, 0);
 	if (!bh) {
 		errorf(fc, "beamfs: unable to read superblock");
@@ -647,7 +647,7 @@ out_brelse:
 }
 
 /*
- * fs_context ops — kernel 5.15+ mount API
+ * fs_context ops - kernel 5.15+ mount API
  */
 static int beamfs_get_tree(struct fs_context *fc)
 {
@@ -655,11 +655,11 @@ static int beamfs_get_tree(struct fs_context *fc)
 }
 
 /*
- * beamfs_reconfigure — handle mount -o remount
+ * beamfs_reconfigure - handle mount -o remount
  *
  * xfstests calls remount,ro after each test to verify filesystem
- * integrity. BEAMFS accepts the reconfigure request without
- * taking any action — ro/rw transitions are handled by the VFS.
+ * integrity. beamfs accepts the reconfigure request without
+ * taking any action - ro/rw transitions are handled by the VFS.
  */
 static int beamfs_reconfigure(struct fs_context *fc)
 {
@@ -708,7 +708,7 @@ static int __init beamfs_init(void)
 	BUILD_BUG_ON(sizeof(struct beamfs_rs_event) != 40);
 	BUILD_BUG_ON(sizeof(struct beamfs_dir_entry) != 268);
 
-	/* Initialize GF(2^8) tables for RS FEC — once, before any mount */
+	/* Initialize GF(2^8) tables for RS FEC - once, before any mount */
 	beamfs_rs_init_tables();
 
 	beamfs_inode_cachep =
@@ -730,7 +730,7 @@ static int __init beamfs_init(void)
 		return ret;
 	}
 
-	pr_info("beamfs: module loaded (BEAMFS Beam Electromagnetic File System, EM resilience)\n");
+	pr_info("beamfs: module loaded (beamfs Beam Electromagnetic File System, EM resilience)\n");
 	return 0;
 }
 
@@ -748,7 +748,7 @@ module_exit(beamfs_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
-MODULE_DESCRIPTION("BEAMFS: Beam-Resilient Filesystem");
+MODULE_DESCRIPTION("beamfs: Beam-Resilient Filesystem");
 MODULE_VERSION("0.1.0");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

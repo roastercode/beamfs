@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — File operations
+ * beamfs - File operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 #include <linux/fs.h>
@@ -10,7 +10,7 @@
 #include <linux/buffer_head.h>
 #include "beamfs.h"
 
-/* Forward declaration — defined after iomap_ops */
+/* Forward declaration - defined after iomap_ops */
 static ssize_t beamfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from);
 
 const struct file_operations beamfs_file_operations = {
@@ -155,7 +155,7 @@ const struct iomap_ops beamfs_iomap_ops = {
 };
 
 /*
- * Write path — beamfs_iomap_write_ops
+ * Write path - beamfs_iomap_write_ops
  * get_folio/put_folio use generic helpers (no journaling required).
  */
 static struct folio *beamfs_iomap_get_folio(struct iomap_iter *iter,
@@ -183,7 +183,7 @@ static ssize_t beamfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 }
 
 /*
- * Writeback path — beamfs_writeback_ops
+ * Writeback path - beamfs_writeback_ops
  */
 static ssize_t beamfs_writeback_range(struct iomap_writepage_ctx *wpc,
 				     struct folio *folio, u64 offset,
@@ -221,7 +221,7 @@ static int beamfs_writepages(struct address_space *mapping,
 }
 
 /*
- * Read path — uses iomap_bio_read_ops (kernel-provided)
+ * Read path - uses iomap_bio_read_ops (kernel-provided)
  */
 static int beamfs_read_folio(struct file *file, struct folio *folio)
 {

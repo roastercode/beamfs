@@ -3,7 +3,7 @@
 #
 # tools/gen_entropy_lut.py
 #
-# Generates the Shannon entropy lookup table for the BEAMFS Radiation
+# Generates the Shannon entropy lookup table for the beamfs Radiation
 # Event Journal. Output is a C fragment intended to be pasted into
 # edac.c between the SENTINEL markers.
 #

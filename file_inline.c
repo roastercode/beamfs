@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS — File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
+ * beamfs - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
  *
  * Per-block Reed-Solomon FEC on user data: each 4096-byte disk block
  * holds 16 RS(255,239) shortened subblocks (3824 user bytes + 256 parity
@@ -130,7 +130,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 /*      synchronously (durable autonomic repair, mirrors alloc.c bitmap path)*/
 /*                                                                           */
 /* Single-page folios only (mapping_set_folio_order_range(0,0) in inode      */
-/* setup). MIL-STD-883 SEE coverage: validates BEAMFS resistance to RadFI    */
+/* setup). MIL-STD-883 SEE coverage: validates beamfs resistance to RadFI    */
 /* single-bit and multi-byte payload corruption injected at submit_bio.      */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_read_folio(struct file *file, struct folio *folio)

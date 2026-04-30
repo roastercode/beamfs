@@ -1,14 +1,14 @@
-# BEAMFS System Architecture
+# beamfs System Architecture
 
 ## Positioning
 
-BEAMFS is not a general-purpose filesystem and does not attempt to replace
+beamfs is not a general-purpose filesystem and does not attempt to replace
 ext4 or btrfs. It addresses a specific gap in the Linux storage stack:
 **in-place correction of silent data corruption on read-write partitions
 operating in radiation-intensive environments.**
 
-Understanding where BEAMFS fits requires understanding what the other
-components of a hardened embedded Linux system already provide — and
+Understanding where beamfs fits requires understanding what the other
+components of a hardened embedded Linux system already provide - and
 what they do not.
 
 ---
@@ -24,7 +24,7 @@ provides cryptographic integrity verification for **read-only** volumes.
 Properties:
 - Detects any modification to a protected block, including SEU-induced
   bit flips, on read
-- Cannot correct errors — a corrupted block returns an I/O error
+- Cannot correct errors - a corrupted block returns an I/O error
 - Requires the volume to be read-only; any write invalidates the tree
 - Widely used for root filesystem protection (Android Verified Boot,
   ChromeOS, embedded Linux secure boot chains)
@@ -35,9 +35,9 @@ squashfs is a compressed read-only filesystem. It has no write path
 and no allocation state. Combined with dm-verity, it provides a
 verified, compressed, immutable root filesystem.
 
-### BEAMFS
+### beamfs
 
-BEAMFS provides **in-place error correction** for **read-write** partitions.
+beamfs provides **in-place error correction** for **read-write** partitions.
 
 Properties:
 - Reed-Solomon FEC corrects up to 8 symbol errors per 239-byte subblock
@@ -46,17 +46,17 @@ Properties:
   layer redundancy is available
 - Maintains a persistent Radiation Event Journal recording each
   correction event (block number, timestamp, symbols corrected, CRC32)
-- Operates on read-write data — not suitable as a read-only filesystem
+- Operates on read-write data - not suitable as a read-only filesystem
   integrity mechanism
 
 ---
 
-## Why dm-verity and BEAMFS are complementary, not competing
+## Why dm-verity and beamfs are complementary, not competing
 
-dm-verity and BEAMFS operate on different partition types and address
+dm-verity and beamfs operate on different partition types and address
 different failure modes:
 
-| Property              | dm-verity + squashfs   | BEAMFS                    |
+| Property              | dm-verity + squashfs   | beamfs                    |
 |-----------------------|------------------------|--------------------------|
 | Access mode           | read-only              | read-write               |
 | Failure model         | detect & reject        | detect & correct         |
@@ -66,7 +66,7 @@ different failure modes:
 | Use case              | OS, firmware, binaries | mission data, logs, state |
 
 A system that uses only dm-verity has no protection for its read-write
-data partition. A system that uses only BEAMFS on the root filesystem
+data partition. A system that uses only beamfs on the root filesystem
 loses the ability to detect tampering of OS binaries. The two
 mechanisms address complementary partitions of the storage layout.
 
@@ -75,7 +75,7 @@ mechanisms address complementary partitions of the storage layout.
 ## Reference architecture for hardened embedded Linux
 
 The following partition layout represents the recommended deployment
-of BEAMFS within a complete hardened embedded Linux system:
+of beamfs within a complete hardened embedded Linux system:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -89,20 +89,20 @@ of BEAMFS within a complete hardened embedded Linux system:
 │                 Verified at boot via Merkle tree root hash  │
 │                 stored in secure boot chain (TPM / eFuse)   │
 │                                                             │
-│  /data          BEAMFS (read-write)                          │
+│  /data          beamfs (read-write)                          │
 │                 Mission data, application state             │
 │                 RS FEC: in-place SEU correction             │
 │                 Radiation Event Journal: degradation map    │
 │                                                             │
-│  /var/log       BEAMFS (read-write)                          │
+│  /var/log       beamfs (read-write)                          │
 │                 System logs, event records                  │
 │                 RS FEC protects log integrity over time     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-This layout is not theoretical. The BEAMFS Yocto layer
+This layout is not theoretical. The beamfs Yocto layer
 (`github.com/roastercode/yocto-hardened`, branch `arm64-beamfs`) deploys
-BEAMFS as a dedicated data partition (`/dev/vdb`) in an arm64 Slurm HPC
+beamfs as a dedicated data partition (`/dev/vdb`) in an arm64 Slurm HPC
 cluster, validated on kernel 7.0. The rootfs uses a separate ext4
 partition in the current Yocto build; migration to squashfs + dm-verity
 for the rootfs is a planned next step.
@@ -123,7 +123,7 @@ deployments is handled at the hardware level (radiation-hardened
 processors, TMR circuits) or by redundant storage, not at the filesystem
 level.
 
-BEAMFS addresses the case where hardware-level radiation hardening is
+beamfs addresses the case where hardware-level radiation hardening is
 either unavailable (COTS SoCs on CubeSats) or insufficient (high-energy
 particle events exceeding the hardware LET threshold). It operates at
 the filesystem level, below the application, without requiring redundant
@@ -141,8 +141,8 @@ protection on PikeOS deployments (e.g., Thales Alenia Space Inspire,
 GR740-MINI) is provided by the radiation-hardened hardware platform
 (LEON4 TMR, Frontgrade GR740).
 
-BEAMFS is not an RTOS and does not compete with PikeOS. On a Linux
-partition within a PikeOS mixed-criticality system, BEAMFS could serve
+beamfs is not an RTOS and does not compete with PikeOS. On a Linux
+partition within a PikeOS mixed-criticality system, beamfs could serve
 as the read-write data filesystem for the Linux guest, providing
 filesystem-level SEU correction that PikeOS itself does not offer.
 
@@ -150,7 +150,7 @@ filesystem-level SEU correction that PikeOS itself does not offer.
 
 ## Current scope and limitations
 
-BEAMFS in its current version is validated as a **data partition**
+beamfs in its current version is validated as a **data partition**
 filesystem. It is not yet suitable as a root filesystem due to the
 following missing features:
 
@@ -164,13 +164,13 @@ following missing features:
   before writes to the superblock. Planned fix.
 
 These are tracked in [roadmap.md](roadmap.md). The data partition use
-case — which is the primary target — is fully operational.
+case - which is the primary target - is fully operational.
 
 ---
 
 ## Post-quantum considerations
 
-The current BEAMFS integrity model uses CRC32 (per-block, per-inode,
+The current beamfs integrity model uses CRC32 (per-block, per-inode,
 per-journal-entry) and Reed-Solomon FEC. CRC32 is not a cryptographic
 hash and provides no authentication against an adversary with write
 access to the storage device.
@@ -182,7 +182,7 @@ extension could add per-block HMAC or hash-based signatures
 structures. This would provide post-quantum authenticated integrity
 while keeping the RS FEC correction layer unchanged.
 
-This extension is out of scope for the current BEAMFS design, which
+This extension is out of scope for the current beamfs design, which
 targets SEU correction in benign (non-adversarial) radiation
 environments. It is noted here for completeness and to acknowledge
 the direction of the field.
