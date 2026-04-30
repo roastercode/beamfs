@@ -79,7 +79,7 @@ Pas de code kernel encore.
 2. `setup_hosts_static` : générer `beamfs-*` dans /etc/hosts au build
 3. `slurm.conf` source : `arm64-*` → `beamfs-*` (ou fork dans yocto-beamfs)
 4. SUMMARY/DESCRIPTION du module : "Fault-Tolerant Radiation-Robust" →
-   "Beam-Resilient Filesystem"
+   "resilient filesystem"
 5. Auto-load reed_solomon avant beamfs (via modules.dep ou modprobe.d)
 
 ## Position scientifique honnête pour publication

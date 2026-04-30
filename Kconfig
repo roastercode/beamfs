@@ -4,7 +4,7 @@
 #
 
 config BEAMFS_FS
-	tristate "beamfs Beam Electromagnetic File System (EM resilience)"
+	tristate "beamfs - resilient filesystem"
 	depends on BLOCK
 	select CRC32
 	select REED_SOLOMON

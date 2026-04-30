@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * beamfs - Beam Electromagnetic File System (Electromagnetic Resilience)
+ * beamfs - resilient filesystem
  * Based on: Fuchs, Langer, Trinitis - ARCS 2015
  *
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>

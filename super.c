@@ -730,7 +730,7 @@ static int __init beamfs_init(void)
 		return ret;
 	}
 
-	pr_info("beamfs: module loaded (beamfs Beam Electromagnetic File System, EM resilience)\n");
+	pr_info("beamfs: module loaded (resilient filesystem)\n");
 	return 0;
 }
 
@@ -748,7 +748,7 @@ module_exit(beamfs_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
-MODULE_DESCRIPTION("beamfs: Beam-Resilient Filesystem");
+MODULE_DESCRIPTION("beamfs - resilient filesystem");
 MODULE_VERSION("0.1.0");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");
