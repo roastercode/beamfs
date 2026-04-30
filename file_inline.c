@@ -444,30 +444,114 @@ out_brelse:
 }
 
 /* ------------------------------------------------------------------------- */
-/* read_folio (v2 INLINE) -- per-block RS(255,239) FEC on data blocks.       */
+/* beamfs_inline_folio_coverage -- compute INLINE disk block coverage of a   */
+/*                                  VFS folio.                               */
 /*                                                                           */
-/* Single-block scope (v2.0): folio->index is treated as the disk block      */
-/* number directly. Multi-block coverage is the v2.x roadmap (see            */
-/* Documentation/roadmap.md and the INLINE multi-block design).              */
+/* The fundamental impedance: VFS folio carries PAGE_SIZE (4096) user bytes  */
+/* per index, INLINE disk block carries BEAMFS_DATA_INLINE_BYTES (3824) user */
+/* bytes. Therefore a folio at index N spans user-byte range                 */
+/*   [N * PAGE_SIZE, (N+1) * PAGE_SIZE)                                      */
+/* and intersects EXACTLY one or two consecutive INLINE disk blocks (never   */
+/* three, since 4096 < 2 * 3824).                                            */
+/*                                                                           */
+/* Outputs:                                                                  */
+/*   *out_b_first         disk block index covering folio_start_byte         */
+/*   *out_k_first         byte offset within b_first where folio begins      */
+/*   *out_b_last          disk block index covering folio_end_byte - 1       */
+/*                        (== b_first or b_first + 1)                        */
+/*   *out_len_in_b_last   bytes within b_last that the folio covers          */
+/*   *out_folio_user_bytes total user bytes in this folio (1..PAGE_SIZE)     */
+/*                                                                           */
+/* Invariants on success:                                                    */
+/*   out_b_last == out_b_first || out_b_last == out_b_first + 1              */
+/*   1 <= out_len_in_b_last <= BEAMFS_DATA_INLINE_BYTES                      */
+/*   out_k_first < BEAMFS_DATA_INLINE_BYTES                                  */
+/*   if b_last == b_first: out_folio_user_bytes == out_len_in_b_last         */
+/*   else: out_folio_user_bytes ==                                           */
+/*           (BEAMFS_DATA_INLINE_BYTES - k_first) + out_len_in_b_last        */
+/*                                                                           */
+/* Returns 0 on success, -ERANGE if folio_index is at or beyond i_size       */
+/* (caller should zero-fill and end_read in that case, per VFS).             */
+/*                                                                           */
+/* Pure integer arithmetic. No locks, no allocations. Validated out-of-band  */
+/* on 15 boundary cases (see commit message and INLINE-MULTIBLOCK-DESIGN.md  */
+/* section 1.4).                                                             */
+/* ------------------------------------------------------------------------- */
+static int beamfs_inline_folio_coverage(struct inode *inode,
+					pgoff_t folio_index,
+					u64 *out_b_first,
+					u32 *out_k_first,
+					u64 *out_b_last,
+					u32 *out_len_in_b_last,
+					u32 *out_folio_user_bytes)
+{
+	loff_t i_size = i_size_read(inode);
+	u64    folio_start_byte = (u64)folio_index << PAGE_SHIFT;
+	u64    folio_end_byte;     /* exclusive */
+	u64    b_first, b_last;
+	u32    k_first, fub, lbl;
+
+	if (folio_start_byte >= (u64)i_size)
+		return -ERANGE;
+
+	folio_end_byte = folio_start_byte + PAGE_SIZE;
+	if (folio_end_byte > (u64)i_size)
+		folio_end_byte = (u64)i_size;
+
+	b_first = folio_start_byte / BEAMFS_DATA_INLINE_BYTES;
+	k_first = (u32)(folio_start_byte % BEAMFS_DATA_INLINE_BYTES);
+	b_last  = (folio_end_byte - 1) / BEAMFS_DATA_INLINE_BYTES;
+
+	fub = (u32)(folio_end_byte - folio_start_byte);
+
+	if (b_last == b_first)
+		lbl = fub;
+	else
+		lbl = fub - (BEAMFS_DATA_INLINE_BYTES - k_first);
+
+	*out_b_first         = b_first;
+	*out_k_first         = k_first;
+	*out_b_last          = b_last;
+	*out_len_in_b_last   = lbl;
+	*out_folio_user_bytes = fub;
+
+	return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* read_folio (v2 INLINE) -- per-block RS(255,239) FEC, multi-block scope.   */
+/*                                                                           */
+/* Convention C (sliding window, VFS-conformant): folio at index N maps to   */
+/* user-byte range [N * PAGE_SIZE, (N+1) * PAGE_SIZE), and BEAMFS translates */
+/* this to one or two INLINE disk blocks at runtime via folio_coverage.      */
 /*                                                                           */
 /* Steps:                                                                    */
 /*   1) WARN if folio is not single-page (mapping_set_folio_order_range)     */
-/*   2) lookup_phys for folio->index                                         */
-/*   3) HOLE -> zero-fill folio, end_read, return 0                          */
-/*   4) decode disk block via beamfs_inline_decode_block_into_buf, slice =   */
-/*      full user area [0, BEAMFS_DATA_INLINE_BYTES)                         */
-/*   5) zero-pad the folio bytes [BEAMFS_DATA_INLINE_BYTES, BEAMFS_BLOCK_SIZE)*/
-/*   6) flush_dcache + folio_end_read                                        */
+/*   2) folio_coverage -> (b_first, k_first, b_last, len_in_b_last, fub)     */
+/*      ERANGE: folio beyond i_size -> zero-fill, end_read, return 0         */
+/*   3) for each disk block b in [b_first, b_last]:                          */
+/*       a) compute slice (offset within block, length to copy into folio)   */
+/*       b) lookup_phys for b                                                */
+/*       c) HOLE  -> memset zero the slice in the folio                      */
+/*          else  -> decode_block_into_buf with the slice                    */
+/*   4) zero-pad folio bytes [folio_user_bytes, BEAMFS_BLOCK_SIZE)           */
+/*   5) flush_dcache + folio_end_read                                        */
+/*                                                                           */
+/* HOLE handling is per-block: a multi-block folio with only one HOLE block  */
+/* gets the corresponding slice zeroed and the other slice decoded normally. */
+/* This is the sparse-file case (lseek + write past i_size).                 */
 /*                                                                           */
 /* MIL-STD-883 SEE coverage: validates BEAMFS resistance to RadFI            */
-/* single-bit and multi-byte payload corruption injected at submit_bio.      */
+/* single-bit and multi-byte payload corruption injected at submit_bio,      */
+/* across multi-block files (the v2.x WOW-factor target).                    */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 {
 	struct inode       *inode = folio->mapping->host;
 	struct super_block *sb    = inode->i_sb;
-	u64                 iblock_logical;
-	u64                 phys = 0;
+	u64                 b_first, b_last, b;
+	u32                 k_first, len_in_b_last, fub;
+	u32                 folio_offset = 0;  /* current write offset in folio */
 	u8                 *dst;
 	int                 ret;
 
@@ -477,14 +561,12 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 		goto out_unlock;
 	}
 
-	iblock_logical = folio->index;
-
-	ret = beamfs_inline_lookup_phys(inode, iblock_logical, &phys);
-	if (ret < 0)
-		goto out_unlock;
-
-	if (phys == 0) {
-		/* HOLE: zero the folio, mark uptodate, done. */
+	ret = beamfs_inline_folio_coverage(inode, folio->index,
+					   &b_first, &k_first,
+					   &b_last, &len_in_b_last,
+					   &fub);
+	if (ret == -ERANGE) {
+		/* Folio at or beyond i_size: zero-fill per VFS convention. */
 		dst = kmap_local_folio(folio, 0);
 		memset(dst, 0, BEAMFS_BLOCK_SIZE);
 		flush_dcache_folio(folio);
@@ -492,21 +574,53 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 		folio_end_read(folio, true);
 		return 0;
 	}
+	if (ret < 0)
+		goto out_unlock;
 
 	dst = kmap_local_folio(folio, 0);
 
-	ret = beamfs_inline_decode_block_into_buf(sb, phys, inode,
-						  iblock_logical,
-						  dst, 0,
-						  BEAMFS_DATA_INLINE_BYTES);
-	if (ret < 0) {
-		kunmap_local(dst);
-		goto out_unlock;
+	for (b = b_first; b <= b_last; b++) {
+		u32 slice_offset_in_block;
+		u32 slice_length;
+		u64 phys = 0;
+
+		if (b == b_first) {
+			slice_offset_in_block = k_first;
+			slice_length = (b_last == b_first)
+				? len_in_b_last
+				: (BEAMFS_DATA_INLINE_BYTES - k_first);
+		} else {
+			/* b == b_first + 1 == b_last */
+			slice_offset_in_block = 0;
+			slice_length = len_in_b_last;
+		}
+
+		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+		if (ret < 0) {
+			kunmap_local(dst);
+			goto out_unlock;
+		}
+
+		if (phys == 0) {
+			/* HOLE: zero the slice for this block. */
+			memset(dst + folio_offset, 0, slice_length);
+		} else {
+			ret = beamfs_inline_decode_block_into_buf(
+				sb, phys, inode, b,
+				dst + folio_offset,
+				slice_offset_in_block, slice_length);
+			if (ret < 0) {
+				kunmap_local(dst);
+				goto out_unlock;
+			}
+		}
+
+		folio_offset += slice_length;
 	}
 
-	/* Zero the pad zone (3824..4096) in the folio. */
-	memset(dst + BEAMFS_DATA_INLINE_BYTES, 0,
-	       BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_BYTES);
+	/* Zero the trailing portion [fub, BEAMFS_BLOCK_SIZE). */
+	if (fub < BEAMFS_BLOCK_SIZE)
+		memset(dst + fub, 0, BEAMFS_BLOCK_SIZE - fub);
 	flush_dcache_folio(folio);
 	kunmap_local(dst);
 
