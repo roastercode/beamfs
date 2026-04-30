@@ -1,6 +1,6 @@
-# BEAMFS — Recadrage opérationnel pour Claude
+# beamfs - Recadrage opérationnel pour Claude
 
-> **CLASSIFICATION INTERNAL — NEVER PUSH TO PUBLIC GITHUB**
+> **CLASSIFICATION INTERNAL - NEVER PUSH TO PUBLIC GITHUB**
 >
 > Ce document est dans `context/` (gitignored sauf exception explicite
 > dans `.gitignore` pour ce fichier précis). Il est versionné UNIQUEMENT
@@ -12,7 +12,7 @@
 **OBLIGATION DE LECTURE** : Claude doit lire ce fichier en TOUT DÉBUT
 de session, avant toute action. Ce n'est pas un guide général, c'est
 le contrat de travail entre Aurélien Desbières et l'instance Claude
-sur le projet BEAMFS (sécurité kernel, science informatique).
+sur le projet beamfs (sécurité kernel, science informatique).
 
 Si tu lis ce fichier : ne le résume pas, ne le commente pas, applique-le.
 
@@ -39,7 +39,7 @@ destructif :
 - `lsblk` tailles attendues sur la cible
 
 Si un check manque : poser le check explicitement read-only AVANT
-tout code destructif. Ne jamais "supposer" — toujours vérifier.
+tout code destructif. Ne jamais "supposer" - toujours vérifier.
 
 ## 3. Pas d'anticipation, pas d'oracle
 
@@ -60,7 +60,7 @@ frustrant", pas de meta-commentaire sur la dynamique de travail.
 
 Si Aurélien recadre : noter, appliquer, continuer. Pas de
 auto-critique en boucle. Pas d'excuses répétées. Pas de
-"je vais faire mieux" — juste faire mieux.
+"je vais faire mieux" - juste faire mieux.
 
 ## 5. Réponses courtes quand on demande court
 
@@ -74,13 +74,13 @@ ajouter "Bilan" ou "Étapes restantes" en bas de chaque message.
 
 ## 6. Le sujet = beamfs
 
-Le sujet scientifique est BEAMFS — la résistance d'un système de
+Le sujet scientifique est beamfs - la résistance d'un système de
 fichiers Linux face à des perturbations électromagnétiques (RadFI,
 bit-flips, SEE). C'est de la **sécurité kernel**.
 
 `yocto-beamfs` est la **coquille de build**, pas le sujet
-scientifique. La résistance se prouve sur BEAMFS. Ne pas confondre
-les deux. Ne pas optimiser yocto au détriment de BEAMFS.
+scientifique. La résistance se prouve sur beamfs. Ne pas confondre
+les deux. Ne pas optimiser yocto au détriment de beamfs.
 
 ## 7. Tests intégrés au harness `beamfs-bench`
 
@@ -114,7 +114,7 @@ ou recette :
 7. Runtime canary in-VM (single-block round-trip via drop_caches +
    remount, sha256 byte-identique)
 8. `beamfs-bench analyse --scope=full` complet (ex-`Tir-analyse-multifs.sh`), comparaison aux verdicts du run
-   de référence — BEAMFS doit avoir verdicts identiques
+   de référence - beamfs doit avoir verdicts identiques
 9. `hpc-benchmark-beamfs.sh` dans tolérance ±20% du baseline
 10. dmesg post-test : 0 BUG, 0 oops, 0 WARN
 
@@ -128,7 +128,7 @@ Les deux copies de `file_inline.c` doivent être byte-identiques :
 - `~/git/yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.0/file_inline.c`
 
 Vérifier par sha256 AVANT et APRÈS toute modification. Toute
-divergence est un signal d'arrêt — ne pas patcher dessus, diagnostiquer.
+divergence est un signal d'arrêt - ne pas patcher dessus, diagnostiquer.
 
 ## 10. Backup défensif obligatoire
 
@@ -178,13 +178,13 @@ reproductible). Casser ça serait inacceptable.
 
 ---
 
-## R13 — Topologie cluster : ne jamais supposer la passivité d'un node
+## R13 - Topologie cluster : ne jamais supposer la passivité d'un node
 
-Le cluster BEAMFS n'est PAS un système où `beamfs-master` est actif
+Le cluster beamfs n'est PAS un système où `beamfs-master` est actif
 et les 3 `beamfs-compute0X` sont passifs. La réalité observée
 (2026-04-30) :
 
-- Chaque compute a sa propre instance BEAMFS sur `/dev/vdb`
+- Chaque compute a sa propre instance beamfs sur `/dev/vdb`
   montée sur `/data`
 - Chaque compute tourne le kernel 7.0.3 avec `beamfs.ko`,
   `reed_solomon.ko`, et `radfi.ko` chargeables
@@ -195,7 +195,7 @@ et les 3 `beamfs-compute0X` sont passifs. La réalité observée
 ne signifie PAS que la topologie réelle est mono-node.** Cela signifie
 que ce script-là est partiel (head-to-head FS comparison sur les 5
 USB pass-through, qui sont effectivement attachés à master uniquement).
-Le vrai test système (HPC, `beamfs-bench bench` — sous-commande encore à porter depuis l'ancien `Tir.sh`) est multi-node : master + 3
+Le vrai test système (HPC, `beamfs-bench bench` - sous-commande encore à porter depuis l'ancien `Tir.sh`) est multi-node : master + 3
 computes, iobench parallèle, RadFI armable sur chaque node.
 
 **Avant toute capture forensique ou test d'attaque cluster, vérifier
@@ -239,7 +239,7 @@ done
 
 ---
 
-## R14 — Multi-remote git : ne jamais supposer que `origin` est le remote privé
+## R14 - Multi-remote git : ne jamais supposer que `origin` est le remote privé
 
 **Incident fondateur** (2026-04-30, ~22:24) : pendant la session de
 finalisation `beamfs-bench`, j'ai (Claude) lancé `git push origin devel`
@@ -288,7 +288,7 @@ git push <remote-name> <branch>
 - `roastercode/yocto-beamfs` est PRIVATE (lab layer interne, pas le
   composant public). Pas de remote privé séparé puisque le repo est
   déjà privé ; mais malgré ça, ne pas y commit de fichiers `context/`
-  ni `papers/*-findings/` (les gitignorer en amont) — l'idée est que
+  ni `papers/*-findings/` (les gitignorer en amont) - l'idée est que
   même un repo privé peut être ouvert plus tard, donc on garde la
   séparation des couches.
 - `roastercode/beamfs-bench` est PRIVATE ; outillage interne (créé
@@ -297,9 +297,9 @@ git push <remote-name> <branch>
 - `roastercode/radfi` est PRIVATE ; companion to beamfs-devel ; jamais
   public avant la coordonée release avec beamfs.
 - `roastercode/yocto-hardened` est PUBLIC (archive de hardening Yocto
-  général, sans lien BEAMFS).
+  général, sans lien beamfs).
 - `roastercode/FTRFS` est PUBLIC (archive du paper FTRFS d'origine,
-  ancestor du lineage BEAMFS).
+  ancestor du lineage beamfs).
 - Avant tout push, **toujours vérifier `gh repo view <owner>/<repo>
   --json visibility`** plutôt que de se fier à cette liste qui peut
   dériver.
@@ -322,6 +322,200 @@ Toujours :
 mais GitHub fait du GC sur les refs orphelins assez rapidement et
 sans publicisation/fork dans cette fenêtre il n'y a pas de leak
 permanent. Quand même : prévention >> correction.
+
+---
+
+## R15 - Phase tracking obligatoire
+
+À partir du 30 avril 2026 (clôture Phase 0), tout commit lié à la
+trajectoire mainline doit porter un footer `phase=N` dans le
+message, où N est le numéro de phase défini dans
+`Documentation/roadmap.md` section "Mainline preparation roadmap".
+
+**Format du commit** :
+
+feat(format-v5): add EXTENTS feature flag
+
+phase=1
+DoD: extents flag defined in beamfs.h, no behavior yet
+
+[message body]
+
+Signed-off-by: Aurélien Desbrières aurelien.desbrieres@gmail.com
+
+
+**Filtrage** : `git log --grep="phase=N"` reconstruit l'état d'une
+phase à n'importe quel moment.
+
+**Phases définies** :
+
+| Phase | Effort | Scope court                                 |
+|-------|--------|---------------------------------------------|
+| 0     | 3 h    | Cadrage formalisé (mainline-scope, format-v5-design, fsck.beamfs, roadmap update) |
+| 1     | 50 h   | Format v5.0 minimal RFC-able                |
+| 2     | 30 h   | fsck.beamfs MVP                             |
+| 3     | 12 h   | Multiblock read_folio sub-steps 4-10        |
+| 4     | 100 h  | Stage 4 close + paper v3                    |
+| 5     | 25 h   | DKMS + Yocto layer                          |
+| 6     | 75 h   | Build user base (anti-NAK)                  |
+| 7     | 50 h   | Documentation/filesystems + checkpatch zero |
+| 8     | 60 h   | RFC mainline + review cycle                 |
+
+**Pas de saut de phase sans DoD validée**. La DoD de chaque phase
+est explicite dans `roadmap.md`. Si une DoD ne peut pas être
+atteinte, on bloque la phase suivante et on documente le blocage
+dans le recadrage avant de pivoter.
+
+**Application immédiate** : tous les commits de la session du
+2026-04-30 evening (Phase 0 closure) portent `phase=0`.
+
+---
+
+## Acquis stratégiques - session 2026-04-30 evening (Phase 0)
+
+Cette section capture les décisions structurantes prises durant la
+session de clôture Phase 0. Elles sont la base de toutes les
+sessions suivantes.
+
+### Repositionnement beamfs
+
+L'ancien pitch ("FS spatial radiation-hardened") était NAK-prone
+(FTRFS-style : pas d'utilisateurs, pas de demande explicite). Le
+nouveau pitch est :
+
+> *beamfs est le seul filesystem Linux RW avec correction RS-FEC
+> native, comblant un manque mainline (dm-fec actuel ne supporte
+> que le RO). Il protège contre une classe d'attaques réelle et
+> universelle : silent data corruption d'origine matérielle ou
+> adversariale (SEU, MBU, IEMI, voltage glitch, rowhammer, aging
+> silicon, environmental radiation). Le cas spatial est un cas
+> extrême ; le cas datacenter standard est aussi adressé.*
+
+Le scope cible est universel (n'importe quel système Linux), pas
+spatial niche. Cette reformulation est documentée dans
+`Documentation/mainline-scope.md`.
+
+### Architecture v5 décidée
+
+**Format unique paramétrable** par feature flags (pattern ext4),
+exposant **3 profiles préconfigurés** au mkfs :
+
+- `embedded` : 32 KB - 100 GB volumes, 4 KB - 1 GB files, hardware-bound, aucun flag activé (= v5.0 minimal RFC-able)
+- `server`   : 1 GB - 16 EB volumes, 4 KB - 16 EB files, 50-300 µs, flags EXTENTS+64BIT+BLOCK_GROUPS+JOURNAL
+- `dax`      : 64 GB - 100 TB volumes, 4 KB - 16 EB files, 1-10 µs, flags +DAX
+
+Migration entre profiles via `tune.beamfs -O +flags` (in-place).
+Migration depuis ext4/btrfs/xfs via copie + rsync.
+
+11 INCOMPAT bits réservés, 4 RO_COMPAT bits réservés, 3 COMPAT
+bits réservés. Détails dans `Documentation/format-v5-design.md`.
+
+### Trajectoire RFC mainline
+
+**RFC initial = profile `embedded` minimal seulement** (~5-8k LoC,
+anti-NAK fort). Patches successifs ajoutent les flags un par un.
+C'est la trajectoire **f2fs / exfat** (entrée modeste, croissance
+par patches), opposée à **bcachefs** (entrée massive, éjection
+2025).
+
+Anti-FTRFS-NAK : Phase 6 dédiée à constituer une base utilisateurs
+(3-5 déploiements publics cités) AVANT la Phase 8 RFC submission.
+
+### Threat model étendu
+
+Au-delà du scope spatial original, beamfs adresse :
+
+- SEU / MBU (cosmic rays, terrestrial neutrons, baseline silicon)
+- IEMI (intentional electromagnetic interference, attack vector)
+- Voltage glitch attacks (TPM/HSM bypass attesté)
+- Rowhammer-class (DDR3/4/5 software-induced bit flips)
+- Aging silicon (NAND/DRAM charge loss)
+- Environmental radiation (altitude, latitude, solar events)
+
+Validation harness : RadFI fault injection. Tous ces vecteurs
+produisent silent data corruption non corrigée par les FS mainline
+actuels.
+
+### Décisions techniques figées
+
+**3824/4096 mismatch v4** : décision option A (garder + multiblock
+sub-steps 4-10) OU option B (INODE_UNIVERSAL séparé). Documentée
+dans `format-v5-design.md` section 4.3, décision pendante Phase 1.
+
+**Allocator scaling** : multi-bitmap chained insuffisant pour 16 EB.
+Block groups (ext-style) suffit jusqu'à 256 TB. Btree allocator
+obligatoire pour 16 EB. Trois flags coexistent : `BLOCK_GROUPS`,
+`BTREE_ALLOC`, exclusifs.
+
+**Block size** : fixé à 4096 (page size x86-64/aarch64).
+`BIGALLOC` flag autorise cluster_size > 4 KB (pattern ext4).
+
+### Out of scope explicites (à défendre dans la cover letter RFC)
+
+beamfs v5 ne fait PAS :
+- RAID natif (délégué à dm-raid/mdraid)
+- Snapshots CoW (délégué à LVM thin / btrfs subvol au-dessus)
+- Encryption native (délégué à dm-crypt)
+- Compression (orthogonal, peut-être v6+)
+- Network FS (local seulement)
+- MTD/UBI natif (block device only en v5)
+
+### Ce qu'on N'A PAS retenu
+
+**Financement** : la discussion Bpifrance/SASU/ADEC/ARCE/ACRE a été
+explicitement retirée du scope par décision user. On reste 100%
+technique. Pas de structure juridique à monter, pas de demande de
+subvention. Si la question revient, ne pas la traiter sans
+demande explicite renouvelée.
+
+**Migration in-place ext4 → beamfs** : trop coûteuse en complexité
+pour v5. Seule la migration par copie est supportée. Reconsidérer
+en v6+ si demande explicite.
+
+### 4 commits Phase 0 (sur `roastercode/beamfs-devel` PRIVATE,
+branche `mainline-prep`)
+
+b84e61a docs(fsck): add fsck.beamfs.md design document
+a46c462 docs(scope): add mainline-scope.md formalizing v5 trajectory
+0c0b590 docs(format): add format-v5-design.md skeleton
+c604c85 docs(roadmap): add 8-phase mainline preparation roadmap
+
+
+Audit R14 post-push confirmé : `mainline-prep` est uniquement sur
+`beamfs-devel` (PRIVATE), absente de `beamfs` (PUBLIC). Aucune
+fuite.
+
+### Beamfs-bench acquis
+
+Le harnais `beamfs-bench` (privé, `roastercode/beamfs-bench`) sert
+de baseline anti-régression pour toutes les phases 1-8. Économie
+estimée : ~85 h sur les 405 h totales de la trajectoire mainline.
+À chaque ajout de flag/feature, un Test régression beamfs-bench
+DOIT passer avant commit.
+
+---
+
+## R16 - Em-dash interdit
+
+L'em-dash `-` (U+2014) est interdit dans toute la doc, le code, les
+commits, les noms de fichiers, partout. Utiliser `-` (hyphen-minus,
+U+002D) systematiquement.
+
+**Pourquoi** : copy-paste depuis terminal corrompt les em-dash en
+markdown auto-link, casse la lisibilite plain-text, et empeche les
+recherches grep simples.
+
+**Application** : a partir du 30 avril 2026, tout commit qui ajoute
+un em-dash est invalide. Les em-dash existants sont remplaces en
+masse dans le commit de cleanup global Phase 0.
+
+**Detection avant commit** :
+
+```bash
+grep -rn "-" Documentation/ context/ README.md *.c *.h 2>/dev/null
+```
+
+Doit retourner vide.
 
 ---
 
