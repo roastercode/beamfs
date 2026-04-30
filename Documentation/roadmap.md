@@ -900,3 +900,144 @@ methodology.
 - ext4 + dm-verity: read-only baseline with cryptographic integrity
 - ZFS-on-Linux DKMS: out-of-tree comparison point (CDDL/GPL caveat)
 
+
+---
+
+## Mainline preparation roadmap
+
+The path from current state to RFC mainline submission is broken
+into 8 phases. Each phase has a clear Definition of Done (DoD), a
+concrete deliverable, and an effort estimate in focused work hours.
+
+### Phase 0 — Cadrage formalised
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 3 hours                                             |
+| DoD         | Documents committed on `mainline-prep`              |
+| Deliverable | mainline-scope.md, format-v5-design.md, fsck.beamfs.md |
+| Risk        | Scope creep, mitigated by atomic commits            |
+| Precondition| None                                                |
+
+### Phase 1 — Format v5.0 minimal (RFC-able baseline)
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 50 hours                                            |
+| DoD         | beamfs.h v5 + mkfs.beamfs userspace, format mountable R/W on device |
+| Deliverable | Updated beamfs.h, tools/mkfs.beamfs/, format-v5.md complete |
+| Risk        | Format break (acceptable, no production deployment) |
+| Precondition| Phase 0                                             |
+
+### Phase 2 — fsck.beamfs MVP
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 30 hours                                            |
+| DoD         | fsck.beamfs --check-only passes 1-3, exit codes ok  |
+| Deliverable | tools/fsck.beamfs/, fsck.beamfs.8 manpage, Test D   |
+| Risk        | Low (scope well defined)                            |
+| Precondition| Phase 1                                             |
+
+### Phase 3 — Multiblock read_folio (VFS impedance resolution)
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 12 hours                                            |
+| DoD         | 15 boundary tests pass, fsstress 1h no corruption   |
+| Deliverable | file_inline.c sub-steps 4-10 complete, regression tests |
+| Risk        | Race conditions, lock discipline                    |
+| Precondition| Phase 1                                             |
+
+### Phase 4 — Stage 4 close + paper v3 draft
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 100 hours (paper-heavy)                             |
+| DoD         | Paper v3 draft + Zenodo upload + arXiv preprint     |
+| Deliverable | papers/2026-XX-beamfs-v5/                           |
+| Risk        | Paper drift                                         |
+| Precondition| Phases 1, 2, 3                                      |
+
+### Phase 5 — DKMS packaging + Yocto layer
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 25 hours                                            |
+| DoD         | dkms install works on Debian/Ubuntu/Fedora/Gentoo, Yocto recipe |
+| Deliverable | packaging/dkms.conf, packaging/{debian,rpm}/, meta-beamfs/ |
+| Risk        | Distro variations                                   |
+| Precondition| Phase 1                                             |
+
+### Phase 6 — Build user base (anti-NAK FTRFS-style)
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 75 hours                                            |
+| DoD         | 3-5 public deployments cited, blog post, linux-fsdevel presence |
+| Deliverable | Site, technical blog, FOSDEM/equivalent submission, deployments referenced |
+| Risk        | Time sink, must be boxed                            |
+| Precondition| Phase 5                                             |
+
+### Phase 7 — Documentation/filesystems mainline + checkpatch zero
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 50 hours                                            |
+| DoD         | beamfs.rst Sphinx-ready, MAINTAINERS entry, checkpatch --strict zero, fs/beamfs/ restructure, selftests, fsstress + xfstests subset PASS |
+| Deliverable | Patch series 15-25 commits ready for submission     |
+| Risk        | Moderate                                            |
+| Precondition| Phases 1-3 + Phase 6 produces 3+ deployments cited  |
+
+### Phase 8 — RFC mainline + review cycle
+
+| Item        | Detail                                              |
+|-------------|-----------------------------------------------------|
+| Effort      | 60 hours (variable)                                 |
+| DoD         | Patch series merged OR explicit NAK with corrective actions for v5.1 |
+| Deliverable | Cover letter linux-fsdevel, patch series, review responses |
+| Risk        | NAK political (bcachefs-style ejection if code style fails) |
+| Precondition| All previous phases                                 |
+
+### Total
+
+| Phase | Hours | Cumulative |
+|-------|-------|------------|
+| 0     | 3     | 3          |
+| 1     | 50    | 53         |
+| 2     | 30    | 83         |
+| 3     | 12    | 95         |
+| 4     | 100   | 195        |
+| 5     | 25    | 220        |
+| 6     | 75    | 295        |
+| 7     | 50    | 345        |
+| 8     | 60    | 405        |
+
+**Total: 405 hours focused work** before mainline RFC submitted.
+
+### Commit convention
+
+Phase tracking via commit message footer:
+
+feat(format-v5): add EXTENTS feature flag
+
+phase=1
+DoD: extents flag defined in beamfs.h, no behavior yet
+
+[message body]
+
+Signed-off-by: Aurélien Desbrières aurelien@roaster.lab
+
+
+Filter via `git log --grep="phase=N"` to track per-phase progress.
+
+### Precision tooling
+
+To prevent drift across the 8 phases:
+
+- This roadmap is the source of truth for phase status.
+- Each phase has explicit DoD that must pass before moving to the next.
+- `bin/phase-status.sh` (TBD Phase 0) reports % completion per phase.
+- Weekly 30-minute "phase review" checkpoint internal to the project.
+- Beamfs-bench acquired in earlier work serves as anti-regression
+  harness for all subsequent phases.
