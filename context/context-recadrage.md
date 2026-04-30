@@ -519,4 +519,35 @@ Doit retourner vide.
 
 ---
 
+## R17 - Tagline officielle figee
+
+La tagline officielle de beamfs est, sans exception :
+
+beamfs - resilient filesystem
+
+
+Casse : tout en minuscules. Separateur : hyphen-minus (R16). Pas
+d'autre formulation toleree dans :
+
+- README.md (titre H1)
+- MODULE_DESCRIPTION dans super.c
+- Kconfig tristate
+- En-tetes SPDX-style des fichiers .c et .h
+- pr_info de chargement du module
+- Tout texte public ou commit message qui presente le projet
+
+Les anciennes formulations interdites :
+- "Beam-Resilient Filesystem"
+- "Beam Electromagnetic File System"
+- "BEAM Electromagnetic Resilience"
+- toute variante avec majuscules au-dela du nom propre "beamfs"
+
+L'expansion B-E-A-M-F-S comme acronyme est explicitement abandonnee.
+"beamfs" est un nom propre, comme f2fs, btrfs, xfs, jffs2.
+
+La portee technique (electromagnetic, radiation, adversarial bit-flip)
+est decrite dans threat-model.md, pas dans la tagline.
+
+---
+
 **Fin du contrat de recadrage. Lecture obligatoire en début de session.**
