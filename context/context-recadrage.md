@@ -82,12 +82,21 @@ bit-flips, SEE). C'est de la **sécurité kernel**.
 scientifique. La résistance se prouve sur BEAMFS. Ne pas confondre
 les deux. Ne pas optimiser yocto au détriment de BEAMFS.
 
-## 7. Tests intégrés au harness Tir
+## 7. Tests intégrés au harness `beamfs-bench`
 
-Pour tester sous attaque : utiliser `bin/Tir-analyse-multifs.sh` ou
-les autres `Tir-*.sh` du repo `yocto-beamfs/bin/`. Ne PAS écrire de
+Pour tester sous attaque : utiliser le binaire Rust unifié
+`beamfs-bench` (sous-commandes `multifs`, `analyse --scope=...`, etc.).
+Ce binaire **est le successeur direct** des scripts bash historiques
+qui vivaient dans `yocto-beamfs/bin/` : `Tir.sh`, `Tir-analyse.sh`,
+`Tir-analyse-rapide.sh`, `Tir-multifs.sh`, `Tir-analyse-multifs.sh`.
+Ces scripts ont été assemblés, augmentés (cluster-wide forensics,
+device validation pipeline R12, topologie auto-discoverée R13) et
+rassemblés dans un seul outil dynamique. Les **noms de répertoires
+de runs** restent préfixés par `Tir-multifs-<TS>/` et
+`Tir-analyse-multifs-<scope>-<TS>/` par compatibilité historique
+avec les artefacts forensiques déjà capturés. Ne PAS écrire de
 scripts de test ad-hoc parallèles. Si un nouveau test est nécessaire,
-l'ajouter au harness Tir, pas à côté.
+l'ajouter au harness `beamfs-bench` (nouveau scope = nouvelle sous-commande), pas à côté.
 
 Bench cluster perf : `bin/hpc-benchmark-beamfs.sh`.
 
@@ -104,7 +113,7 @@ ou recette :
 6. `bitbake beamfs-module` (0 erreur, 0 nouvelle warning)
 7. Runtime canary in-VM (single-block round-trip via drop_caches +
    remount, sha256 byte-identique)
-8. `Tir-analyse-multifs.sh` complet, comparaison aux verdicts du run
+8. `beamfs-bench analyse --scope=full` complet (ex-`Tir-analyse-multifs.sh`), comparaison aux verdicts du run
    de référence — BEAMFS doit avoir verdicts identiques
 9. `hpc-benchmark-beamfs.sh` dans tolérance ±20% du baseline
 10. dmesg post-test : 0 BUG, 0 oops, 0 WARN
@@ -182,11 +191,11 @@ et les 3 `beamfs-compute0X` sont passifs. La réalité observée
 - Les 3 computes sont des **cibles à part entière**, pas des
   observateurs ; toute capture forensique réelle doit les couvrir
 
-**Le fait qu'un script legacy (`Tir-multifs.sh`) ne touche que master
+**Le fait que la sous-commande `beamfs-bench multifs` (ex-`Tir-multifs.sh`) ne touche que master
 ne signifie PAS que la topologie réelle est mono-node.** Cela signifie
 que ce script-là est partiel (head-to-head FS comparison sur les 5
 USB pass-through, qui sont effectivement attachés à master uniquement).
-Le vrai test système (HPC, `Tir.sh`) est multi-node : master + 3
+Le vrai test système (HPC, `beamfs-bench bench` — sous-commande encore à porter depuis l'ancien `Tir.sh`) est multi-node : master + 3
 computes, iobench parallèle, RadFI armable sur chaque node.
 
 **Avant toute capture forensique ou test d'attaque cluster, vérifier
@@ -223,10 +232,85 @@ done
 - `beamfs-bench analyse` doit pouvoir capturer **les 4 nodes** quand
   le scope l'exige (default = master pour `analyse` qui enveloppe
   `multifs`, mais `analyse --scope=full` couvre les 4)
-- `beamfs-bench bench` (port futur de `Tir.sh`) sera multi-node par
+- `beamfs-bench bench` (port futur de l'ancien `Tir.sh`, encore à faire) sera multi-node par
   conception (HPC iobench)
 - Toute future règle "single-node" doit être justifiée par une raison
   hardware (USB pass-through), pas par fainéantise de capture
+
+---
+
+## R14 — Multi-remote git : ne jamais supposer que `origin` est le remote privé
+
+**Incident fondateur** (2026-04-30, ~22:24) : pendant la session de
+finalisation `beamfs-bench`, j'ai (Claude) lancé `git push origin devel`
+sur le repo `~/git/beamfs/`. Or ce repo a DEUX remotes :
+
+- `origin` -> `git@github.com:roastercode/beamfs.git` (PUBLIC)
+- `devel`  -> `git@github.com:roastercode/beamfs-devel.git` (PRIVATE)
+
+La branche `devel` (contenant des findings scientifiques pre-publication
+v3, par construction confidentiels) a donc été poussée sur le repo
+PUBLIC pendant ~5 minutes avant détection et `git push origin --delete devel`
+correctif. Aucun fork ni indexation détectés, mais l'incident illustre
+qu'on ne peut pas se fier à la convention "origin = remote par défaut
+= mon remote privé". Sur les repos d'Aurélien, **la convention est
+inversée** : `origin` est le remote PUBLIC (mirroring grand public),
+les remotes auxiliaires nommés (`devel`, etc.) sont les remotes privés.
+
+**Règle** : avant tout `git push`, **lire `git remote -v` et vérifier
+explicitement la visibilité GitHub du remote cible**, en particulier
+quand on pousse une branche dont le contenu n'est PAS destiné au
+public.
+
+**Pré-flight obligatoire** avant tout `git push` de branche autre que
+`main` ou de matériel pre-publication (findings, drafts, context/) :
+
+```bash
+# 1. Lister les remotes et leur URL
+git remote -v
+
+# 2. Pour chaque remote candidat, vérifier la visibilité GitHub
+gh repo view <owner>/<repo> --json name,visibility
+
+# 3. UNIQUEMENT si visibility=PRIVATE pour le remote choisi : push
+git push <remote-name> <branch>
+```
+
+**Conventions à appliquer sans exception sur les repos d'Aurélien :**
+
+- `roastercode/beamfs` est PUBLIC ; `origin` y pointe ; n'y push QUE
+  ce qui est destiné public (main code, README, docs publiques).
+- `roastercode/beamfs-devel` est PRIVATE ; remote nommé `devel` y
+  pointe ; y push tout ce qui est `context/`, `papers/*-findings/`,
+  drafts pre-publication, et toute branche de travail (`devel`, autres
+  topic branches).
+- `roastercode/yocto-beamfs` est PUBLIC ; pas de remote privé associé ;
+  ne jamais y commit de fichiers `context/` ni `papers/*-findings/`
+  (les gitignorer en amont).
+- `roastercode/beamfs-bench` est PRIVATE ; à créer avec `gh repo create
+  --private` ; outillage interne, jamais public sans review.
+- `roastercode/radfi` est PRIVATE ; convention identique.
+- Tous les autres repos `roastercode/*` (yocto-hardened, etc.) sont
+  PUBLIC sauf indication contraire dans ce fichier.
+
+**Conséquence opérationnelle pour Claude** : quand le user demande
+"push", ne JAMAIS utiliser `git push origin <branch>` aveuglément.
+Toujours :
+
+1. `cd` dans le repo concerné
+2. `git remote -v` pour voir les remotes locaux disponibles
+3. Si plus d'un remote, demander confirmation au user OU vérifier la
+   visibilité GitHub du remote choisi avant push
+4. Pour les branches autres que `main`, défaut = remote privé si
+   le contenu inclut `context/`, `papers/*-findings/`, ou tout
+   matériel pre-publication
+
+**Si l'incident se reproduit** : le seul recours est `git push <public-remote>
+--delete <branch>` immédiat, suivi d'une vérification `git ls-remote
+--heads <public-remote>`. La branche aura été visible quelques minutes,
+mais GitHub fait du GC sur les refs orphelins assez rapidement et
+sans publicisation/fork dans cette fenêtre il n'y a pas de leak
+permanent. Quand même : prévention >> correction.
 
 ---
 

@@ -69,22 +69,57 @@ super.c:	pr_info("beamfs: module loaded (BEAMFS Beam Electromagnetic File System
 3. Skip `papers/`, all `BEAMFS_*` macros, `"BEAM"` magic literal,
    `EMPIRICAL-FINDINGS.md` title, `format-v4.md` normative refs.
 4. Test build (`bitbake beamfs-module`) after each `.c`/`.h` commit.
-5. Run `Tir-analyse-multifs` after the kernel-source pass to confirm
+5. Run `beamfs-bench analyse --scope=full` (ex-`Tir-analyse-multifs.sh`) after the kernel-source pass to confirm
    no regression.
 
 ---
 
 ## TODO 2 — beamfs-bench (Rust unified harness)
 
-Replace the 5 shell scripts in `~/git/yocto-beamfs/bin/`:
-  - Tir.sh (443 lines)
-  - Tir-analyse.sh (206)
-  - Tir-analyse-rapide.sh (27)
-  - Tir-multifs.sh (425)
-  - Tir-analyse-multifs.sh (75)
+**Status (2026-04-30)** : DONE for `multifs` + `analyse` scopes.
+The 5 shell scripts that originally lived in `~/git/yocto-beamfs/bin/`
+have been assembled, augmented (cluster-wide forensics, R12 device
+validation, R13 topology auto-discovery), and rassembled into a
+single Rust binary `beamfs-bench`. The ancestor scripts were:
 
-Total: 1176 lines of bash to consolidate into a single Rust binary
-`beamfs-bench` with subcommands.
+  - Tir.sh (443 lines)              -> `beamfs-bench bench` (PENDING)
+  - Tir-analyse.sh (206)            -> `beamfs-bench analyse` (DONE)
+  - Tir-analyse-rapide.sh (27)      -> merged into `analyse --scope=quick` (DONE)
+  - Tir-multifs.sh (425)            -> `beamfs-bench multifs` (DONE)
+  - Tir-analyse-multifs.sh (75)     -> `analyse --scope=full` (DONE)
+
+Total: 1176 lines of bash assembled into a single Rust binary
+`beamfs-bench` with subcommands. Validation matrix executed against
+the live 4-node BEAMFS cluster on 2026-04-30 (multifs, analyse quick,
+analyse standard, analyse full); 5 successful runs covering 5 FS,
+3 probabilities, and cluster-wide RadFI saturation on 4 nodes
+simultaneously (48 confirmed flips, 0 corruption).
+
+**Remaining work to fully close TODO 2** :
+
+1. Extract `beamfs-bench/` from `yocto-beamfs/` to a dedicated private
+   repository `roastercode/beamfs-bench` (subtree split, keeping the
+   3 commits of history). After extraction: `git rm -r beamfs-bench/`
+   in yocto-beamfs and replace by `beamfs-bench/MOVED.md` pointer.
+
+2. Move the legacy `bin/Tir-*.sh` files in `yocto-beamfs/` to
+   `bin/legacy/` and add a README explaining they are kept for
+   historical reference only and that `beamfs-bench` is the
+   replacement. Removing them entirely is also acceptable since
+   `beamfs-bench` reproduces (and extends) all their functionality.
+
+3. Port the last unported script `Tir.sh` (443 lines, HPC iobench)
+   to `beamfs-bench bench` subcommand. Multi-node by design.
+
+4. Implement 4 new scopes that did not exist in legacy bash:
+   `metadata` (Test A — superblock/inode/journal targeted attack),
+   `crash` (Test B — virsh destroy mid-write + remount),
+   `bitrot` (Test C — dd random on offline partition),
+   `fsck` (Test D — fsck recovery post-FS_PANIC).
+
+5. Fix the `perf record` header data_size=0 race in
+   `forensics::stop_perf_master` (currently the polling on
+   `pgrep -x perf` exits before perf flushes its file header).
 
 ### 2.1 — Subcommand layout
 
