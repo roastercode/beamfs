@@ -54,3 +54,7 @@ Thumbs.db
 context/*
 !context/context-recadrage.md
 !context/TODO.md
+
+# Bitbake transient artefacts (do not commit)
+pn-buildlist
+task-depends.dot
