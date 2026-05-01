@@ -638,22 +638,22 @@ out_unlock:
 static void beamfs_inline_readahead(struct readahead_control *rac)
 {
 	struct folio *folio;
+
 	while ((folio = readahead_folio(rac)))
 		beamfs_inline_read_folio(rac->file, folio);
 }
 
 /* ------------------------------------------------------------------------- */
-/* write_begin (v2 INLINE, single-block scope)                               */
+/* write_begin (v2 INLINE, multi-block scope)                                */
 /*                                                                           */
 /* Provides a folio for the write to land into. The actual encoding to disk  */
 /* (RS encode + sync) happens in writepages.                                 */
 /*                                                                           */
-/* SCOPE LIMITATION (v2.0): only single-block files (file_offset + len <=    */
-/* BEAMFS_DATA_INLINE_BYTES = 3824). Multi-block INLINE writes are rejected  */
-/* with -EFBIG. The reason is the impedance mismatch between the VFS folio  */
-/* model (4096 user bytes per page) and the INLINE layout (3824 user bytes  */
-/* per disk block). Multi-block INLINE write is deferred to the v2.x roadmap*/
-/* per Documentation/format-v4.md section 7.5.                               */
+/* MULTI-BLOCK SCOPE: pos+len may span across a 4096-byte folio boundary    */
+/* into 1 or 2 underlying INLINE disk blocks (3824 user bytes per block).   */
+/* RMW via read_folio populates the folio with the existing data of the     */
+/* covered block(s) before the user write lands; writepages later RS-encodes*/
+/* and writes back the covered blocks. See INLINE-MULTIBLOCK-DESIGN.md S2.3.*/
 /*                                                                           */
 /* RMW handling:                                                             */
 /*   - If the folio is already uptodate, no read is needed (overwrite).      */
@@ -665,19 +665,17 @@ static int beamfs_inline_write_begin(const struct kiocb *iocb,
 				     loff_t pos, unsigned int len,
 				     struct folio **foliop, void **fsdata)
 {
+	pgoff_t       index;
 	struct folio *folio;
 	int           ret;
 
-	/* v2.0 scope: single-block only. */
+	/* multi-block scope: 1 or 2 underlying INLINE disk blocks. */
 	if (pos < 0 || len == 0)
 		return -EINVAL;
-	if ((u64)pos + len > BEAMFS_DATA_INLINE_BYTES) {
-		pr_warn_ratelimited("beamfs/inline: write_begin: pos+len=%llu exceeds single-block scope (3824 bytes); multi-block INLINE write is v2.x roadmap\n",
-				   (unsigned long long)((u64)pos + len));
-		return -EFBIG;
-	}
 
-	folio = __filemap_get_folio(mapping, 0,
+	index = pos >> PAGE_SHIFT;
+
+	folio = __filemap_get_folio(mapping, index,
 				   FGP_WRITEBEGIN | FGP_NOFS,
 				   mapping_gfp_mask(mapping));
 	if (IS_ERR(folio))
