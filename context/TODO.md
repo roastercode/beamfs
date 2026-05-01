@@ -201,11 +201,11 @@ Total: 10-12h focused work.
 
 ---
 
-## TODO 3 - Sub-step 4 of multiblock design
+## TODO 3 - INLINE-MULTIBLOCK sub-steps (Sub-step 4 DONE 2026-05-01)
 
 Continue the 10-step INLINE-MULTIBLOCK-DESIGN.md sequence:
 
-- Sub-step 4: `write_begin` multi-block (remove `-EFBIG`), 30 min
+- Sub-step 4: `write_begin` multi-block (remove `-EFBIG`), 30 min - DONE 2026-05-01 (commit beamfs cd02a547, manifest 20260501T154348Z, R19 overall_rc=0)
 - Sub-step 5: `writepages` multi-folio + `writeback_folio` +
   scratch kmalloc + `i_alloc_mutex`, 3h
 - Sub-step 6: `setattr` truncate, 1h
@@ -260,6 +260,61 @@ predates sub-steps 2-3 multiblock-read. It needs an update to mention:
 - TODO.md (this file) as the live deferred work list
 
 Estimated 10 min.
+
+---
+
+## TODO 7 - Pipeline MIL no-NAK improvements (low priority)
+
+The pipeline `beamfs-bench full` is operational since 2026-05-01
+with 9 phases fail-closed and GPG-signed audit manifest. Possible
+improvements identified during the substep-4 validation session
+(none blocking, all incremental hardening) :
+
+### 7.1 - Manifest provenance enrichment
+
+Add to manifest JSON :
+- ext2 deployed sha256 per VM (4 entries) -- proves redeploy
+  reached the libvirt images dir, not just that the build artifact
+  was correct.
+- super.c warnings count (frame-larger-than) -- track regression.
+- bitbake task summary count (Attempted vs Succeeded).
+- gpg signing key fingerprint embedded in manifest body.
+
+### 7.2 - xfstests harness integration
+
+Add `beamfs-bench xfstests` subcommand running generic/{001,002,
+010,098,257}. Required for sub-step 9 of INLINE-MULTIBLOCK and
+for stage 4 closure (RFC v4 readiness, cf roadmap.md).
+
+### 7.3 - checkpatch strict gate in pipeline
+
+Add Phase 0.25 between lockstep (0.2) and bitbake (0.3) :
+checkpatch.pl --strict on all .c/.h, fail closed if any new
+warning vs baseline. Currently checkpatch is run manually.
+
+### 7.4 - Pipeline self-test
+
+Add a meta-test that intentionally creates a stale-code scenario
+(e.g. revert one source file in yocto layer without touching
+~/git/beamfs/) and verifies that pipeline Phase 0.2 lockstep
+detects the divergence and aborts. Proves the pipeline is
+actually fail-closed, not just exit-0-prone.
+
+### 7.5 - bring_cluster_up reuse vs deletion
+
+Currently `lifecycle.rs::bring_cluster_up` was deleted (orphan
+after pipeline absorbed it). All sub-helpers (define_missing_vms,
+destroy_all_vms, start_network, start_all_vms, wait_ssh_ready_
+parallel) remain pub. If a future use case needs the legacy
+compound, recreate it as `lifecycle::cold_start_cluster()` with
+clearer scoping.
+
+### 7.6 - SBOM stronger than current Yocto SPDX
+
+Current image embeds Yocto SPDX (do_create_image_sbom_spdx).
+For MIL-grade audit, link manifest -> Yocto SPDX explicitly :
+copy SPDX tarball into Documentation/runs/manifest-<stamp>-sbom.tar.gz
+and reference its sha256 in manifest JSON.
 
 ---
 

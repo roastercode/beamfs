@@ -4,7 +4,7 @@
 > navigation, then `context/context-recadrage.md` (R0-R28) for the
 > operational contract, then THIS file for current state.
 
-Etat reel au 2026-05-01 fin-session beamfs-bench full implementation.
+Etat reel au 2026-05-01 evening, sub-step 4 closed + pipeline MIL operationnel.
 
 Storage canonique : `~/git/beamfs/context/STATUS.md` (NEVER published).
 
@@ -95,9 +95,32 @@ SSH user hpcadmin, key ~/.ssh/hpclab_admin (no passphrase).
 (see `context/TODO.md` for the live deferred work list)
 
 Top of mind :
-1. Audit coherence finale documentation : DONE 2026-05-01 (this update)
-2. R24-R28 ajout au recadrage : in flight
-3. Stage 3 metadata hardening : ACTIVE (cf roadmap.md)
-4. fsck.beamfs MVP : Phase 2 mainline-prep, future session
+1. Audit coherence finale documentation : DONE 2026-05-01 (handoff session)
+2. R24-R28 ajout au recadrage : DONE 2026-05-01
+3. **Pipeline MIL no-NAK operationnel** : DONE 2026-05-01 evening
+   - beamfs-bench full = 9 phases fail-closed validation chain
+   - manifest JSON GPG-signed audit-grade en Documentation/runs/
+   - in-VM identity check (sha256 beamfs.ko match reference)
+4. **Sub-step 4 INLINE-MULTIBLOCK CLOSED** : DONE 2026-05-01 evening
+   - file_inline.c write_begin: -EFBIG removed, pos>>PAGE_SHIFT
+   - readahead hygiene blank line fix (checkpatch 0 warnings)
+   - pipeline R19 overall_rc=0, manifest 20260501T154348Z signed
+   - in-VM beamfs.ko sha256 match on 4 nodes
+   - multifs RECOVERED 3/3 + cluster RECOVERED 12/12
+   - dmesg clean on 4 nodes
+   - commit beamfs cd02a547 (devel/mainline-prep PRIVATE)
+   - commit yocto-beamfs b5e277e (origin/main PRIVATE) validate
+   - commit beamfs-bench 9cd6e50 (origin/main PRIVATE) pipeline
+5. **Recadrage section 0 cristallise** : DONE 2026-05-01 evening
+   - mapping v2 PUBLIC / devel v3 PRIVATE / v3 PUBLIC futur
+   - conditions publication v3 explicitees
+   - lecture ligne-a-ligne obligatoire renforcee
+6. **Sub-step 5 INLINE-MULTIBLOCK** : NEXT (writepages multi-folio +
+   RMW writeback + per-inode allocation mutex). Effort estime 3h.
+   Design : context/INLINE-MULTIBLOCK-DESIGN.md section 2.4 + 5
+   step 5. C'est le sub-step qui exerce reellement write_begin
+   multi-block au runtime (cross-block-boundary writes).
+7. Stage 3 metadata hardening : ACTIVE (cf roadmap.md)
+8. fsck.beamfs MVP : Phase 2 mainline-prep, future session
 
 End of STATUS.md.
