@@ -116,11 +116,12 @@ simultaneously (48 confirmed flips, 0 corruption).
    subcommand is no longer needed; cluster perf measurement happens
    inside `analyse --scope=full` cluster phase.
 
-4. PENDING : Implement 4 new scopes that did not exist in legacy bash:
-   `metadata` (Test A - superblock/inode/journal targeted attack),
-   `crash` (Test B - virsh destroy mid-write + remount),
-   `bitrot` (Test C - dd random on offline partition),
-   `fsck` (Test D - fsck recovery post-FS_PANIC).
+4. DONE 2026-05-01 : 4 new scopes implemented and validated:
+   `bitrot`   (Test C - dd random on offline partition)            DONE morning
+   `metadata` (Test A - superblock/inode/journal targeted attack)  DONE midday
+   `crash`    (Test B - virsh destroy mid-write + remount)         DONE afternoon
+   `fsck`     (Test D - fsck recovery post-FS_PANIC)               DONE afternoon
+   All 4 modules : 5/5 to 20/20 phases OK, exit 0, R19 vert.
 
 5. PENDING : Fix the `perf record` header data_size=0 race in
    `forensics::stop_perf_master` (currently the polling on
@@ -141,10 +142,10 @@ beamfs-bench multifs       # DONE - 5 FS x 3 probs head-to-head on USB
 beamfs-bench analyse       # DONE - forensic wrapper (3 scopes: quick/standard/full)
 beamfs-bench full          # DONE - lifecycle + bootstrap + analyse scope=full
                            #        canonical pre-push validation (R19)
-beamfs-bench metadata      # PENDING - Test A - metadata-targeted attack
-beamfs-bench crash         # PENDING - Test B - crash consistency
-beamfs-bench bitrot        # PENDING - Test C - bit-rot offline
-beamfs-bench fsck          # PENDING - Test D - fsck recovery post-FS_PANIC
+beamfs-bench metadata      # DONE - Test A - metadata-targeted attack
+beamfs-bench crash         # DONE - Test B - crash consistency
+beamfs-bench bitrot        # DONE - Test C - bit-rot offline
+beamfs-bench fsck          # DONE - Test D - fsck recovery post-FS_PANIC
 
 
 Common flags (existing) : `--auto-confirm`, `--dry-run`, `--scope`,
@@ -186,7 +187,7 @@ Total: 10-12h focused work.
 3. DONE 2026-05-01 : `beamfs-bench full` added (lifecycle + bootstrap +
    analyse scope=full). Replaces the originally-planned `bench` subcommand
    which was redundant with `full`'s cluster phase.
-4. PENDING : 4 new test scopes (metadata, crash, bitrot, fsck).
+4. DONE 2026-05-01 : 4 new test scopes (metadata, crash, bitrot, fsck).
 5. PENDING : decide whether to physically remove `bin/Tir-*.sh` (currently
    kept in place, no longer invoked per R19).
 6. PENDING : bench-v2 multi-capability report

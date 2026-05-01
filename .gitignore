@@ -52,7 +52,9 @@ Thumbs.db
 # This file is the operational contract for Claude on the BEAMFS project.
 # Versioned on roastercode/beamfs-devel (private) only, never on public.
 context/*
+!context/00-MINDMAP.md
 !context/context-recadrage.md
+!context/STATUS.md
 !context/TODO.md
 
 # Bitbake transient artefacts (do not commit)

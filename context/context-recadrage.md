@@ -108,7 +108,7 @@ Sous-commandes restantes :
 - `beamfs-bench multifs` : multifs seul (USB sticks, sans cluster)
 - `beamfs-bench analyse --scope=quick|standard|full` : forensics modulaire
 - `beamfs-bench full` : pipeline complet autonome (canonique pre-push)
-- `beamfs-bench metadata|crash|bitrot|fsck` : stubs (Phase tooling future)
+- `beamfs-bench bitrot|metadata|crash|fsck` : DONE 2026-05-01 (4 nouveaux tests scopes)
 
 Ne PAS écrire de scripts de test ad-hoc parallèles. Si un nouveau test
 est nécessaire, l'ajouter au harness `beamfs-bench` comme nouvelle
@@ -801,7 +801,7 @@ le legacy non-BEAMFS dans yocto-hardened, hors scope BEAMFS).
 Recipes connexes dans yocto-beamfs :
 
   recipes-kernel/linux/linux-mainline_7.0.3.bb : kernel 7.0.3
-  recipes-kernel/linux/files/BEAMFS-arm64.cfg  : kernel config arm64
+  recipes-kernel/linux/BEAMFS-arm64.cfg        : kernel config arm64
   recipes-kernel/linux/files/multifs.cfg       : kernel config multifs
   recipes-kernel/beamfs/beamfs-module_0.1.0.bb : module BEAMFS
   recipes-kernel/beamfs/mkfs-beamfs_0.1.0.bb   : mkfs.beamfs userspace
@@ -822,3 +822,151 @@ Image produite :
 
 Deployee aux 4 VMs via copie binaire vers
 /var/lib/libvirt/images/hpc-arm64/beamfs-{master,compute01,compute02,compute03}.img
+
+## R24 - R-CWD : invocation bench depuis yocto-beamfs
+
+Le binaire `beamfs-bench full` cherche le repo root yocto-beamfs depuis
+le CWD courant via `analyse.rs::find_yocto_root()`. Si CWD ne resout
+pas vers `~/git/yocto-beamfs/`, l'invocation echoue avec :
+
+  `could not locate yocto-beamfs repo root from <cwd> or exe path`
+
+Donc l'invocation canonique R19 est :
+
+```bash
+cd ~/git/yocto-beamfs
+beamfs-bench full --auto-confirm
+```
+
+Piege observe : `script -q -c "beamfs-bench full" /tmp/run.log` change
+le CWD effectif et casse la resolution de root. Ne pas utiliser script(1)
+pour capturer R19 ; rediriger stdout/stderr classiquement :
+
+```bash
+cd ~/git/yocto-beamfs
+beamfs-bench full --auto-confirm 2>&1 | tee /tmp/r19.log
+```
+
+---
+
+## R25 - R-bg-detach : SSH background commands need full FD detach
+
+Quand le worker.sh lance un process background via SSH (ex : crash
+test dd loop), le bash backgrounded herite des stdin/stdout/stderr du
+shell parent SSH. Tant que les FDs sont ouverts, la connection SSH
+parent attend EOF. Sans detach, `ssh.exec_lenient` bloque.
+
+Pattern correct (referencer pour modules futurs) :
+
+```bash
+sudo nohup bash -c "
+    (process_in_loop)
+" </dev/null >/dev/null 2>&1 &
+PID=$!
+disown $PID 2>/dev/null || true
+echo $PID > /tmp/worker-bg-$TS.pid
+```
+
+Trois elements indispensables :
+- `nohup`            : detach SIGHUP au logout SSH
+- `</dev/null`       : ferme stdin
+- `>/dev/null 2>&1`  : ferme stdout + stderr
+- `&` puis `disown`  : detache du job control bash
+
+Sans ces 4 elements, le worker SSH bloque indefiniment.
+
+Pattern documente dans worker.sh fonction `crash_start_writer`
+(2026-05-01 commit `df76a4d`).
+
+---
+
+## R26 - R-tracing-rigueur : outils professionnels, pas bricolage
+
+Pour tout diagnostic de comportement kernel/FS, utiliser les outils
+fsdevel professionnels disponibles dans l'image canonique R23 :
+
+| Outil      | Use case                                      |
+|------------|-----------------------------------------------|
+| strace     | syscalls userspace + errno                    |
+| blktrace   | I/O block layer events                         |
+| ftrace     | kernel function tracing (debugfs)              |
+| perf       | sampling profiling + counters                 |
+| trace-cmd  | wrapper ftrace                                 |
+| dmesg      | kernel ring buffer (lecture **structuree**)    |
+
+**Anti-patterns interdits** (bricolage) :
+- `bash -x` + `set -x` comme outil de diagnostic principal
+- `dmesg | grep <keyword>` comme analyse complete
+- `cat /proc/...` ad-hoc sans tarball forensic
+- diagnostic empirique base sur pattern matching shell sans capture
+
+**Pattern correct** :
+
+1. Capture forensic via tarball : `tar czf /tmp/diag-$TS.tar.gz <files>`
+2. Outils tracing en parallele du test (strace + blktrace concurrent)
+3. dmesg lecture **structuree** (parser par categories : EIO,
+   journal_replay, panic, fsck_needed, etc.)
+4. Decision basee sur **donnees empiriques convergentes** depuis 3
+   sources, pas une seule.
+
+---
+
+## R27 - R-anchor-exact : Python patches via byte-for-byte count==1
+
+Pour tout patch Python sur fichier code/doc, utiliser exclusivement
+le pattern :
+
+```python
+old = bytes(...)  # anchor exact byte-for-byte
+new = bytes(...)
+assert content.count(old) == 1, "anchor not unique"
+content = content.replace(old, new, 1)
+```
+
+**Anti-patterns interdits** :
+- `re.search(...)` ou `re.sub(...)` multilignes pour suppression de code
+- `re.compile(r'...', re.DOTALL)` pour matcher un bloc fonction
+- regex gourmandes type `[^}]*\}` pour delimiter
+
+Cause : les regex multilignes peuvent matcher au-dela de l'intention
+(greedy by default), supprimant du code adjacent. Incident observe
+2026-05-01 : tentative de suppression de `cmd_not_yet_implemented`
+via regex a corrompu 14 lignes au-dela de la fonction, build casse.
+
+Anchor byte-for-byte avec `count == 1` garantit que :
+- Le patch ne s'applique que si l'anchor est unique
+- En cas d'ambiguite, l'assertion echoue avant modification
+- Pas de surprise greedy regex
+
+---
+
+## R28 - R-empirical-state : lire le disque avant patch, pas la memoire de session
+
+Avant tout patch, **toujours** lire l'etat empirique actuel sur le
+disque, jamais speculer depuis la memoire de session.
+
+Symptome de violation : "je sais que ce fichier contient X parce que
+je l'ai genere il y a 5 messages". Cette assertion est non-fiable :
+- L'utilisateur a peut-etre edit le fichier manuellement
+- Un patch precedent a peut-etre echoue partiellement
+- La session a peut-etre ete compactee
+
+**Pattern correct avant tout patch** :
+
+```bash
+sha256sum <fichier>
+grep -nE '<anchor pattern>' <fichier>
+# verifier que l'etat reel correspond a l'attendu
+```
+
+Ce pattern est aussi valide pour les VMs distantes : avant tout patch
+SSH, lire l'etat reel via `ssh ... 'cat <fichier>'` ou `scp ... <local>`
+puis diff.
+
+Specifiquement pour le worker.sh : verifier les SHA local + deploye.
+Si divergence, redeployer avant patch.
+
+---
+
+**Fin R0-R28. Lecture obligatoire de R0-R28 en debut de session.**
+
