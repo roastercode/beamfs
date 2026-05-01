@@ -65,17 +65,6 @@ Renaming requires a coordinated toolchain pass: binary name + Makefile
 target + recipe install path + syslog consumer scripts + Python script
 filename + cross-references in beamfs-bench worker.sh if any.
 
-### gap-2 : synthesis.rs UPPERCASE BEAMFS in topology table
-
-**Status** : intentional (parity with bash baseline tracked at
-`Documentation/runs/beamfs-bench-analyse-20260430-141008/`)  
-**Effort** : 15 min when baseline parity is no longer required  
-**Repo** : beamfs-bench (src/synthesis.rs:45)
-
-The topology table renders `| BEAMFS | vdg | SanDisk Cruzer ... |` in
-uppercase to preserve diff-parity with the legacy bash multifs script's
-output. The module-level comment line 8 documents this.
-
 ### gap-3 : kernel module not yet redeployed on VMs
 
 **Status** : pending bitbake rebuild + redeploy  
@@ -101,23 +90,9 @@ post-rename tarball.
 
 ---
 
-## Functional gaps (9 items)
+## Functional gaps (8 items)
 
 These are missing features or known bugs in the beamfs/bench code.
-
-### func-1 : Bug Fix B placement (cluster_setup INITIAL)
-
-**Status** : known, partial fix in commit f4b76f0  
-**Effort** : 10 min  
-**Repo** : beamfs-bench (src/analyse.rs:217 vs 252)
-
-Empirical observation in mega run 20260501-225142: cluster-records.txt
-shows 8 events `subdir_missing` at prob=1000 (the FIRST iteration), then
-12/12 RECOVERED at prob=100k and 1M. The bug is at the INITIAL
-cluster_setup_all (line 217) before the first probability, not in the
-next-prob retry (line 252) where the fix B was applied.
-
-Fix : duplicate the retry+bootstrap_data logic at line 217.
 
 ### func-2 : Substep 6 truncate kernel patch
 
@@ -247,7 +222,7 @@ This is a recommendation, not a prescription.
 
 | Tier            | Items                                  | Cumulative effort |
 |-----------------|----------------------------------------|-------------------|
-| Quick wins      | gap-1, gap-3, func-1, func-4, func-7   | ~5h               |
+| Quick wins      | gap-1, gap-3, func-4, func-7           | ~4.5h             |
 | Stage 3 closing | func-2 (substep 6 truncate), func-5    | ~1.5 day          |
 | Stage 4 prep    | func-3 (data block RS)                 | 2-4 weeks         |
 | Upstream prep   | func-6 (fsck), upstream-1 (xfstests)   | 3-5 weeks         |
