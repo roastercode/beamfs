@@ -55,6 +55,9 @@ Storage canonique : `~/git/beamfs/context/STATUS.md` (NEVER published).
 ### yocto-beamfs PRIVATE origin/main
 - `50c339f` feat(image): blktrace IMAGE_INSTALL
 
+### beamfs-overlay PRIVATE origin/main
+- `011bf20` initial: Gentoo overlay (sys-fs/beamfs-bench live ebuild)
+
 ### radfi PRIVATE origin/main
 (unchanged this session)
 

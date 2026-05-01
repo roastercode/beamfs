@@ -132,10 +132,14 @@ simultaneously (48 confirmed flips, 0 corruption).
    validation (analyse --scope=full): perf_stopped_size=44212536
    header_ok=1, 237K samples readable, no data_size=0 error.
 
-6. PENDING (2026-05-01) : Push the Gentoo overlay
-   `/var/db/repos/beamfs-overlay/` to a dedicated private repo
-   `roastercode/beamfs-overlay` (Q3=a of the spec). Currently local
-   git init done, no remote yet.
+6. DONE 2026-05-01 : Gentoo overlay pushed to PRIVATE
+   `roastercode/beamfs-overlay`. Initial commit `011bf20` GPG-signed,
+   layout standards-compliant (masters=gentoo, thin-manifests).
+   Initial package: sys-fs/beamfs-bench (live ebuild 9999, cargo +
+   git-r3, EGIT_REPO_URI=file:///home/aurelien/git/beamfs-bench).
+   Sudoers entry /etc/sudoers.d/beamfs-bench dropped via
+   insinto/doins in src_install (NOPASSWD virsh for group libvirt).
+   Visibility verified PRIVATE post-push (gh repo view).
 
 ### 2.1 - Subcommand layout (final, 2026-05-01)
 

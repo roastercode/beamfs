@@ -35,6 +35,7 @@ unified electromagnetic threat model (paper v2, Zenodo 19886192).
 | beamfs-devel         | PRIVATE             | Same code + context/ (recadrage, STATUS, TODO)|
 | yocto-beamfs         | PRIVATE             | Yocto layer, image canonique cluster (R23)    |
 | beamfs-bench         | PRIVATE             | Rust harness for resilience bench             |
+| beamfs-overlay       | PRIVATE             | Gentoo overlay (sys-fs/beamfs-bench ebuild)   |
 | radfi                | PRIVATE             | EM fault injection module (Zenodo 19885777)   |
 
 The two beamfs repos are mirrored; only context/ differs.
