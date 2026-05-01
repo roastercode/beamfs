@@ -297,3 +297,68 @@ to be promoted to a v3 paper section when the v3 milestone closes
   (private) for now. To be promoted to a v3 paper section once roadmap
   stages 3-5 close (multiblock complete + fsck + RAID-RS).
 
+
+
+---
+
+## Bench rigour & architectural isolation (added 2026-05-01)
+
+The bench harness used for all measurements above (`beamfs-bench`,
+private repo `roastercode/beamfs-bench`) enforces a strict
+architectural contract for the FS-test cluster: the orchestrator
+node is physically separated from the victim nodes that hold the
+filesystem-under-test devices.
+
+### Rationale
+
+A bench that injects faults via RadFI on the same machine that
+runs `perf record`, captures kernel `dmesg`, and drives the SSH
+attack pipeline is not a controlled experiment. RadFI flips bytes
+in DRAM along the kernel block I/O transit path
+(`submit_bio_noacct`, `submit_bh`); flips on the orchestrator
+machine could perturb the orchestrator kernel state itself (block
+layer queues, page cache lines, scheduler runqueues), introducing
+transverse contamination that invalidates causal attribution of
+observed FS behavior to the FS-under-test.
+
+### Architectural contract (R-isolation)
+
+| Node                | Devices                              | Role                          |
+|---------------------|--------------------------------------|-------------------------------|
+| `beamfs-master`     | rootfs + cluster `/data`             | orchestrator, never a target  |
+| `beamfs-compute01`  | rootfs + `/data` + 5 USB FS victims  | FS-under-test holder          |
+| `beamfs-compute02`  | rootfs + cluster `/data`             | compute (BEAMFS on /data)     |
+| `beamfs-compute03`  | rootfs + cluster `/data`             | compute (BEAMFS on /data)     |
+
+The 5 USB sticks holding the filesystem-under-test partitions
+(`ext4`, `ext3`, `btrfs`, `squashfs`, `beamfs`) are physically
+attached to `beamfs-compute01` via libvirt virtio-blk
+passthrough with `cache='none'` and `io='threads'`. The master VM
+holds no FS-under-test device.
+
+### Enforcement (pre-flight check)
+
+The bench refuses to run on a non-conforming cluster.
+`beamfs-bench` Phase 0 (`assert_isolation_architecture()`) parses
+the libvirt persistent XML for each VM and verifies that the
+disk-target set matches the contract above. On any divergence,
+the bench aborts with an explicit message identifying the violating
+VM and offending disk targets, citing R-isolation. This guarantees
+that no measurement reported in this document or in derived v3
+publications can have been produced under transversely-contaminated
+conditions.
+
+The enforcement was validated by injecting a deliberate violation
+(`virsh attach-disk beamfs-master ... vdh`) and observing that
+`beamfs-bench full` aborts in Phase 0 before any other action.
+After detaching the violating disk, the bench resumes normally.
+
+### Implication for v3 results
+
+All cluster-wide and multifs-wide runs that produced the
+observations in this document, post 2026-05-01 12:32 UTC, were
+executed under R-isolation. The R-isolation contract is part of
+the bench-certified envelope: any future v3 measurement that
+violates R-isolation must be retracted.
+
+Reference: `beamfs-bench` commit `b23ab2a`, GPG-signed.

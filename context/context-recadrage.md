@@ -717,3 +717,57 @@ bannière ASCII art, ou tout autre format. Le format est figé.
 ---
 
 **Fin du contrat de recadrage. Lecture obligatoire en début de session.**
+
+
+## R21 - R-isolation : architecture FS-test isolee, master orchestrateur seul
+
+Contrat architectural enforce par `beamfs-bench` Phase 0 pre-flight via
+`virsh dumpxml`. Le cluster doit respecter ce layout libvirt persistent :
+
+| VM                | Disques attendus                            | Role                                       |
+|-------------------|---------------------------------------------|--------------------------------------------|
+| `beamfs-master`   | `vda`, `vdb`                                | orchestrateur, jamais cible RadFI          |
+| `beamfs-compute01`| `vda`, `vdb`, `vdc`, `vdd`, `vde`, `vdf`, `vdg` | victime FS-test (5 USB ext4/ext3/btrfs/squashfs/beamfs) |
+| `beamfs-compute02`| `vda`, `vdb`                                | cluster compute (BEAMFS sur /dev/vdb)      |
+| `beamfs-compute03`| `vda`, `vdb`                                | cluster compute (BEAMFS sur /dev/vdb)      |
+
+Justification : si le master tient les 5 USB et est aussi orchestrateur
+(perf record, dmesg capture, SSH driver), une attaque RadFI sur une USB
+victime peut contaminer transversalement le kernel state du master
+(block layer, page cache, scheduler) et invalider la rigueur du bench.
+Master doit rester un observateur non-victime.
+
+Enforcement : `lifecycle.rs::assert_isolation_architecture()` est appele
+en Phase 0 de `bring_cluster_up()`. Sur divergence, le bench abort avec
+un message explicite citant R-isolation. Le bench refuse de tourner sur
+un cluster non-conforme.
+
+Validation : commit beamfs-bench `b23ab2a` (2026-05-01), test inline
+verifie que `virsh attach-disk beamfs-master ... vdh` fait correctement
+echouer `beamfs-bench full` en Phase 0 avec le message attendu.
+
+Implication pour publication v3 : la rigueur architecturale du banc
+d'essai est explicitement documentee dans la prochaine publication
+beamfs (cf. `papers/2026-04-beamfs-v3-findings/`).
+
+---
+
+## R22 - R-os-stack : pile OS workstation Aurelien
+
+Workstation `spartian-1` :
+
+- Distribution : Gentoo Linux (source-based, OpenRC init)
+- Compositor : Wayland + Sway
+- Terminal : foot
+- Editeur : Emacs
+- Shell : bash
+
+Contraintes operationnelles qui en decoulent :
+
+- Pas de systemd : tout service-related utilise OpenRC (`rc-service`,
+  `rc-update`)
+- Pas de X11 par defaut : commandes graphiques doivent supporter
+  Wayland natif ou XWayland fallback
+- Pas de `gnome-terminal` / `xterm` : invocations terminal via `foot`
+- Restart Sway sous Wayland : `killall -HUP sway` pas `rc-service sway
+  restart` (kill la session graphique)
