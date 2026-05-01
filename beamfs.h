@@ -314,13 +314,40 @@ struct beamfs_rs_event {
  * s_feat_ro_compat  -- features that prevent safe write. Unknown bits cause
  *                     mount to be forced read-only with a warning.
  *
- * In BEAMFS_VERSION_V1 no feature bits are allocated; all three masks are
- * zero. Future features will allocate bits and update the corresponding
- * SUPP mask.
+ * In BEAMFS_VERSION_V5 the bit layout below is reserved. None of these
+ * features are active in v5.0 (RFC profile = embedded, all SUPP = 0).
+ * Subsequent patches will activate flags one by one and update the
+ * corresponding SUPP mask.
  */
-#define BEAMFS_FEAT_COMPAT_SUPP      0ULL
-#define BEAMFS_FEAT_INCOMPAT_SUPP    0ULL
-#define BEAMFS_FEAT_RO_COMPAT_SUPP   0ULL
+
+/* COMPAT features (informational, mount continues if unknown) */
+#define BEAMFS_FEATURE_COMPAT_RS_JOURNAL_VERBOSE  (1ULL << 0)
+#define BEAMFS_FEATURE_COMPAT_LABEL_LONG          (1ULL << 1)
+#define BEAMFS_FEATURE_COMPAT_DIR_INDEX           (1ULL << 2)
+
+/* RO_COMPAT features (force RO mount if unknown) */
+#define BEAMFS_FEATURE_RO_COMPAT_LARGE_FILE       (1ULL << 0)
+#define BEAMFS_FEATURE_RO_COMPAT_HUGE_FILE        (1ULL << 1)
+#define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      (1ULL << 2)
+#define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        (1ULL << 3)
+
+/* INCOMPAT features (refuse mount if unknown) */
+#define BEAMFS_FEATURE_INCOMPAT_EXTENTS           (1ULL << 0)
+#define BEAMFS_FEATURE_INCOMPAT_64BIT             (1ULL << 1)
+#define BEAMFS_FEATURE_INCOMPAT_BIGALLOC          (1ULL << 2)
+#define BEAMFS_FEATURE_INCOMPAT_BLOCK_GROUPS      (1ULL << 3)
+#define BEAMFS_FEATURE_INCOMPAT_BTREE_ALLOC       (1ULL << 4)
+#define BEAMFS_FEATURE_INCOMPAT_JOURNAL           (1ULL << 5)
+#define BEAMFS_FEATURE_INCOMPAT_DAX               (1ULL << 6)
+#define BEAMFS_FEATURE_INCOMPAT_RS_HEAVY          (1ULL << 7)
+#define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      (1ULL << 8)
+#define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
+#define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
+
+/* All flags supported by this kernel module (none active in v5.0) */
+#define BEAMFS_FEAT_COMPAT_SUPP    0ULL
+#define BEAMFS_FEAT_RO_COMPAT_SUPP 0ULL
+#define BEAMFS_FEAT_INCOMPAT_SUPP  0ULL
 
 /*
  * On-disk superblock - block 0
