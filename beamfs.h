@@ -12,6 +12,7 @@
 #include <linux/fs.h>
 #include <linux/fs_context.h>
 #include <linux/types.h>
+#include <linux/mutex.h>
 
 /* inode_state_read_once returns inode_state_flags in kernel 7.0 */
 #define beamfs_inode_is_new(inode) \
@@ -464,6 +465,7 @@ struct beamfs_inode_info {
 	__le64          i_dindirect;
 	__le64          i_tindirect;
 	__u32           i_flags;
+	struct mutex    i_alloc_mutex;  /* serialize lookup_or_alloc_phys */
 	struct inode    vfs_inode;  /* Must be last */
 };
 

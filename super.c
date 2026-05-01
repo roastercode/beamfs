@@ -33,6 +33,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 	fi->i_dindirect = 0;
 	fi->i_tindirect = 0;
 	fi->i_flags     = 0;
+	mutex_init(&fi->i_alloc_mutex);
 
 	return &fi->vfs_inode;
 }
@@ -42,6 +43,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
  */
 static void beamfs_free_inode(struct inode *inode)
 {
+	mutex_destroy(&BEAMFS_I(inode)->i_alloc_mutex);
 	kmem_cache_free(beamfs_inode_cachep, BEAMFS_I(inode));
 }
 
