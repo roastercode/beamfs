@@ -771,3 +771,54 @@ Contraintes operationnelles qui en decoulent :
 - Pas de `gnome-terminal` / `xterm` : invocations terminal via `foot`
 - Restart Sway sous Wayland : `killall -HUP sway` pas `rc-service sway
   restart` (kill la session graphique)
+
+
+## R23 - R-image-canonique : recipe Yocto unique et autoritaire
+
+Le recipe Yocto canonique de l'image cluster BEAMFS est :
+
+  ~/git/yocto-beamfs/recipes-core/images/hpc-arm64-research-beamfs.bb
+
+C'est le coeur des travaux. C'est le seul recipe d'image actif dans
+BBLAYERS et le seul qui produit les rootfs ext2 deployes sur les 4 VMs
+du cluster (master + compute01..03).
+
+Tout ce qui concerne :
+
+  - les outils de tracing (strace, blktrace, bpftrace, ftrace, perf)
+  - les outils de bench (fio, iperf3, sysstat)
+  - les modules kernel embarques (beamfs-module, mkfs-beamfs,
+    beamfsd, radfi-module)
+  - les paquets userspace (slurm, munge, hwloc, btrfs-tools,
+    squashfs-tools, e2fsprogs)
+
+doit etre ajoute via IMAGE_INSTALL dans CE fichier, pas ailleurs.
+
+Ne JAMAIS chercher ce recipe en aveugle. Ne JAMAIS supposer qu'il
+existe sous un autre nom (hpc-arm64-research.bb sans suffixe est
+le legacy non-BEAMFS dans yocto-hardened, hors scope BEAMFS).
+
+Recipes connexes dans yocto-beamfs :
+
+  recipes-kernel/linux/linux-mainline_7.0.3.bb : kernel 7.0.3
+  recipes-kernel/linux/files/BEAMFS-arm64.cfg  : kernel config arm64
+  recipes-kernel/linux/files/multifs.cfg       : kernel config multifs
+  recipes-kernel/beamfs/beamfs-module_0.1.0.bb : module BEAMFS
+  recipes-kernel/beamfs/mkfs-beamfs_0.1.0.bb   : mkfs.beamfs userspace
+  recipes-kernel/radfi/radfi-module_0.1.2.bb   : module RadFI
+  recipes-beamfs/beamfsd/beamfsd_0.1.0.bb      : daemon beamfsd
+  recipes-hpc/slurm/slurm_25.11.4.bb           : slurm
+  recipes-hpc/munge/munge_0.5.18.bb            : munge
+  recipes-hpc/pmix/pmix_5.0.3.bb               : pmix
+
+Build :
+
+  bitbake hpc-arm64-research-beamfs
+
+Image produite :
+
+  ~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/
+    hpc-arm64-research-beamfs-qemuarm64.ext2
+
+Deployee aux 4 VMs via copie binaire vers
+/var/lib/libvirt/images/hpc-arm64/beamfs-{master,compute01,compute02,compute03}.img
