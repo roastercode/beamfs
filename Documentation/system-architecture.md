@@ -44,7 +44,7 @@ Properties:
   without operator intervention and without a redundant copy
 - Designed for single-device storage (MRAM, NOR flash) where no block
   layer redundancy is available
-- Maintains a persistent Radiation Event Journal recording each
+- Maintains a persistent Electromagnetic Resilience Journal recording each
   correction event (block number, timestamp, symbols corrected, CRC32)
 - Operates on read-write data - not suitable as a read-only filesystem
   integrity mechanism
@@ -92,7 +92,7 @@ of beamfs within a complete hardened embedded Linux system:
 │  /data          beamfs (read-write)                          │
 │                 Mission data, application state             │
 │                 RS FEC: in-place SEU correction             │
-│                 Radiation Event Journal: degradation map    │
+│       Electromagnetic Resilience Journal: degradation map  │
 │                                                             │
 │  /var/log       beamfs (read-write)                          │
 │                 System logs, event records                  │

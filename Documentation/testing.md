@@ -44,7 +44,7 @@ dmesg | grep beamfs | tail -5
 
 ```
 beamfs: loading out-of-tree module taints kernel.
-beamfs: module loaded (beamfs Fault-Tolerant Radiation-Robust FS)
+beamfs: module loaded (beamfs - resilient filesystem)
 beamfs: bitmaps initialized (16377 data blocks, 16377 free; 64 inodes, 63 free)
 beamfs: mounted (blocks=16384 free=16377 inodes=64)
 beamfs: module unloaded

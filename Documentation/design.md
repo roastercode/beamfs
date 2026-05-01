@@ -54,7 +54,7 @@ struct beamfs_super_block {
     __u8    s_uuid[16];         /* volume UUID */
     __u8    s_label[32];        /* volume label */
     struct beamfs_rs_event
-            s_rs_journal[64];   /* Radiation Event Journal (1536 bytes) */
+            s_rs_journal[64];   /* Electromagnetic Resilience Journal (1536 bytes) */
     __u8    s_rs_journal_head;  /* next write index (ring buffer, 0..63) */
     __le64  s_bitmap_blk;       /* on-disk block bitmap block number */
     __le64  s_feat_compat;      /* informational features (v3+) */
@@ -270,7 +270,7 @@ byte-for-byte against the kernel at validation time.
 `beamfs_setup_bitmap()`:
 1. Reads bitmap block from `s_bitmap_blk`
 2. Decodes each subblock via `beamfs_rs_decode()` (calls `decode_rs8`)
-3. If corrections made: logs event to Radiation Event Journal,
+3. If corrections made: logs event to Electromagnetic Resilience Journal,
    writes corrected bitmap back immediately
 4. Copies bitmap data into in-memory `sbi->s_block_bitmap`
 
@@ -325,7 +325,7 @@ Read path: CRC32 verification first; if and only if CRC32
 fails AND scheme is `INODE_UNIVERSAL`, RS decode is invoked
 in place. After a successful correction the kernel re-verifies
 CRC32 against the corrected buffer and writes the corrected
-inode back to disk; the event is logged to the Radiation
+inode back to disk; the event is logged to the Electromagnetic
 Event Journal. See `inode.c::beamfs_iget`.
 
 Write path: RS parity is recomputed on every inode write
@@ -350,7 +350,7 @@ emitted by `dir_emit_dots()` during readdir.
 
 ---
 
-## Radiation Event Journal
+## Electromagnetic Resilience Journal
 
 64-entry ring buffer embedded in the superblock. Each entry:
 

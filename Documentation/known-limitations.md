@@ -102,7 +102,7 @@ corrected is not returned to the caller.
 `alloc.c::beamfs_setup_bitmap` consumes the return value with the
 condition `if (rc > 0)` to identify a "corrected sub-block" event,
 which never matches under the current decoder semantics. As a
-consequence, the Radiation Event Journal currently does not log
+consequence, the Electromagnetic Resilience Journal currently does not log
 bitmap corrections that did occur.
 
 This is a behavioral defect: corrections are applied (the bitmap

@@ -181,7 +181,7 @@ consults it. The macros `BEAMFS_INODE_RS_DATA` (172) and
 Read path: CRC32 verification first, RS decode only on CRC fail
 when scheme is `INODE_UNIVERSAL`. After successful correction the
 kernel re-verifies CRC32 against the corrected buffer, logs the
-event to the Radiation Event Journal, writes the corrected inode
+event to the Electromagnetic Resilience Journal, writes the corrected inode
 back to disk, and emits a `pr_warn`. This ordering avoids the
 decoder on the fast path (>99 % of reads) and avoids the rare
 risk of an SEU on the parity bytes inducing a false correction
