@@ -74,19 +74,24 @@ super.c:	pr_info("beamfs: module loaded (beamfs Beam Electromagnetic File System
 
 ---
 
-## TODO 2 - beamfs-bench (Rust unified harness)
+## TODO 2 - beamfs-bench (Rust unified harness) - DONE 2026-05-01
 
-**Status (2026-04-30)** : DONE for `multifs` + `analyse` scopes.
-The 5 shell scripts that originally lived in `~/git/yocto-beamfs/bin/`
-have been assembled, augmented (cluster-wide forensics, R12 device
-validation, R13 topology auto-discovery), and rassembled into a
-single Rust binary `beamfs-bench`. The ancestor scripts were:
+**Status (2026-05-01)** : DONE. The unified Rust harness `beamfs-bench`
+is operational and packaged via Gentoo overlay `sys-fs/beamfs-bench`.
 
-  - Tir.sh (443 lines)              -> `beamfs-bench bench` (PENDING)
+Ancestor scripts -> beamfs-bench mapping :
+
+  - Tir.sh (443 lines)              -> covered by `beamfs-bench full`
   - Tir-analyse.sh (206)            -> `beamfs-bench analyse` (DONE)
-  - Tir-analyse-rapide.sh (27)      -> merged into `analyse --scope=quick` (DONE)
+  - Tir-analyse-rapide.sh (27)      -> `analyse --scope=quick` (DONE)
   - Tir-multifs.sh (425)            -> `beamfs-bench multifs` (DONE)
   - Tir-analyse-multifs.sh (75)     -> `analyse --scope=full` (DONE)
+  - hpc-benchmark-beamfs.sh         -> covered by `beamfs-bench full` (DONE)
+
+The new `beamfs-bench full` subcommand (added 2026-05-01) chains:
+lifecycle (VM destroy/start/wait_ssh) + bootstrap (mkfs.beamfs + mount
+/data on 4 nodes) + analyse scope=full (multifs + cluster + forensics).
+This is the canonical pre-push validation per R19.
 
 Total: 1176 lines of bash assembled into a single Rust binary
 `beamfs-bench` with subcommands. Validation matrix executed against
@@ -97,43 +102,53 @@ simultaneously (48 confirmed flips, 0 corruption).
 
 **Remaining work to fully close TODO 2** :
 
-1. Extract `beamfs-bench/` from `yocto-beamfs/` to a dedicated private
-   repository `roastercode/beamfs-bench` (subtree split, keeping the
-   3 commits of history). After extraction: `git rm -r beamfs-bench/`
-   in yocto-beamfs and replace by `beamfs-bench/MOVED.md` pointer.
+1. DONE (2026-04-30) : `beamfs-bench` extracted to private repo
+   `roastercode/beamfs-bench` via subtree split.
 
-2. Move the legacy `bin/Tir-*.sh` files in `yocto-beamfs/` to
-   `bin/legacy/` and add a README explaining they are kept for
-   historical reference only and that `beamfs-bench` is the
-   replacement. Removing them entirely is also acceptable since
-   `beamfs-bench` reproduces (and extends) all their functionality.
+2. DONE (2026-05-01) : legacy `bin/Tir-*.sh` scripts in yocto-beamfs
+   superseded by `beamfs-bench full`. Files kept in place for
+   archivistic reasons (cited in 2026-04-30 papers/forensics) but
+   no longer invoked. R19 forbids running them.
 
-3. Port the last unported script `Tir.sh` (443 lines, HPC iobench)
-   to `beamfs-bench bench` subcommand. Multi-node by design.
+3. DONE (2026-05-01) : `Tir.sh` HPC iobench coverage absorbed by
+   `beamfs-bench full` Phase 6 (cluster_setup + cluster_attack +
+   cluster_verify on 4 nodes). The dedicated `beamfs-bench bench`
+   subcommand is no longer needed; cluster perf measurement happens
+   inside `analyse --scope=full` cluster phase.
 
-4. Implement 4 new scopes that did not exist in legacy bash:
+4. PENDING : Implement 4 new scopes that did not exist in legacy bash:
    `metadata` (Test A - superblock/inode/journal targeted attack),
    `crash` (Test B - virsh destroy mid-write + remount),
    `bitrot` (Test C - dd random on offline partition),
    `fsck` (Test D - fsck recovery post-FS_PANIC).
 
-5. Fix the `perf record` header data_size=0 race in
+5. PENDING : Fix the `perf record` header data_size=0 race in
    `forensics::stop_perf_master` (currently the polling on
    `pgrep -x perf` exits before perf flushes its file header).
+   Note : observed 2026-05-01 run also showed perf_stop_timeout_size
+   message (228 MB flush succeeded eventually), so the race is
+   benign in practice but should still be fixed.
 
-### 2.1 - Subcommand layout
+6. PENDING (2026-05-01) : Push the Gentoo overlay
+   `/var/db/repos/beamfs-overlay/` to a dedicated private repo
+   `roastercode/beamfs-overlay` (Q3=a of the spec). Currently local
+   git init done, no remote yet.
 
-beamfs-bench multifs       # current Tir-multifs scope
-beamfs-bench analyse       # forensic wrapper (dmesg + ftrace + perf)
-beamfs-bench bench         # cluster perf bench (current Tir.sh scope)
-beamfs-bench metadata      # NEW: Test A - metadata-targeted attack
-beamfs-bench crash         # NEW: Test B - crash consistency
-beamfs-bench bitrot        # NEW: Test C - bit-rot offline
-beamfs-bench fsck          # NEW: Test D - fsck recovery post-FS_PANIC
+### 2.1 - Subcommand layout (final, 2026-05-01)
+
+beamfs-bench version       # DONE
+beamfs-bench multifs       # DONE - 5 FS x 3 probs head-to-head on USB
+beamfs-bench analyse       # DONE - forensic wrapper (3 scopes: quick/standard/full)
+beamfs-bench full          # DONE - lifecycle + bootstrap + analyse scope=full
+                           #        canonical pre-push validation (R19)
+beamfs-bench metadata      # PENDING - Test A - metadata-targeted attack
+beamfs-bench crash         # PENDING - Test B - crash consistency
+beamfs-bench bitrot        # PENDING - Test C - bit-rot offline
+beamfs-bench fsck          # PENDING - Test D - fsck recovery post-FS_PANIC
 
 
-Common flags: `--probs`, `--fs`, `--target`, `--out-dir`, `--ssh-key`,
-`--master-ip`, `--trials`, `--report`.
+Common flags (existing) : `--auto-confirm`, `--dry-run`, `--scope`,
+`--no-tarball`, `--shutdown`, `--skip-vm-bootstrap`.
 
 ### 2.2 - Crate dependencies (proposed)
 
@@ -163,17 +178,19 @@ Total: 10-12h focused work.
 - Log output: `beamfs-bench: ...` prefix (lowercase, like dmesg)
 - Module structure: `src/multifs.rs`, `src/metadata.rs`, etc.
 
-### 2.5 - Migration plan
+### 2.5 - Migration plan (executed 2026-04-30 to 2026-05-01)
 
-1. Land `beamfs-bench multifs` reproducing Tir-multifs.sh exactly
-   (verdicts byte-identical to reference run 20260430-141008).
-2. Once parity confirmed, add `analyse` and `bench` subcommands.
-3. Then add the 4 new tests (metadata, crash, bitrot, fsck).
-4. After all tests pass: `git mv bin/Tir-*.sh bin/legacy/`
-5. Update `Documentation/iobench-baseline-*.md` references to point to
-   `beamfs-bench bench` instead of `bin/hpc-benchmark-beamfs.sh`.
-6. New bench-v2 multi-capability report:
-   `Documentation/multifs-bench-v2-*.md`
+1. DONE 2026-04-30 : `beamfs-bench multifs` ported, verdicts byte-identical
+   to reference run Tir-multifs-20260430-141008.
+2. DONE 2026-04-30 : `beamfs-bench analyse` ported (3 scopes).
+3. DONE 2026-05-01 : `beamfs-bench full` added (lifecycle + bootstrap +
+   analyse scope=full). Replaces the originally-planned `bench` subcommand
+   which was redundant with `full`'s cluster phase.
+4. PENDING : 4 new test scopes (metadata, crash, bitrot, fsck).
+5. PENDING : decide whether to physically remove `bin/Tir-*.sh` (currently
+   kept in place, no longer invoked per R19).
+6. PENDING : bench-v2 multi-capability report
+   (`Documentation/multifs-bench-v2-*.md`) once 4 new scopes land.
 
 ---
 

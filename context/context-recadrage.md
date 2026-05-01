@@ -85,20 +85,39 @@ les deux. Ne pas optimiser yocto au détriment de beamfs.
 ## 7. Tests intégrés au harness `beamfs-bench`
 
 Pour tester sous attaque : utiliser le binaire Rust unifié
-`beamfs-bench` (sous-commandes `multifs`, `analyse --scope=...`, etc.).
-Ce binaire **est le successeur direct** des scripts bash historiques
-qui vivaient dans `yocto-beamfs/bin/` : `Tir.sh`, `Tir-analyse.sh`,
-`Tir-analyse-rapide.sh`, `Tir-multifs.sh`, `Tir-analyse-multifs.sh`.
-Ces scripts ont été assemblés, augmentés (cluster-wide forensics,
-device validation pipeline R12, topologie auto-discoverée R13) et
-rassemblés dans un seul outil dynamique. Les **noms de répertoires
-de runs** restent préfixés par `Tir-multifs-<TS>/` et
-`Tir-analyse-multifs-<scope>-<TS>/` par compatibilité historique
-avec les artefacts forensiques déjà capturés. Ne PAS écrire de
-scripts de test ad-hoc parallèles. Si un nouveau test est nécessaire,
-l'ajouter au harness `beamfs-bench` (nouveau scope = nouvelle sous-commande), pas à côté.
+`beamfs-bench` (sys-fs/beamfs-bench, installé via overlay Gentoo).
 
-Bench cluster perf : `bin/hpc-benchmark-beamfs.sh`.
+**Sous-commande canonique pre-push : `beamfs-bench full`.** Cette
+commande est autonome et fait tout en un seul appel :
+
+  1. VM lifecycle (destroy aveugle + start + wait_ssh parallèle)
+  2. Cluster /data bootstrap (insmod + mkfs.beamfs + mount sur 4 nodes)
+  3. Device validation USB sticks (R12 prompt anti-NAK)
+  4. Multifs head-to-head 5 FS x 3 probs sur USB
+  5. Cluster attack 4 nodes x 3 probs sur /dev/vdb
+  6. Forensics complet (dmesg, ftrace, perf, RadFI counters, RS journal)
+  7. Tarball archive
+
+`beamfs-bench full` rend obsolètes tous les anciens scripts bash :
+`Tir.sh`, `Tir-analyse.sh`, `Tir-analyse-rapide.sh`, `Tir-multifs.sh`,
+`Tir-analyse-multifs.sh`, `bin/hpc-benchmark.sh`, `bin/hpc-benchmark-beamfs.sh`.
+Ces scripts ne doivent plus être invoqués. Le naming `Tir-*` n'existe
+plus dans le vocabulaire opérationnel.
+
+Sous-commandes restantes :
+- `beamfs-bench multifs` : multifs seul (USB sticks, sans cluster)
+- `beamfs-bench analyse --scope=quick|standard|full` : forensics modulaire
+- `beamfs-bench full` : pipeline complet autonome (canonique pre-push)
+- `beamfs-bench metadata|crash|bitrot|fsck` : stubs (Phase tooling future)
+
+Ne PAS écrire de scripts de test ad-hoc parallèles. Si un nouveau test
+est nécessaire, l'ajouter au harness `beamfs-bench` comme nouvelle
+sous-commande, pas à côté.
+
+Les **noms de répertoires de runs** historiques (`Tir-multifs-<TS>/`,
+`Tir-analyse-multifs-<scope>-<TS>/`) restent en place sous
+`Documentation/runs/` comme artefacts archivistiques. Les nouveaux runs
+gardent ce naming jusqu'à nettoyage explicite (TODO future tooling).
 
 ## 8. Rien n'est commité sans test validé
 
@@ -113,9 +132,10 @@ ou recette :
 6. `bitbake beamfs-module` (0 erreur, 0 nouvelle warning)
 7. Runtime canary in-VM (single-block round-trip via drop_caches +
    remount, sha256 byte-identique)
-8. `beamfs-bench analyse --scope=full` complet (ex-`Tir-analyse-multifs.sh`), comparaison aux verdicts du run
-   de référence - beamfs doit avoir verdicts identiques
-9. `hpc-benchmark-beamfs.sh` dans tolérance ±20% du baseline
+8. `beamfs-bench full` exit code 0 sur cluster live 4 nodes
+   (R19 : critères détaillés plus bas). Ce step remplace les anciennes
+   étapes 8 et 9 (analyse + hpc-benchmark séparés, retirés).
+9. (vide - fusionné dans step 8)
 10. dmesg post-test : 0 BUG, 0 oops, 0 WARN
 
 Si UNE SEULE étape échoue : rollback avec le backup, diagnostic,
@@ -191,12 +211,13 @@ et les 3 `beamfs-compute0X` sont passifs. La réalité observée
 - Les 3 computes sont des **cibles à part entière**, pas des
   observateurs ; toute capture forensique réelle doit les couvrir
 
-**Le fait que la sous-commande `beamfs-bench multifs` (ex-`Tir-multifs.sh`) ne touche que master
+**Le fait que la sous-commande `beamfs-bench multifs` ne touche que master
 ne signifie PAS que la topologie réelle est mono-node.** Cela signifie
-que ce script-là est partiel (head-to-head FS comparison sur les 5
-USB pass-through, qui sont effectivement attachés à master uniquement).
-Le vrai test système (HPC, `beamfs-bench bench` - sous-commande encore à porter depuis l'ancien `Tir.sh`) est multi-node : master + 3
-computes, iobench parallèle, RadFI armable sur chaque node.
+que cette sous-commande est partielle (head-to-head FS comparison sur les
+5 USB pass-through, qui sont effectivement attachés à master uniquement).
+Le vrai test système multi-node passe par `beamfs-bench full` (qui appelle
+`analyse --scope=full` en interne, lequel orchestre le cluster_setup/
+attack/verify sur master + 3 computes en plus du multifs USB).
 
 **Avant toute capture forensique ou test d'attaque cluster, vérifier
 read-only sur les 4 nodes :**
@@ -229,11 +250,10 @@ done
 
 - `beamfs-bench multifs` reste master-only (les 5 USB sont sur master
   uniquement, c'est par construction)
-- `beamfs-bench analyse` doit pouvoir capturer **les 4 nodes** quand
-  le scope l'exige (default = master pour `analyse` qui enveloppe
-  `multifs`, mais `analyse --scope=full` couvre les 4)
-- `beamfs-bench bench` (port futur de l'ancien `Tir.sh`, encore à faire) sera multi-node par
-  conception (HPC iobench)
+- `beamfs-bench analyse` capture les 4 nodes au scope `full` (master
+  uniquement aux scopes `quick` et `standard`)
+- `beamfs-bench full` est multi-node par construction (orchestre
+  lifecycle + bootstrap + analyse scope=full sur les 4 nodes)
 - Toute future règle "single-node" doit être justifiée par une raison
   hardware (USB pass-through), pas par fainéantise de capture
 
@@ -547,6 +567,152 @@ L'expansion B-E-A-M-F-S comme acronyme est explicitement abandonnee.
 
 La portee technique (electromagnetic, radiation, adversarial bit-flip)
 est decrite dans threat-model.md, pas dans la tagline.
+
+## R18 - Pas de glob shell ouvert, pas de checkpatch --file sur header
+
+**Incident fondateur** (2026-05-01, ~08:50) : pendant le bloc 3 de
+validation Phase 1.1, j'ai (Claude) genere un script combinant deux
+anti-patterns critiques :
+
+1. Glob non borne dans une boucle for :
+   `for p in /usr/src/linux-*/scripts/checkpatch.pl ; do ... done`
+   Sur Gentoo, `/usr/src/linux-*/` peut matcher de nombreux
+   repertoires (sources kernel multiples). L'expansion shell injecte
+   tous les paths dans la boucle, sans borne.
+
+2. `checkpatch.pl --file beamfs.h 2>&1 | tail -30` sur un header de
+   28 KB. checkpatch en mode `--file` audite TOUT le fichier (pas le
+   diff), produit des centaines a milliers de warnings sur du code
+   legacy, et le flux stdout/stderr massif via pipe peut tuer le
+   terminal sous Wayland (compositor backpressure foot/alacritty/kitty).
+
+Resultat : terminal tue, perte de la session shell.
+
+**Regle** : ne JAMAIS combiner glob ouvert + invocation checkpatch
+verbeuse + pipe direct vers un terminal interactif.
+
+**Anti-patterns interdits** :
+
+```bash
+# Glob expansion non bornee
+for p in /usr/src/linux-*/scripts/checkpatch.pl ; do ... done
+for f in /var/log/**/*.log ; do ... done
+
+# checkpatch --file sur header existant, pipe vers tail
+checkpatch.pl --file beamfs.h 2>&1 | tail -30
+checkpatch.pl --strict --file include/linux/fs.h | head -100
+
+# Tout pipe verbeux non borne vers terminal interactif
+find / -name '*.h' 2>&1 | head
+dmesg -w | grep BUG
+```
+
+**Patterns corrects** :
+
+```bash
+# Path explicite, echec rapide si absent
+CHECKPATCH=/usr/src/linux/scripts/checkpatch.pl
+[ -x "$CHECKPATCH" ] || { echo "checkpatch absent"; exit 0; }
+
+# checkpatch sur PATCH uniquement, sortie redirigee vers fichier
+git diff beamfs.h > /tmp/phase.patch
+"$CHECKPATCH" --strict /tmp/phase.patch > /tmp/checkpatch.out 2>&1
+wc -l /tmp/checkpatch.out
+head -50 /tmp/checkpatch.out  # consultation bornee a posteriori
+
+# Si volume incertain : toujours rediriger d'abord
+commande_verbeuse > /tmp/out 2>&1
+wc -l /tmp/out
+head -100 /tmp/out
+```
+
+**Conclusion** : Claude ne genere JAMAIS, sans exception :
+- de glob expansion non bornee dans une boucle for ou un argument de
+  commande qui itere
+- de `checkpatch.pl --file` sur un fichier kernel existant
+- de pipe direct d'une sortie potentiellement volumineuse vers un
+  terminal interactif (utiliser redirection vers /tmp/ + consultation
+  bornee via `head`/`wc -l`/`grep` ensuite)
+
+Si le volume de sortie est incertain : redirection fichier obligatoire,
+consultation bornee ensuite. Le terminal d'Aurelien sous River/Wayland
+n'est pas une cible jetable, sa perte = perte de la session de travail.
+
+---
+
+## R19 - Validation pre-push : `beamfs-bench full` exit 0 obligatoire
+
+Avant tout `git commit` qui touche du code kernel, du code Rust
+`beamfs-bench`, ou des recettes Yocto associées, ET avant tout `git
+push` (origin OU devel), la validation suivante est obligatoire :
+
+```bash
+beamfs-bench full --auto-confirm 2>&1 | tee /tmp/beamfs-bench-full-$(date +%s).log
+echo "Exit: $?"
+```
+
+**Critère de succès (cumulatif, tous obligatoires)** :
+
+- Exit code = 0
+- Phase 1 lifecycle : 4 VMs running, 4 nodes SSH ready
+- Phase 2 bootstrap : 4 nodes /data monté beamfs (BOOTSTRAP=OK x4)
+- Phase 5 multifs beamfs : RECOVERED 3/3 (probs 1k, 100k, 1M)
+  Note : ext4/btrfs FS_PANIC à prob=1M est attendu et non bloquant.
+  Seul beamfs doit RECOVERED 3/3.
+- Phase 6 cluster : 12/12 RECOVERED DIFFS=0 (4 nodes x 3 probs)
+- Phase 7 forensics : pas de nouveau BUG/Oops/WARN dmesg vs baseline
+
+**Si UN SEUL critère échoue** : pas de commit, pas de push. Diagnostic
+d'abord, fix, re-run `beamfs-bench full`, puis seulement commit/push.
+
+**Exception** : commits docs-only (pas de code touché, juste
+`Documentation/`, `context/`, `README.md`). Ces commits sont exempts
+de R19 mais doivent être clairement marqués `docs(...)` ou similaire
+dans le subject, et ne JAMAIS toucher de fichier `.c`/`.h`/`.rs`/
+`.bb`/`.bbappend`. Si un commit mélange code et docs, R19 s'applique.
+
+**Reproductibilité** : `beamfs-bench full` est installé via
+`sys-fs/beamfs-bench` (overlay `beamfs-overlay` sous `/var/db/repos/`).
+Le binaire est `/usr/bin/beamfs-bench` après `emerge sys-fs/beamfs-bench`.
+L'utilisateur doit être dans le groupe `libvirt` (sudoers NOPASSWD
+virsh généré par l'ebuild en `/etc/sudoers.d/beamfs-bench`).
+
+**Anti-pattern interdit** : invoquer `bin/Tir-*.sh`, `bin/Tir.sh`,
+`bin/hpc-benchmark.sh`, `bin/hpc-benchmark-beamfs.sh`, ou tout script
+shell de bench legacy. Ces scripts existent encore sur disque pour
+raison archivistique (artefacts forensiques cités dans les papers)
+mais NE DOIVENT PLUS être invoqués. Toujours `beamfs-bench full`.
+
+---
+
+## R20 - Format de sortie console pour Aurélien
+
+Quand Claude livre un bloc bash/Python à exécuter dans cette interface,
+la sortie capturée par Aurélien doit être facile à localiser dans le
+flot du terminal. Donc : tout bloc encadré par un marker visuel clair.
+
+**Format obligatoire (3 lignes blanches avant + après marker, marker
+sur 3 lignes)** :
+
+<contenu shell précédent>
+
+#######
+#début#
+#######
+
+<commande réelle à exécuter>
+
+
+**Note caractères** : marker exactement `#######` / `#début#` /
+`#######` (7 hash, espace zéro, hyphens zéro, accent é dans `début`).
+
+**À la fin du bloc** : 3 lignes blanches avant le prompt suivant pour
+que la sortie ne se colle pas au prompt `aurelien@spartian-1`.
+
+**Anti-pattern interdit** : `##### DEBUT #####`, `=== START ===`,
+bannière ASCII art, ou tout autre format. Le format est figé.
+
+---
 
 ---
 

@@ -97,7 +97,7 @@ Two latent build-time defects fixed in passing:
   known-limitations 3.7.)
 
 Validated on the 4-node arm64 Slurm cluster on 2026-04-26: all 8
-phases of `bin/hpc-benchmark.sh` passed, v3 mount on all 4 nodes,
+phases of `bin/hpc-benchmark.sh` (legacy, replaced by `beamfs-bench full`) passed, v3 mount on all 4 nodes,
 distributed beamfs write via Slurm, zero BUG/WARN/Oops. 9-job
 throughput +6.7% above the 2026-04-21 reference, within the 20%
 regression policy. Latencies +69-83% due to a concurrent unrelated
@@ -341,7 +341,7 @@ Research deployment: new Yocto recipe `hpc-arm64-research.bb`
 replaces `hpc-arm64-master.bb` + `hpc-arm64-compute.bb` with a
 single squashfs read-only rootfs image (~52 MB), real `/dev/vdb`
 beamfs partition (no more loopback), kernel cmdline-driven hostname,
-`beamfs.ko` packaged in image (no manual injection). `hpc-benchmark.sh`
+`beamfs.ko` packaged in image (no manual injection). `hpc-benchmark.sh` (now superseded by `beamfs-bench full`)
 phases 2-7 refactored. Architecture is now OIV-grade. Pre-v4 I/O
 baseline captured on this architecture and recorded in
 `Documentation/iobench-baseline-2026-04-26.md` (yocto-hardened layer):
