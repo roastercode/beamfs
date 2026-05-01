@@ -774,28 +774,54 @@ mais NE DOIVENT PLUS être invoqués. Toujours `beamfs-bench full`.
 
 Quand Claude livre un bloc bash/Python à exécuter dans cette interface,
 la sortie capturée par Aurélien doit être facile à localiser dans le
-flot du terminal. Donc : tout bloc encadré par un marker visuel clair.
+flot du terminal. Donc : tout bloc encadré par un marker visuel clair
+**généré par des `echo ""` exécutables**, pas par du markdown plain-text
+(qui voit ses lignes blanches collapsées par le rendu chat).
 
-**Format obligatoire (3 lignes blanches avant + après marker, marker
-sur 3 lignes)** :
+**Format obligatoire** : tout bloc shell livré dans cette interface est
+un bloc bash fenced (```bash ... ```) qui contient les `echo ""`
+nécessaires pour produire les lignes blanches réelles dans le terminal.
 
-<contenu shell précédent>
+Exemple canonique :
 
-#######
-#début#
-#######
-
+```bash
+echo ""
+echo ""
+echo ""
+echo "#######"
+echo "#début#"
+echo "#######"
+echo ""
+echo ""
+echo ""
 <commande réelle à exécuter>
+echo ""
+echo ""
+echo ""
+```
 
+**Composition obligatoire** :
+- 3 `echo ""` AVANT le marker (sépare du prompt précédent)
+- marker exactement `echo "#######"` / `echo "#début#"` / `echo "#######"`
+  (7 hash, espace zéro, hyphens zéro, accent é dans `début`)
+- 3 `echo ""` APRÈS le marker (sépare du contenu de la commande)
+- la commande réelle
+- 3 `echo ""` APRÈS la commande (sépare la sortie du prompt suivant)
 
-**Note caractères** : marker exactement `#######` / `#début#` /
-`#######` (7 hash, espace zéro, hyphens zéro, accent é dans `début`).
+**Pourquoi `echo ""` et pas des lignes blanches markdown** : les lignes
+blanches markdown plain-text sont collapsées par le rendu chat (1 ou 2
+max conservées). Seuls des `echo ""` exécutés par bash produisent
+des lignes blanches réelles dans la sortie terminal d'Aurélien.
 
-**À la fin du bloc** : 3 lignes blanches avant le prompt suivant pour
-que la sortie ne se colle pas au prompt `aurelien@spartian-1`.
-
-**Anti-pattern interdit** : `##### DEBUT #####`, `=== START ===`,
-bannière ASCII art, ou tout autre format. Le format est figé.
+**Anti-patterns interdits** :
+- bloc bash sans `echo ""` autour du marker (lignes blanches markdown
+  qui collapsent au rendu)
+- marker en dehors d'un bloc bash fenced (commande non copiable d'un
+  coup, marker rendu comme texte)
+- variantes du marker : `##### DEBUT #####`, `=== START ===`, bannière
+  ASCII art, ou tout autre format. Le format est figé.
+- bloc qui mélange markdown narratif et `echo ""` : le bloc bash doit
+  être auto-suffisant, copiable d'un seul coup dans le terminal.
 
 ---
 
