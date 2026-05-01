@@ -16,6 +16,91 @@ sur le projet beamfs (sécurité kernel, science informatique).
 
 Si tu lis ce fichier : ne le résume pas, ne le commente pas, applique-le.
 
+**Lecture ligne-à-ligne obligatoire** : Claude lit ce document de la
+première à la dernière ligne, sans sauter, sans skim. Si la session
+redémarre, la lecture redémarre. Pas de "je m'en souviens" - la mémoire
+de session est volatile, le contrat est sur disque. R0 jusqu'à R28 sont
+tous lus, intégrés, appliqués avant tout autre fichier projet.
+
+---
+
+## 0. Mapping de versioning (cristallisé 2026-05-01)
+
+Le projet beamfs vit sur **trois** versions, sur **deux** repos GitHub.
+Cette structure est non-négociable et doit être respectée à chaque push :
+
+```
+  beamfs v2 (PUBLIC)         roastercode/beamfs PUBLIC, branch main
+                             = vitrine cristallisée à la dernière publication
+                             = paper Zenodo v2 + état du code à ce moment
+                             = NE BOUGE PAS entre deux publications
+                             = headers actuels: tags v1.x, papier v2 publié
+                                                                                
+  beamfs-devel v3 (PRIVATE)  roastercode/beamfs-devel PRIVATE, branch mainline-prep
+                             = la trajectoire de travail courante
+                             = sub-step 4 → 10 INLINE-MULTIBLOCK
+                             = paper v3 in progress (papers/2026-04-beamfs-v3-findings/)
+                             = context/, manifests, drafts, findings
+                             = TOUTES les sessions de dev poussent ici
+                                                                                
+  beamfs v3 (PUBLIC, futur)  roastercode/beamfs PUBLIC, branch main
+                             = sera produit à la double-publication suivante :
+                               1. Zenodo paper v3 publié (DOI assigné)
+                               2. Mail RFC kernel.org prêt à partir
+                             = à ce moment, on push beamfs-devel → beamfs PUBLIC
+                               (filtré pour exclure context/, papers v3 findings,
+                                manifests audit-grade internes)
+                             = tag annoté GPG : v0.5.0-... ou similaire
+```
+
+**Implication immédiate** : aucun push sur `beamfs` PUBLIC entre les
+publications. Pendant tout le développement v3 (sub-step 4 → RFC), seul
+`beamfs-devel` PRIVATE reçoit les commits. Le PUBLIC est gelé sur la
+dernière release publiée.
+
+**Workflow opérationnel** :
+
+- Tout commit code/docs/papers va sur `beamfs-devel` PRIVATE branche
+  `mainline-prep` (ou autre branche topic, jamais `main`).
+- Tout commit yocto va sur `yocto-beamfs` PRIVATE branche `main` (lockstep
+  miroir des sources kernel + manifests pipeline).
+- Tout commit harness va sur `beamfs-bench` PRIVATE branche `main`.
+- Tout commit overlay Gentoo va sur `beamfs-overlay` PRIVATE branche `main`.
+- **Aucun** commit ne va sur `beamfs` PUBLIC tant que paper v3 + RFC ne
+  sont pas tous deux prêts à publication coordonnée.
+
+**Vérification avant tout push** (R14) : `gh repo view <owner>/<repo>
+--json visibility` doit retourner `PRIVATE` pour le remote ciblé. Si
+un push vers PUBLIC est tenté pendant la phase de dev v3, c'est un
+bug de la procédure. Ne pas forcer.
+
+**Quand publier v3 PUBLIC ?** Conditions cumulatives obligatoires :
+
+1. Sub-step 4 → 10 INLINE-MULTIBLOCK closed avec pipeline `beamfs-bench
+   full` overall_rc=0 (R19) sur le commit final.
+2. xfstests subset generic/{001,002,010,098,257} passing.
+3. checkpatch.pl --strict sur tous les fichiers .c/.h : 0 errors,
+   0 warnings.
+4. Paper v3 finalisé, soumis sur Zenodo, DOI assigné.
+5. Cover letter RFC kernel.org rédigée, patches cleans (rebased,
+   atomiques), `git send-email` prêt à partir.
+
+À ce moment-là, et pas avant, on prépare le push PUBLIC v3 :
+
+- Branche temporaire `public-v3-staging` créée depuis `mainline-prep`.
+- Filter : exclure `context/`, `papers/2026-04-beamfs-v3-findings/`
+  (sauf publication finale Zenodo), `Documentation/runs/manifest-*.json{,.asc}`
+  (rester sur PRIVATE comme audit interne).
+- Cherry-pick ou rebase pour produire un historique linéaire propre.
+- Tag annoté GPG : `v0.x.0-beamfs-v3-rfc`.
+- Push `public-v3-staging:main` sur `roastercode/beamfs` PUBLIC.
+- `git send-email` patches sur linux-fsdevel.
+- Annoncer Zenodo DOI dans la cover letter.
+
+Cette opération est **manuelle, intentionnelle, finale**. Elle est
+préparée avec rigueur dans une session dédiée, jamais comme un effet
+de bord d'une autre session.
+
 ---
 
 ## 1. Pas de sandbox
