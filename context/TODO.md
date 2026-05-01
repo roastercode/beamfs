@@ -123,12 +123,14 @@ simultaneously (48 confirmed flips, 0 corruption).
    `fsck`     (Test D - fsck recovery post-FS_PANIC)               DONE afternoon
    All 4 modules : 5/5 to 20/20 phases OK, exit 0, R19 vert.
 
-5. PENDING : Fix the `perf record` header data_size=0 race in
-   `forensics::stop_perf_master` (currently the polling on
-   `pgrep -x perf` exits before perf flushes its file header).
-   Note : observed 2026-05-01 run also showed perf_stop_timeout_size
-   message (228 MB flush succeeded eventually), so the race is
-   benign in practice but should still be fixed.
+5. DONE 2026-05-01 : `forensics::stop_perf_master` perf header
+   data_size=0 race fixed in beamfs-bench `97ca646`. start_perf_master
+   now writes /tmp/beamfs-bench-perf.pid via `bash -c '... & echo $!'`,
+   stop_perf_master SIGINTs that exact PID, bounded-waits via `kill -0`
+   for process exit, then validates the data file with `perf report
+   --header-only`. Marker on success: `header_ok=1`. Empirical
+   validation (analyse --scope=full): perf_stopped_size=44212536
+   header_ok=1, 237K samples readable, no data_size=0 error.
 
 6. PENDING (2026-05-01) : Push the Gentoo overlay
    `/var/db/repos/beamfs-overlay/` to a dedicated private repo

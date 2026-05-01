@@ -49,6 +49,8 @@ Storage canonique : `~/git/beamfs/context/STATUS.md` (NEVER published).
 - `7c390b6` docs(readme): R-isolation + bitrot DONE
 - `3f54611` feat(bench): metadata subcommand (Test A)
 - `df76a4d` feat(bench): crash + fsck subcommands (Test B + Test D)
+- `d638949` docs(readme): mark bitrot/metadata/crash/fsck as DONE
+- `97ca646` fix(forensics): wait on exact perf PID + validate header
 
 ### yocto-beamfs PRIVATE origin/main
 - `50c339f` feat(image): blktrace IMAGE_INSTALL
