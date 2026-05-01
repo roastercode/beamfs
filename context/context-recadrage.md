@@ -1053,5 +1053,51 @@ Si divergence, redeployer avant patch.
 
 ---
 
-**Fin R0-R28. Lecture obligatoire de R0-R28 en debut de session.**
+## R29 - R-gpg-signing : preauth interactif obligatoire avant batch loopback
+
+`gpg --batch --pinentry-mode loopback` ne peuple PAS le cache gpg-agent
+sans passphrase fournie via stdin. Sans cache prealable, l'invocation
+fail silencieusement avec :
+
+  `gpg: Sorry, we are in batchmode - can't get input`
+
+Symptome observe (2026-05-01) : sequence de plusieurs commits GPG-signed
+dans la meme session. Les premiers commits passent (cache populated par
+un signing interactif anterieur), puis le cache expire (default-cache-ttl
+3600s) ou est vide en debut de session, et `git commit -S` ou
+`emit_manifest` fail.
+
+**Le seul vrai preauth qui populate le cache gpg-agent** :
+
+```bash
+# Preauth interactif au debut d'une session (UNE fois par cycle 3600s)
+git commit -S ...                  # via pinentry-curses au TTY
+# OU
+gpg --sign /tmp/dummy              # pinentry-curses au TTY
+rm /tmp/dummy.gpg
+```
+
+L'invocation interactive (sans `--batch`) declenche `pinentry-curses`,
+qui demande la passphrase au TTY, et populate le cache gpg-agent pour
+le TTL configure (3600s default, 7200s max).
+
+**Anti-pattern interdit** : utiliser `gpg --batch --pinentry-mode
+loopback` comme "preauth" en debut de bloc shell. Ca ne marche que si
+le cache est deja populated, donc c'est un no-op qui passe ou un fail
+silencieux selon l'etat du cache. Ce n'est PAS un mecanisme de preauth.
+
+**Pattern correct dans `pipeline::emit_manifest`** : `gpg --batch
+--pinentry-mode loopback --detach-sign --armor` est valide UNIQUEMENT
+si le cache gpg-agent a ete populated par un signing interactif
+anterieur dans la fenetre TTL. Pour mega run, le preauth se fait au
+debut de la session avant invocation `beamfs-bench mega`.
+
+**Pour Claude generant des blocs shell multi-commit** : ne pas inserer
+de pseudo-preauth `gpg --batch --pinentry-mode loopback` en tete de
+bloc. Si plusieurs commits sont attendus, le premier `git commit -S`
+populate le cache pour les suivants, sans ceremonie supplementaire.
+
+---
+
+**Fin R0-R29. Lecture obligatoire de R0-R29 en debut de session.**
 
