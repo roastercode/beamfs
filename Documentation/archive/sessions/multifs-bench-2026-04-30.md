@@ -245,7 +245,7 @@ The bench is fully reproducible from the yocto-beamfs lab repository:
   + multifs.cfg fragment
 - RadFI v0.1.3 (with `target_block` filter on bio hook)
 
-Run artifact: `Documentation/runs/Tir-analyse-multifs-20260430-141008.tar.gz`
+Run artifact: `Documentation/runs/beamfs-bench-analyse-20260430-141008.tar.gz` (renamed 2026-05-01 from Tir-analyse-multifs-20260430-141008.tar.gz for naming consistency)
 
 ## Next steps
 

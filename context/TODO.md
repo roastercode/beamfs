@@ -188,7 +188,7 @@ Total: 10-12h focused work.
 ### 2.5 - Migration plan (executed 2026-04-30 to 2026-05-01)
 
 1. DONE 2026-04-30 : `beamfs-bench multifs` ported, verdicts byte-identical
-   to reference run Tir-multifs-20260430-141008.
+   to reference run beamfs-bench-analyse-20260430-141008 (renamed 2026-05-01).
 2. DONE 2026-04-30 : `beamfs-bench analyse` ported (3 scopes).
 3. DONE 2026-05-01 : `beamfs-bench full` added (lifecycle + bootstrap +
    analyse scope=full). Replaces the originally-planned `bench` subcommand
