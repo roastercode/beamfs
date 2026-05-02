@@ -340,7 +340,7 @@ struct beamfs_dir_entry {
     __le64  d_ino;
     __le16  d_rec_len;
     __u8    d_name_len;
-    __u8    d_file_type;        /* DT_REG=1, DT_DIR=4, ... */
+    __u8    d_file_type;        /* Linux DT_* (DT_REG=8, DT_DIR=4); legacy v1 used 1=REG/2=DIR, dir.c translates on read */
     char    d_name[256];
 } __packed;
 ```

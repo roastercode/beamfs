@@ -11,6 +11,7 @@
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/time.h>
+#include <linux/fs_dirent.h>
 #include "beamfs.h"
 
 /* ------------------------------------------------------------------ */
@@ -311,7 +312,7 @@ static int beamfs_create(struct mnt_idmap *idmap, struct inode *dir,
 	if (ret)
 		goto out_iput;
 
-	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino, 1 /* DT_REG */);
+	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino, DT_REG);
 	if (ret)
 		goto out_iput;
 
@@ -349,12 +350,12 @@ static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	/* Add . and .. entries */
 	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT(".", 1),
-			       inode->i_ino, 4 /* DT_DIR */);
+			       inode->i_ino, DT_DIR);
 	if (ret)
 		goto out_fail;
 
 	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT("..", 2),
-			       dir->i_ino, 4 /* DT_DIR */);
+			       dir->i_ino, DT_DIR);
 	if (ret)
 		goto out_fail;
 
@@ -363,7 +364,7 @@ static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		goto out_fail;
 
 	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino,
-			       4 /* DT_DIR */);
+			       DT_DIR);
 	if (ret)
 		goto out_fail;
 
@@ -554,7 +555,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 	/* Add entry in new_dir */
 	ret = beamfs_add_dirent(new_dir, &new_dentry->d_name,
 			       old_inode->i_ino,
-			       is_dir ? 4 /* DT_DIR */ : 1 /* DT_REG */);
+			       is_dir ? DT_DIR : DT_REG);
 	if (ret)
 		return ret;
 
@@ -577,7 +578,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 			return ret;
 
 		ret = beamfs_add_dirent(old_inode, &dotdot,
-				       new_dir->i_ino, 4 /* DT_DIR */);
+				       new_dir->i_ino, DT_DIR);
 		if (ret)
 			return ret;
 

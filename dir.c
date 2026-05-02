@@ -5,6 +5,7 @@
  */
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
+#include <linux/fs_dirent.h>
 #include "beamfs.h"
 
 /*
@@ -84,6 +85,8 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 			    !(de->d_name_len == 1 && de->d_name[0] == '.') &&
 			    !(de->d_name_len == 2 && de->d_name[0] == '.' &&
 			      de->d_name[1] == '.')) {
+				u8 dt;
+
 				/*
 				 * Update ctx->pos before dir_emit so the VFS
 				 * has a unique seek offset for each entry.
@@ -91,9 +94,31 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 				 */
 				ctx->pos = ((loff_t)(block_idx + 1) << 16)
 					   | entry_slot;
+
+				/*
+				 * Translation layer: legacy beamfs
+				 * convention used d_file_type=1 for REG
+				 * and d_file_type=2 for DIR (predates
+				 * Linux DT_* alignment). New writes use
+				 * DT_REG=8 / DT_DIR=4 directly. Both
+				 * forms remain readable by userspace
+				 * through this mapping.
+				 */
+				switch (de->d_file_type) {
+				case 1:
+					dt = DT_REG;
+					break;
+				case 2:
+					dt = DT_DIR;
+					break;
+				default:
+					dt = de->d_file_type;
+					break;
+				}
+
 				if (!dir_emit(ctx, de->d_name, de->d_name_len,
 					      le64_to_cpu(de->d_ino),
-					      de->d_file_type)) {
+					      dt)) {
 					brelse(bh);
 					return 0;
 				}
