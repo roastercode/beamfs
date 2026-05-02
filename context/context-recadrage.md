@@ -1164,5 +1164,68 @@ livrer un bloc preauth au lieu de tenter direct un commit batch.
 
 ---
 
-**Fin R0-R29. Lecture obligatoire de R0-R29 en debut de session.**
+## R30 - R-no-pager : neutraliser systematiquement le pager
+
+Tout outil CLI qui invoque un pager interactif (less, more) par defaut
+peut killer le terminal sous Wayland (foot/alacritty/kitty) si la sortie
+est volumineuse, ou bloquer la progression d'un bloc shell en attente
+d'un 'q' utilisateur. Le terminal d'Aurelien sous River/Wayland n'est
+pas une cible jetable (cf. R18) ; sa perte = perte de la session de
+travail.
+
+**Outils concernes** : git, gh, systemctl, journalctl, less, more, et
+tout binaire qui detecte un TTY et active less/more automatiquement.
+
+**Anti-patterns interdits** dans tout bloc shell livre par Claude :
+
+```bash
+git log                              # pager actif par defaut
+git diff                             # idem
+git show <commit>                    # idem
+gh repo view <owner>/<repo>          # pager via PAGER env
+gh pr view <num>                     # idem
+gh issue view <num>                  # idem
+gh api repos/<owner>/<repo>/...      # idem
+systemctl status <unit>              # pager LESS=FRSXMK actif
+journalctl -u <unit>                 # idem
+```
+
+**Patterns corrects** (a utiliser systematiquement) :
+
+```bash
+# git : option --no-pager native
+git --no-pager log
+git --no-pager diff
+git --no-pager show <commit>
+
+# gh : pas d'option --no-pager native, utiliser PAGER=cat
+PAGER=cat gh repo view <owner>/<repo> --json name,visibility
+PAGER=cat gh pr view <num>
+PAGER=cat gh api repos/<owner>/<repo>/branches
+# alternative equivalente : pipe vers cat (force EOF sur stdout)
+gh repo view <owner>/<repo> | cat
+
+# systemctl/journalctl : option --no-pager native
+systemctl status <unit> --no-pager
+journalctl -u <unit> --no-pager
+```
+
+**Self-check obligatoire avant livraison de bloc shell** : Claude
+grepe mentalement le bloc pour `git log|git diff|git show|gh repo|gh
+pr|gh issue|gh api|systemctl|journalctl|less|more` et verifie que
+`--no-pager` ou `PAGER=cat` ou `| cat` est present dans la meme
+commande. Si non : ajouter avant livraison.
+
+**Conclusion** : Claude ne genere JAMAIS, sans exception, une commande
+qui invoque un pager interactif. La perte du terminal sous Wayland
+casse le flux de travail et fait perdre des etats non-persistes
+(scrollback, processus en cours, variables d'env de session).
+
+Violations observees session 2026-05-02 substep 10 : `git log` sans
+`--no-pager` (1x), `gh repo view` sans `PAGER=cat` (3x). Cette regle
+R30 est ajoutee suite a ces violations pour eviter la recurrence.
+
+---
+
+**Fin R0-R30. Lecture obligatoire de R0-R30 en debut de session.**
 
