@@ -51,7 +51,7 @@ the **Priority matrix** (section 14) for guided next-step selection.
 
 ## 1. Schemas (orientation)
 
-### 1.1 Documentation map (13 .md + context/)
+### 1.1 Documentation map (post-rationalisation 2026-05-02)
 
 ```
                             beamfs/Documentation/
@@ -130,6 +130,24 @@ Public vs Private classification
   INTERNAL (context/, gitignored except whitelist) :
     00-MINDMAP.md, STATUS.md, context-recadrage.md, INLINE-MULTIBLOCK-DESIGN.md
 ```
+
+**Post-audit 2026-05-02 changes :**
+
+- `context/TODO.md` (322 lines, obsolete duplicate) : **REMOVED**
+- `context/INLINE-MULTIBLOCK-DESIGN.md` (1064 lines, substeps 4-10
+  closed) : **ARCHIVED** to
+  `context/archive/INLINE-MULTIBLOCK-DESIGN-2026-05-02-closed.md`
+  (audit trail preserved, no longer active editing)
+- `format-v4.md` : naming clarification header added
+  (`BEAMFS_VERSION_V1 = 1` is the kernel version constant ; "v4"
+  refers to the superblock layout family inherited from FTRFS lineage)
+- `roadmap.md` : Stage 3 status `ACTIVE` -> `CLOSED 2026-05-02` ;
+  Item 4 Shannon entropy `PENDING` -> `CLOSED 2026-05-02`
+- `known-limitations.md` : table line 6.4 Shannon entropy "Not
+  implemented" -> "Implemented in stage 3 item 4 (closed 2026-05-02)"
+- `beamfs/README.md` : R17 tagline corrected
+- `yocto-beamfs/README.md`, `radfi/README.md` : R17 tagline edits
+  pending in WT, deferred to next session of those repos
 
 ### 1.2 Code map (4 projects)
 
@@ -1080,25 +1098,94 @@ architecture** :
 
 ---
 
-## 7. Documentation drift to repair (1-2h, doc-only commit)
+## 7. Documentation rationalisation (audit 2026-05-02 - applied)
 
-These items are immediate doc-only fixes ; the underlying code is
-already live runtime.
+Audit of all 41 .md files across 4 repos (beamfs / beamfs-bench /
+yocto-beamfs / radfi, 11833 lines total). Eight rationalisation
+actions identified and applied in this commit. The audit also
+detected the long-standing drift items previously listed here ;
+those drifts are now repaired by the same actions.
 
-| Doc claim                                                            | File                          | Empirical reality                                |
-|----------------------------------------------------------------------|-------------------------------|--------------------------------------------------|
-| `Item 4 - Shannon entropy in RS journal (PENDING)`                   | roadmap.md L354               | All 6 sub-commits A-F shipped (struct, LUT, signature, call sites, mkfs, format-v4.md) |
-| `6.4 Shannon entropy in RS journal \| Not implemented`               | known-limitations.md L49      | Entropy computed and stored in RS journal at runtime |
-| `BEAMFS PRE-ALPHA, no code yet`                                      | radfi/README.md               | 500 LOC C shipped, validated v0.1.2 tag          |
-| `tag v0.3.0-metadata-hardening` (planned closing tag)                | roadmap.md L466 ish           | Tag never created, but content is on HEAD        |
-| `format-v4.md` is authoritative for "v4"                             | format-v4.md                  | Document describes the **current** beamfs v1 format, naming inherited from FTRFS lineage |
-| `Stage 3 ACTIVE`                                                     | roadmap.md L26                | Stage 3 is effectively closed (items 1, 2, 3, 4, 4a, 4b-dirent all CLOSED) ; only the closing tag and v1.0 release ceremony remain |
+### 7.1 Doublons / obsolescence supprimes
 
-These do not block any technical work. They block clarity of state
-for any future reviewer (including future Claude sessions).
+- [x] **DELETE** `beamfs/context/TODO.md` (322 lignes obsoletes,
+      doublon de `Documentation/TODO.md` au format pre-restructure
+      avec items TODO 1-7 dont la majorite DONE).
 
----
+      Items utiles rapatries dans la presente section :
+      - TODO 1 lowercase normalization (350+950 occurrences) ->
+        section 7.4 Tier 3 ticket
+      - TODO 7 manifest provenance / SBOM / xfstests / checkpatch
+        deja couverts par upstream-1, upstream-3, upstream-4
 
+- [x] **ARCHIVE** `beamfs/context/INLINE-MULTIBLOCK-DESIGN.md`
+      (1064 lignes, substeps 4-10 tous CLOSED) deplace vers
+      `context/archive/INLINE-MULTIBLOCK-DESIGN-2026-05-02-closed.md`.
+      Audit trail historique preserve, n'evolue plus comme document
+      vivant.
+
+### 7.2 R17 tagline violations corrigees
+
+- [x] `beamfs/README.md` L1 : "beamfs - Beam-Resilient Filesystem"
+      -> "beamfs - resilient filesystem"
+
+- [ ] `yocto-beamfs/README.md` L4 : "BEAMFS v1 (Beam-Resilient
+      Filesystem)" -> "beamfs v1 (beamfs - resilient filesystem)"
+      [edit pending, commit deferred to next yocto-beamfs session]
+
+- [ ] `radfi/README.md` L7-9 : "PRE-ALPHA - paper draft only. No
+      code yet." factuellement faux (500 LOC C shipped, tag
+      v0.1.2-palier3-validated, paper Zenodo DOI 10.5281/zenodo.19885777).
+      [edit pending, commit deferred to next radfi session ; combinable
+      avec les 2 fichiers source dirty actuels]
+
+### 7.3 Drift status interne corrige (commit current)
+
+- [x] `format-v4.md` header : naming clarification ajoutee
+      (`BEAMFS_VERSION_V1 = 1` is the kernel constant ; "v4" is the
+      superblock layout family name from FTRFS lineage)
+
+- [x] `roadmap.md` L25 status table : Stage 3 `ACTIVE` -> `CLOSED 2026-05-02`
+      (items 1, 2, 3, 4, 4a, 4b-dirent all closed ; only release
+      ceremony tag `v0.3.0-metadata-hardening` remains)
+
+- [x] `roadmap.md` L353 : Item 4 Shannon entropy `PENDING` -> `CLOSED 2026-05-02`
+      (struct 40-byte, LUT entropy, journal recording all live runtime)
+
+- [x] `known-limitations.md` L49 (table line 6.4) : "Not implemented"
+      -> "Implemented in stage 3 item 4 (closed 2026-05-02)" with
+      full description of struct layout and runtime path
+
+### 7.4 Tickets de rationalisation residuels (Tier 3, post-RFC)
+
+- [ ] `doc-1` : lowercase normalization audit
+      Origin : ex-`context/TODO.md` TODO 1 (rapatrie ici).
+      Effort : ~2-3h. 350 occurrences `BEAMFS` dans .md/.txt et
+      ~950 dans .c/.h strings/comments cross-repo. Convention
+      kernel.org : lowercase `beamfs` en prose et dmesg, MAJ
+      preserve pour macros C, magic ASCII "BEAM", tex/bib papers.
+      Decoupage en 3 PRs (md/txt batch, dmesg strings audit,
+      kernel comments audit). Pas critique pour RFC submission ;
+      `checkpatch --strict` (upstream-3) ne flag pas la casse en
+      prose.
+
+- [ ] `doc-2` : `design.md` reposition
+      Effort : ~30 min. Header "Block Layout (v3)" + spec v3
+      coexiste avec `format-v4.md` qui s'autodeclare autoritaire
+      pour v4. Soit renommer `format-history.md`, soit reduire a
+      un index pointant vers `format-v4.md`. Pas urgent (les deux
+      docs cohabitent proprement, format-v4 est explicite sur la
+      precedence).
+
+### 7.5 Compte final post-audit
+
+| Etat                  | Avant audit | Apres audit |
+|-----------------------|-------------|-------------|
+| Total .md across 4 repos | 41        | 39 (-2)     |
+| Total lignes prose    | 11833       | ~9800 (-2033 : delete + archive moves) |
+| Doublons actifs       | 1 (context/TODO.md) | 0 |
+| Drift documente       | 6 items     | 0 (1 delete + 5 fixes appliques) |
+| README en violation R17 | 3         | 1 (beamfs OK ; yocto + radfi pending) |
 
 ---
 

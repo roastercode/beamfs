@@ -1,4 +1,4 @@
-# beamfs - Beam-Resilient Filesystem
+# beamfs - resilient filesystem
 
 **Status: PRE-DEMO. Not for publication, not for push, not for Zenodo, not
 for kernel.org. This tree exists to validate the recovery calculus of the
