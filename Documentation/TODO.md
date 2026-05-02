@@ -573,6 +573,213 @@ or mkfs.
 
 ---
 
+## radfi improvements
+
+### radfi improvement: targeting precision (range/list/file-aware)
+
+**Status** : not implemented. Identified empirically from R19 runs of
+beamfs-bench substep 10.
+**Effort** : 2-4 days (radfi API + beamfs FIEMAP support).
+**Repo** : radfi (companion module) + beamfs (FIEMAP).
+
+`target_block=0` is currently a broadcast mode (random flip across all
+blocks of `target_dev` while RadFI is armed). Useful for Family A
+stochastic SEU but insufficient for :
+
+  - Family B adversarial bursts (need range or list of blocks)
+  - File-precise targeting to prove RS-FEC functional correctness
+    (need file -> block mapping)
+
+Empirical evidence from R19 runs : multifs+cluster beamfs records
+show RS_CORRECTED=0 even when FLIP_DELTA>0, because the broadcast
+flips touch FS structural blocks (HASHES, dirent, metadata) more
+often than RS-protected data blocks. The current bench mostly
+observes RS_PASSTHROUGH instead of the desired RS_RECOVERED.
+
+Two symmetric problems with one architectural fix :
+
+  1. radfi side : add `target_block_range` or `target_block_list`
+     debugfs entries (atomic write : start..end or comma-list).
+  2. beamfs side : implement `.fiemap` in `inode_operations` so
+     userspace `filefrag -b4096 <file>` returns the actual block
+     list backing the file (already supported by ext4/btrfs/xfs).
+
+beamfs-bench `worker.sh setup` already conditionally reads
+`filefrag` for non-beamfs FS (line 153 : `[ "$FS" != "beamfs" ]`).
+Once beamfs implements FIEMAP, the conditional is removed and the
+TARGET_BLOCK becomes file-precise. radfi then accepts that block
+value via the existing `target_block` debugfs entry.
+
+For paper v3, this is the gap to either close or explicitly
+document : the current bench measures FS resilience to broadcast
+EM noise on the device, not file-level RS-FEC functional
+correctness. Both are valid scientific questions, but the paper
+narrative needs to match the measurement methodology.
+
+### radfi improvement: mainline submission positioning
+
+**Status** : not implemented. Forward-looking concern.
+**Effort** : 2-4 weeks (RFC writing + reviewer cycle).
+**Repo** : radfi (RFC patches) + Documentation/.
+
+radfi is currently a companion out-of-tree module to beamfs (separate
+Zenodo DOI 10.5281/zenodo.19885777). For lab use this is fine, but
+two trajectories diverge if radfi is to live in production beyond
+the bench :
+
+  - Production deployments running beamfs do NOT need radfi loaded.
+    radfi.ko stays optional, lab-only, distributed via the bench.
+  - Mainline submission requires positioning radfi vs existing
+    kernel fault injection facilities :
+      - `fail_make_request` (block layer fault injection, existing)
+      - `fault-injection` framework in lib/fault-inject.c (existing)
+      - dm-flakey (DM target for transient I/O errors, existing)
+    radfi distinguishes itself by simulating bit-level flips in
+    flight on the bio path (not request rejection or whole-block
+    corruption). This is the angle to defend in an RFC cover
+    letter.
+
+Decision needed before phase 8 (RFC mainline submission of beamfs) :
+submit radfi as a separate RFC track, bundle it with beamfs as a
+co-submission, or keep it permanently out-of-tree as a lab tool ?
+
+## beamfs improvements
+
+### beamfs improvement: on-disk format stability discipline
+
+**Status** : architectural concern. No code change required if
+discipline is held.
+**Effort** : ongoing (review every format-touching commit).
+**Repo** : beamfs (Documentation/format-v5-design.md).
+
+Format on-disk has had several revisions during pre-mainline work :
+
+  - v3 (legacy)
+  - v4 (current, kvmalloc RS scratch buffers)
+  - v4 strict (item 4b, format bump rejecting v3 at mount)
+  - v5 design in progress (allocator scaling : bitmap chained ->
+    block groups -> btree for 16 EB, 11 INCOMPAT bits, 4 RO_COMPAT
+    bits, 3 COMPAT bits)
+
+Tension between roadmap phase 6 (build user base, anti-FTRFS-NAK)
+and ongoing format evolution :
+
+  - phase 6 needs real users with real deployments
+  - real users need a stable on-disk format (no painful migrations)
+  - mainline RFC needs the format to be defendable
+
+Resolution requires holding the discipline already documented in
+`format-v5-design.md` : freeze v5 minimal at RFC submission time,
+add features only via INCOMPAT/RO_COMPAT/COMPAT flags (ext4 pattern),
+never break existing on-disk layouts. The discipline is documented ;
+enforcement is per-commit reviewer responsibility.
+
+No automation possible. This entry exists as a reminder for every
+reviewer (including future Claude sessions) to check whether a
+commit touches on-disk layout and refuse it if it breaks v5
+minimal compatibility post-RFC submission.
+
+### beamfs improvement: defense-in-depth silent skip observability
+
+**Status** : implemented but needs ongoing surveillance.
+**Effort** : ongoing (per-session forensic check).
+**Repo** : beamfs (alloc.c).
+
+The canary fix (substep 10, commit 3275202) added a 2-layer defense
+against double-free of reserved blocks :
+
+  - Layer 1 (inode.c) : `S_IMMUTABLE` flag set on reserved inodes
+    at mount time. VFS rejects open/setattr/unlink etc. with EPERM.
+  - Layer 2 (alloc.c) : `beamfs_free_block` and
+    `beamfs_free_inode_num` silent skip + early return when called
+    on reserved blocks/inodes (covers Layer 1 bypass via memory
+    corruption mutating an `i_direct[]` in flight).
+
+Layer 2 by design hides corrupted state : the call returns silently
+instead of WARN+pr_err. This is correct in production (avoids panic
+on suspected EM corruption) but masks real bugs in debug.
+
+Mitigation already in place : `dump_stack()` after `pr_warn "double
+free of block %llu"` in `beamfs_free_block` legitimate path. Zero
+cost on success path (`test_bit` short-circuit), captures call chain
+on error path.
+
+Required surveillance per session :
+
+  - Grep dmesg captures for `double free` + `dump_stack` markers
+    after every R19. Investigate any non-zero count.
+  - Do not rely on R19 exit=0 alone : Layer 2 silent skip can
+    mask a real bug while the pipeline reports clean.
+  - When a real bug is suspected : temporarily replace silent
+    skip with `WARN_ONCE` or `pr_err+BUG_ON` for diagnosis, then
+    restore silent skip.
+
+## beamfs-bench improvements
+
+### beamfs-bench improvement: cluster scope verdict derivation
+
+**Status** : not implemented. Tracked as follow-up of substep 10
+worker redesign.
+**Effort** : 2-3h (port multifs derivation to cluster scope).
+**Repo** : beamfs-bench (cluster.rs + synthesis logic).
+
+`synthesis.rs` derives `RS_RECOVERED|RS_PASSTHROUGH|RS_FAILED|
+FS_PANIC|CORRUPTED_DATA` for the multifs scope by cross-referencing
+ATTACK and VERIFY records. The cluster scope emits factual records
+in the same format (CLUSTER|HOST=...|HASH_PRE/POST/CAT_RC/
+RS_CORRECTED/...) but no derivation runs on them. Cluster verdicts
+remain raw (`VERIFIED|DIFFS=N`) at synthesis time.
+
+Asymmetry to remove :
+  - multifs : worker emits factual ; synthesis.rs derives logical
+  - cluster : worker emits factual ; nothing derives logical
+
+Action : write `derive_cluster_verdict()` mirroring
+`derive_verdict_beamfs()` and apply per-node + per-prob.
+Aggregate cluster verdict = worst case across 4 nodes
+(FS_PANIC dominates, CORRUPTED_DATA next, RS_FAILED next,
+RS_PASSTHROUGH next, RS_RECOVERED best).
+
+### beamfs-bench improvement: radfi state timeline in forensics
+
+**Status** : not implemented. Identified during forensics-1 review.
+**Effort** : 1-2h (capture debugfs at transitions, ts annotation).
+**Repo** : beamfs-bench (forensics.rs + worker.sh).
+
+VM-side forensics capture dmesg, ftrace, perf, lsmod, but not the
+`/sys/kernel/debug/radfi/{call_count,flip_count,target_dev,
+target_block,probability,enabled,hook_blk}` content snapshots at
+the arm/disarm boundaries.
+
+Consequence : when investigating "did radfi flip the block beamfs
+failed to recover ?", the answer requires reading dmesg for radfi
+log entries (which exist but are not always emitted at every flip)
+instead of reading a clean before/after counter snapshot.
+
+Action : add `radfi-timeline.log` per-VM capture file. worker.sh
+attack action already reads CALL_B/FLIP_B/CALL_A/FLIP_A for the
+delta computation ; persist these per-attack with monotonic
+timestamps. forensics post-capture appends final state. Output
+format machine-parseable for cross-correlation with dmesg RS
+corrected events.
+
+### beamfs-bench improvement: factor multifs/cluster worker duplication
+
+**Status** : already tracked under "cluster_*/multifs worker
+duplication" section above. Cross-referenced here for visibility.
+**Effort** : 4-6h refactor + tests.
+**Repo** : beamfs-bench (worker.sh).
+
+Same logic lives twice (`setup`/`attack`/`verify` for multifs vs
+`cluster_setup`/`cluster_attack`/`cluster_verify` for cluster).
+The substep 10 worker redesign had to patch both in lockstep ;
+a common helper layer (`_setup_layout`, `_run_attack`,
+`_compute_observation`) would prevent the next session from
+discovering the same bug at two scopes after one fix.
+
+See section above ("beamfs-bench evolution: cluster_*/multifs
+worker duplication") for details.
+
 ## Priority matrix (recommendation)
 
 This is a recommendation, not a prescription.
