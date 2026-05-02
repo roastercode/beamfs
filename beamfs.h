@@ -551,6 +551,9 @@ extern const struct file_operations beamfs_file_operations;
 extern const struct inode_operations beamfs_file_inode_operations;
 extern const struct address_space_operations beamfs_aops;
 
+/* file_inline.c (v2 INLINE inode_operations: getattr + setattr/truncate) */
+extern const struct inode_operations beamfs_inline_inode_operations;
+
 /* edac.c */
 void beamfs_rs_init_tables(void);
 void beamfs_rs_exit_tables(void);

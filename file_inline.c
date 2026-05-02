@@ -47,6 +47,13 @@ static int     beamfs_inline_write_end(const struct kiocb *iocb,
 				       struct folio *folio, void *fsdata);
 static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from);
+static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
+				    struct dentry *dentry,
+				    struct iattr *attr);
+static void    beamfs_inline_free_blocks_from(struct inode *inode,
+					      u64 b_first_freed);
+static int     beamfs_inline_zero_tail_block(struct inode *inode,
+					     u64 b, u32 zero_offset);
 
 /* ------------------------------------------------------------------------- */
 /* Block-mapping helpers (v2 INLINE)                                         */
@@ -964,4 +971,255 @@ const struct file_operations beamfs_inline_file_operations = {
 	.write_iter  = beamfs_inline_file_write_iter,
 	.fsync       = generic_file_fsync,
 	.splice_read = filemap_splice_read,
+};
+
+/* ------------------------------------------------------------------------- */
+/* Truncate support (sub-step 6 INLINE-MULTIBLOCK)                           */
+/*                                                                           */
+/* Scope: direct + single indirect (mirrors the v4 INLINE allocator). The    */
+/* allocator (lookup_or_alloc_phys) does not allocate dindirect/tindirect,   */
+/* so truncate has nothing to free at those levels in v4. Maximum file size  */
+/* is (BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS) * 3824 = 524 blocks      */
+/* = ~2 MiB. Larger files are deferred to v5 (EXTENTS feature flag).         */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * beamfs_inline_free_blocks_from - free disk blocks at logical iblock
+ *                                  >= b_first_freed.
+ *
+ * Mirror of beamfs_free_data_blocks (super.c) restricted to a starting
+ * logical block, used for truncate-down. Walks direct[b_first_freed..N-1]
+ * then the single indirect block. If b_first_freed == 0 the indirect
+ * block itself is freed; otherwise individual indirect slots are zeroed
+ * and the indirect block is kept.
+ *
+ * Caller holds inode_lock via notify_change. No allocation occurs here,
+ * so i_alloc_mutex is not needed.
+ */
+static void beamfs_inline_free_blocks_from(struct inode *inode,
+					   u64 b_first_freed)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block       *sb = inode->i_sb;
+	unsigned int              i;
+
+	/* --- Direct blocks --- */
+	for (i = b_first_freed; i < BEAMFS_DIRECT_BLOCKS; i++) {
+		u64 blk = le64_to_cpu(fi->i_direct[i]);
+
+		if (blk) {
+			beamfs_free_block(sb, blk);
+			fi->i_direct[i] = 0;
+		}
+	}
+
+	/* --- Single indirect block --- */
+	if (fi->i_indirect) {
+		u64                 indirect_blk = le64_to_cpu(fi->i_indirect);
+		struct buffer_head *ibh;
+		__le64             *ptrs;
+		u64                 nptrs = BEAMFS_INDIRECT_PTRS;
+		u64                 slot_first;
+		u64                 j;
+
+		ibh = sb_bread(sb, indirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: truncate: failed to read indirect block %llu\n",
+					   (unsigned long long)indirect_blk);
+			return;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+
+		if (b_first_freed >= BEAMFS_DIRECT_BLOCKS)
+			slot_first = b_first_freed - BEAMFS_DIRECT_BLOCKS;
+		else
+			slot_first = 0;
+
+		for (j = slot_first; j < nptrs; j++) {
+			u64 blk = le64_to_cpu(ptrs[j]);
+
+			if (blk) {
+				beamfs_free_block(sb, blk);
+				ptrs[j] = 0;
+			}
+		}
+
+		mark_buffer_dirty(ibh);
+		brelse(ibh);
+
+		/* If we freed the entire indirect range, drop the indirect
+		 * block itself.
+		 */
+		if (slot_first == 0) {
+			beamfs_free_block(sb, indirect_blk);
+			fi->i_indirect = 0;
+		}
+	}
+
+	mark_inode_dirty(inode);
+}
+
+/*
+ * beamfs_inline_zero_tail_block - zero user bytes [zero_offset .. 3824)
+ *                                 in INLINE disk block b, via RMW + RS
+ *                                 re-encode.
+ *
+ * Used when truncate-down lands inside a block: the surviving block must
+ * be valid (RS-encoded) with stale tail bytes zeroed. The block is
+ * decoded into scratch, the tail is memset to zero, and the block is
+ * re-encoded and synced. Mirrors writeback_folio's RMW pattern.
+ *
+ * Caller holds inode_lock; we additionally take i_alloc_mutex to exclude
+ * concurrent writeback on the same physical block.
+ */
+static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
+					 u32 zero_offset)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block       *sb = inode->i_sb;
+	struct buffer_head       *bh;
+	u8                       *scratch;
+	u64                       phys = 0;
+	unsigned int              sb_idx;
+	int                       ret;
+
+	if (zero_offset >= BEAMFS_DATA_INLINE_BYTES)
+		return 0;
+
+	mutex_lock(&fi->i_alloc_mutex);
+	ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+	mutex_unlock(&fi->i_alloc_mutex);
+	if (ret < 0)
+		return ret;
+	if (phys == 0)
+		return 0; /* HOLE: nothing to zero, sparse semantics */
+
+	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!scratch)
+		return -ENOMEM;
+
+	ret = beamfs_inline_decode_block_into_buf(sb, phys, inode, b,
+						  scratch, 0,
+						  BEAMFS_DATA_INLINE_BYTES);
+	if (ret < 0) {
+		kfree(scratch);
+		return ret;
+	}
+
+	memset(scratch + zero_offset, 0,
+	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
+
+	bh = sb_bread(sb, phys);
+	if (!bh) {
+		pr_err_ratelimited("beamfs/inline: zero_tail: sb_bread phys=%llu failed\n",
+				   (unsigned long long)phys);
+		kfree(scratch);
+		return -EIO;
+	}
+
+	for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++) {
+		memcpy((u8 *)bh->b_data + (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
+		       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
+		       BEAMFS_SUBBLOCK_DATA);
+	}
+
+	ret = beamfs_rs_encode_region(
+		(u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+		(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
+		BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS);
+	if (ret < 0) {
+		pr_err_ratelimited("beamfs/inline: zero_tail: rs_encode_region failed: %d\n",
+				   ret);
+		brelse(bh);
+		kfree(scratch);
+		return ret;
+	}
+
+	memset((u8 *)bh->b_data + BEAMFS_DATA_INLINE_TOTAL, 0,
+	       BEAMFS_DATA_INLINE_PAD);
+
+	mark_buffer_dirty(bh);
+	ret = sync_dirty_buffer(bh);
+	brelse(bh);
+	kfree(scratch);
+	return ret;
+}
+
+/*
+ * beamfs_inline_setattr - VFS setattr hook for INLINE inodes.
+ *
+ * Handles ATTR_SIZE (truncate up and down). Truncate-up extends i_size
+ * sparsely (HOLE handling in read_folio returns zero for unallocated
+ * blocks). Truncate-down frees disk blocks beyond the new size and
+ * zeros the partial trailing bytes in the surviving block.
+ *
+ * Other attribute changes (mode, owner, times) are forwarded to
+ * setattr_copy + mark_inode_dirty.
+ */
+static int beamfs_inline_setattr(struct mnt_idmap *idmap,
+				 struct dentry *dentry, struct iattr *attr)
+{
+	struct inode *inode = d_inode(dentry);
+	int           ret;
+
+	ret = setattr_prepare(idmap, dentry, attr);
+	if (ret)
+		return ret;
+
+	if (attr->ia_valid & ATTR_SIZE) {
+		loff_t old_size = i_size_read(inode);
+		loff_t new_size = attr->ia_size;
+
+		ret = inode_newsize_ok(inode, new_size);
+		if (ret)
+			return ret;
+
+		if (new_size < old_size) {
+			u64 b_first_freed;
+			u32 tail_off;
+
+			/* Drop pagecache beyond new_size before freeing
+			 * the underlying disk blocks.
+			 */
+			truncate_setsize(inode, new_size);
+
+			/* Logical block index of the first block to be
+			 * fully freed: ceil(new_size / 3824).
+			 */
+			b_first_freed = (new_size + BEAMFS_DATA_INLINE_BYTES - 1)
+					/ BEAMFS_DATA_INLINE_BYTES;
+
+			/* If new_size is not block-aligned, the surviving
+			 * last block has stale user bytes beyond new_size.
+			 * Zero them via RMW + RS re-encode.
+			 */
+			tail_off = (u32)(new_size % BEAMFS_DATA_INLINE_BYTES);
+			if (tail_off != 0 && new_size > 0) {
+				u64 b_last_kept = new_size /
+						  BEAMFS_DATA_INLINE_BYTES;
+
+				ret = beamfs_inline_zero_tail_block(inode,
+								    b_last_kept,
+								    tail_off);
+				if (ret)
+					return ret;
+			}
+
+			beamfs_inline_free_blocks_from(inode, b_first_freed);
+		} else if (new_size > old_size) {
+			/* Sparse extension: just adjust i_size. read_folio
+			 * returns zero for unallocated (HOLE) blocks.
+			 */
+			truncate_setsize(inode, new_size);
+		}
+	}
+
+	setattr_copy(idmap, inode, attr);
+	mark_inode_dirty(inode);
+	return 0;
+}
+
+const struct inode_operations beamfs_inline_inode_operations = {
+	.getattr        = simple_getattr,
+	.setattr        = beamfs_inline_setattr,
 };
