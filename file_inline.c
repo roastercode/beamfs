@@ -969,6 +969,7 @@ const struct file_operations beamfs_inline_file_operations = {
 	.llseek      = generic_file_llseek,
 	.read_iter   = generic_file_read_iter,
 	.write_iter  = beamfs_inline_file_write_iter,
+	.mmap        = generic_file_mmap,
 	.fsync       = generic_file_fsync,
 	.splice_read = filemap_splice_read,
 };
