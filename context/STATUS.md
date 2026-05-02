@@ -4,7 +4,8 @@
 > navigation, then `context/context-recadrage.md` (R0-R28) for the
 > operational contract, then THIS file for current state.
 
-Etat reel au 2026-05-01 evening, sub-step 4 closed + pipeline MIL operationnel.
+Etat reel au 2026-05-02 morning, sub-steps 6 + 7 closed,
+INLINE multi-block path runtime-validated on scheme=2.
 
 Storage canonique : `~/git/beamfs/context/STATUS.md` (NEVER published).
 

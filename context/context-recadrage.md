@@ -90,7 +90,8 @@ bug de la procédure. Ne pas forcer.
 - Branche temporaire `public-v3-staging` créée depuis `mainline-prep`.
 - Filter : exclure `context/`, `papers/2026-04-beamfs-v3-findings/`
   (sauf publication finale Zenodo), `Documentation/runs/manifest-*.json{,.asc}`
-  (rester sur PRIVATE comme audit interne).
+  (rester sur PRIVATE comme audit interne), `Documentation/TODO.md`
+  (analyses internes, threat-model forensic, pre-publication reasoning).
 - Cherry-pick ou rebase pour produire un historique linéaire propre.
 - Tag annoté GPG : `v0.x.0-beamfs-v3-rfc`.
 - Push `public-v3-staging:main` sur `roastercode/beamfs` PUBLIC.

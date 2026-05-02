@@ -1,5 +1,15 @@
 # beamfs TODO list
 
+> **CLASSIFICATION INTERNAL - NEVER PUSH TO PUBLIC GITHUB**
+>
+> This file is versioned only on `roastercode/beamfs-devel` PRIVATE
+> branch `mainline-prep`. When `roastercode/beamfs` PUBLIC v3 is
+> published (cf `context/context-recadrage.md` section 0), the
+> `public-v3-staging` filter MUST exclude `Documentation/TODO.md`
+> from the cherry-pick / rebase set. This file contains internal
+> threat-model analysis, forensic findings, and pre-publication
+> reasoning that is not public-facing.
+
 **Authoritative**: this file is the single source of truth for outstanding
 work across the three beamfs repositories. Each item carries an empirical
 status, an effort estimate, and a cross-repo reference.
@@ -94,14 +104,14 @@ post-rename tarball.
 
 These are missing features or known bugs in the beamfs/bench code.
 
-### func-2 : Substep 6 truncate kernel patch
+### func-2 : Substep 6 truncate kernel patch [CLOSED 2026-05-02]
 
-**Status** : not implemented (Stage 3 closing item)  
-**Effort** : ~1 day, ~40 LOC  
-**Repo** : beamfs (super.c, file_inline.c, namei.c)
-
-Hook `beamfs_inline_setattr` in `i_op` to handle truncate(). Currently
-beamfs does not survive truncate() syscalls on inline-allocated files.
+**Status** : closed by commit `b9d48f0` (beamfs-devel) + `8deee76`
+(yocto-beamfs lockstep). `beamfs_inline_setattr` + helpers
+(`free_blocks_from`, `zero_tail_block`) merged. Scope direct + single
+indirect, ~2 MiB max file (allocator capacity in v4). Validated by
+manifest `20260502T071854Z` (overall_rc=0). Tests 6 (truncate-down)
+and 7 (truncate-up) + durability all PASS on master VM scheme=2.
 
 ### func-3 : Stage 4 data block protection
 
@@ -216,6 +226,96 @@ per `Documentation/process/coding-assistants.rst`.
 
 ---
 
+### func-10 : phys bound check in lookup_or_alloc_phys [NEW 2026-05-02]
+
+**Status** : not implemented  
+**Effort** : ~10 LOC + canary  
+**Origin** : runtime forensic 2026-05-02 R19 substep 7 manifest
+20260502T073520Z (tarball `beamfs-bench-analyse-full-20260502-093118`).
+
+**Observation** : when RadFI flips a bit in an `__le64 i_direct[i]`
+or `i_indirect`, the resulting pointer value can be enormous
+(observed: 0x0004000000000000, 0x0000100000000000,
+0x000000080000001b). The current code passes this value to
+`sb_bread()` which fails (logged as `sb_bread failed phys=N`),
+then later the buffer cache prints `block N out of range`.
+
+**Proposed fix** : in `beamfs_inline_lookup_or_alloc_phys` (and its
+allocator-free read counterpart), add a bound check after reading
+each `__le64` pointer:
+
+```c
+if (phys >= sbi->s_nblocks) {
+    pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu: bogus "
+                       "phys=%llu (s_nblocks=%lu); pointer corrupted
+",
+                       inode->i_ino, b, phys, sbi->s_nblocks);
+    return -EUCLEAN;
+}
+```
+
+Defense in depth: turns a sb_bread failure into a structured
+filesystem corruption signal earlier in the call chain.
+
+**Defers / dependencies** : none. Independent of v5 work.
+
+---
+
+### func-11 : Pointer-corruption forensic counter [NEW 2026-05-02]
+
+**Status** : not implemented  
+**Effort** : ~30 LOC + RS journal entry type  
+**Origin** : runtime forensic 2026-05-02 (tarball
+`beamfs-bench-analyse-full-20260502-093118`).
+
+**Observation** : pointer-corruption rejects (func-10) and inode
+CRC32 mismatches (func-5) are visible only via `pr_err_ratelimited`
+in dmesg. They are not counted, not journaled, and not exposed via
+debugfs. Forensic post-attack reconstruction relies on dmesg ring
+buffer survival.
+
+**Proposed** : add per-counter in `beamfs_sb_info` (or extend the
+RS event journal with a new `BEAMFS_RS_EVENT_FLAG_POINTER_CORRUPT`
+type). Fields:
+- `pointer_corrupt_count`  : monotonic counter
+- `inode_crc_mismatch_count` : monotonic counter
+- `sb_bread_failed_count`  : monotonic counter
+
+Expose under `/sys/fs/beamfs/<dev>/forensics/` or via debugfs.
+
+**Defers / dependencies** : independent. Synergistic with func-10.
+
+---
+
+### func-12 : Scheme INLINE+INODE_RS (v5 feature flag) [NEW 2026-05-02]
+
+**Status** : design only, deferred to Phase 1 v5  
+**Effort** : ~200 LOC + on-disk format bump  
+**Origin** : runtime forensic 2026-05-02 - inode 6 CRC32 mismatch
+observed 8 times on compute01 under RadFI saturation.
+
+**Observation** : current schemes are mutually exclusive:
+- scheme=2 UNIVERSAL_INLINE: data blocks RS-protected, inodes
+  CRC32-detected only (no correction)
+- scheme=5 INODE_UNIVERSAL: inodes RS-protected on metadata,
+  data blocks via legacy iomap (no per-block RS)
+
+Neither covers the full attack surface. RadFI flipping a bit in an
+inode in scheme=2 produces irreversible CRC32 mismatch (no RS).
+
+**Proposed** : v5 INCOMPAT feature flag
+`BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS` (already reserved in
+`Documentation/format-v5-design.md`) activates RS-protection on
+inodes *in addition to* INLINE data blocks. Combined coverage:
+- data blocks: RS(255,239) inline (existing scheme=2)
+- inodes: RS encode/decode at write_inode/read_inode
+  (existing scheme=5 path, ported to inline-aware code)
+
+**Defers** : Phase 1 of mainline-prep roadmap (50h budget).
+Cf `Documentation/format-v5-design.md` section 4.2 (profile flags).
+
+---
+
 ## Priority matrix (recommendation)
 
 This is a recommendation, not a prescription.
@@ -223,7 +323,7 @@ This is a recommendation, not a prescription.
 | Tier            | Items                                  | Cumulative effort |
 |-----------------|----------------------------------------|-------------------|
 | Quick wins      | gap-1, gap-3, func-4, func-7           | ~4.5h             |
-| Stage 3 closing | func-2 (substep 6 truncate), func-5    | ~1.5 day          |
+| Stage 3 closing | func-5 (partial diag DONE 2026-05-02)  | ~1 day            |
 | Stage 4 prep    | func-3 (data block RS)                 | 2-4 weeks         |
 | Upstream prep   | func-6 (fsck), upstream-1 (xfstests)   | 3-5 weeks         |
 | HPC activation  | func-8, func-9                         | 7-9 days hardware-gated |
