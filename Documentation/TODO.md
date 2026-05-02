@@ -373,7 +373,7 @@ Substep 9 xfstests subset can now proceed.
 
 ---
 
-### bench-1 : beamfs-bench INLINE frontier scan methodology [NEW 2026-05-02]
+### beamfs-bench evolution: INLINE frontier scan methodology [NEW 2026-05-02]
 
 **Status** : not implemented
 **Effort** : 4-6h
@@ -415,7 +415,7 @@ that any future kernel module change is regression-tested before
 xfstests is even invoked, with deterministic boundaries (xfstests
 generic tests don't deterministically hit folio-14 etc).
 
-### bench-2 : worker.sh attack/verify semantic mismatch [CLOSED 2026-05-02]
+### beamfs-bench evolution: worker attack/verify semantic redesign [CLOSED 2026-05-02]
 
 **Status** : closed substep 10. Worker actions reworked from
 random-overwrite to pristine-read under live RadFI attack ; verdict
@@ -429,7 +429,30 @@ and "Verdict derivation". Not duplicated here to avoid drift.
 Cluster scope still emits factual records but does not yet apply the
 `RS_RECOVERED|RS_PASSTHROUGH|...` derivation ; tracked as a follow-up.
 
-### bench-3 : cluster_*/multifs duplication in worker.sh [NEW 2026-05-02]
+### beamfs-bench evolution: host-side forensic capture + bpftrace opt-in [CLOSED 2026-05-02]
+
+**Status** : closed substep 10. New module `forensics_host.rs` (companion
+to `forensics.rs` VM-side). Captures host context into `<run_dir>/host/`
+so the existing `make_tarball` naturally embarks both VM and host
+forensics in a single archive (no consolidation step).
+
+Captured systematically (all scopes) :
+  - `dmesg.log`, `uname.log`, `system.log` (free/uptime/cmdline)
+  - `lsblk.log`, `lsusb.log`
+  - `virsh-list.log`, `virsh-list-final.log`
+  - `virsh-dumpxml-beamfs-{master,compute0[1,2,3]}.xml`
+  - `canonical-ko.log` (sha256 + path of deployed .ext2)
+
+Captured opt-in via `--bpftrace` flag :
+  - `bpftrace.log` (block_rq_complete + sched_switch counts)
+  - Requires NOPASSWD sudo on bpftrace ; gracefully skipped
+    otherwise with a warning (no run abort).
+
+bpftrace VM-side is out of scope : not in the Yocto image
+`hpc-arm64-research-beamfs.bb`. Tracked as a follow-up if VM-side
+probes are wanted later.
+
+### beamfs-bench evolution: cluster_*/multifs worker duplication [NEW 2026-05-02]
 
 **Status** : new finding from substep 9 review  
 **Effort** : 4-6h refactor + tests  
@@ -446,11 +469,11 @@ Differences are minimal: cluster uses `$SUBDIR=/data/beamfs-bench-$TS`
 instead of `$MNT=/mnt/test-$FS`, cluster_verify lacks the `! -s
 POST_FILE -> FS_PANIC` guard, and cluster_attack hard-codes `vdb`.
 
-This duplication is the reason bug-2 was discovered late: the same
-flaw lives twice. A common helper (`_setup_layout`, `_run_attack`,
+This duplication is the reason the worker attack/verify semantic
+mismatch was discovered late: the same flaw lived twice. A common helper (`_setup_layout`, `_run_attack`,
 `_compute_verdict`) that both paths call would have caught it.
 
-### mkfs-1 : mkfs.beamfs robustness + integration tests in beamfs-bench [NEW 2026-05-02]
+### beamfs-bench evolution: mkfs.beamfs robustness + integration tests [NEW 2026-05-02]
 
 **Status** : not implemented
 **Effort** : 1-2 days
