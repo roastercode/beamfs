@@ -3,81 +3,1106 @@
 > **CLASSIFICATION INTERNAL - NEVER PUSH TO PUBLIC GITHUB**
 >
 > This file is versioned only on `roastercode/beamfs-devel` PRIVATE
-> branch `mainline-prep`. When `roastercode/beamfs` PUBLIC v3 is
-> published (cf `context/context-recadrage.md` section 0), the
-> `public-v3-staging` filter MUST exclude `Documentation/TODO.md`
-> from the cherry-pick / rebase set. This file contains internal
-> threat-model analysis, forensic findings, and pre-publication
-> reasoning that is not public-facing.
+> branch. When `roastercode/beamfs` PUBLIC v3 is published (cf
+> `context/context-recadrage.md` section 0), the `public-v3-staging`
+> filter MUST exclude `Documentation/TODO.md` from the cherry-pick /
+> rebase set. This file contains internal threat-model analysis,
+> forensic findings, pre-publication reasoning, and strategic
+> decisions queued -- none of which is public-facing.
 
-**Authoritative**: this file is the single source of truth for outstanding
-work across the three beamfs repositories. Each item carries an empirical
-status, an effort estimate, and a cross-repo reference.
+**Authoritative**: this file is the **single source of truth** for
+outstanding work across the four beamfs repositories AND the session
+opener (read top to bottom in 5 minutes for context). It supersedes
+fragmentary status across `roadmap.md`, `known-limitations.md`, and
+prior session handoffs.
 
 **Last updated**: 2026-05-02
 
 **Cross-repository scope**:
 
-| Repo                                    | Branch          | Visibility | Latest commit |
-|-----------------------------------------|-----------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `mainline-prep` | PRIVATE    | `390676b`     |
-| `roastercode/beamfs` (vitrine, frozen)  | `mainline-prep` | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `main`          | PRIVATE    | `99cf71e`     |
-| `roastercode/beamfs-bench`              | `main`          | PRIVATE    | `6c1e0c0`     |
+| Repo                                    | Branch                  | Visibility | Latest commit |
+|-----------------------------------------|-------------------------|------------|---------------|
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `2253564`     |
+| `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `8e5ee1c`     |
+| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `f007934`     |
+| `roastercode/radfi`                     | `main`                  | PRIVATE    | `bcf13d3`*    |
+
+\* radfi has uncommitted edits in working tree (`radfi.h`,
+`radfi_hooks_blk.c`) -- flagged for next radfi session.
 
 ---
 
-## What is in good shape
+## How to use this file (session opener)
 
-This section is empirical: items here have been validated by mega run
-20260501-225142 (10/10 phases PASSED, tarball SHA c1fd528b...) and by
-the cross-repo lockstep R19 audit.
+Read sections 1 -> 6 in order at the start of every session :
 
-- mkfs.beamfs : operational, schemes 0..5 supported
-- beamfs.ko kernel module : scheme 5 INODE_UNIVERSAL fully functional
-- radfi.ko fault injection module : EM-style bit-flip injection working
-- beamfsd userspace daemon : reads journal, signs peer protocol
-- inject_raf, decode_raf_journal.py : tooling functional
-- beamfs-bench (6 scopes : pipeline, multifs, analyse, bitrot, metadata, crash, fsck, mega)
-- 4-VM aarch64 cluster (master + 3 computes) : isolation R21 enforced
-- Lockstep R19 byte-identical 12 sources beamfs<->yocto-beamfs
-- Build reproducibility : 12013 lines proc-config + 231 Yocto logs captured
-- GPG-signed commits + R14 PRIVATE-only push workflow
-- Naming canonical "beamfs - resilient filesystem" applied across docs/code
-- v4 journal nomenclature "Electromagnetic Resilience Journal" applied
-- Empirical paper-grade data : multifs, cluster (45 flips RECOVERED at 1M ppm),
-  metadata 4 scenarios, crash 5 FS, fsck 3+1+1
+1. **Schemas** (doc map + code map + mindmap)  -> orient the project mentally
+2. **Empirical state**                         -> know what is shipped on disk
+3. **Target architecture**                     -> know where we are heading
+4. **Critical path to kernel.org RFC**         -> know the next milestone
+5. **Strategic decisions queued**              -> know which forks need a call
+6. **Documentation drift to repair**           -> quick wins (1-2h, doc-only)
+
+Then jump to the catalog (sections 8-13) for item-level work, or to
+the **Priority matrix** (section 14) for guided next-step selection.
 
 ---
 
-## Critical path to kernel.org RFC
+## 1. Schemas (orientation)
 
-beamfs has not been submitted to linux-fsdevel. Distance to first
-RFC mail measured against `Documentation/roadmap.md` Phase 1 to 8.
+### 1.1 Documentation map (13 .md + context/)
 
-### Phase mapping (status per phase)
+```
+                            beamfs/Documentation/
+                                       │
+            ┌──────────────────────────┼──────────────────────────────┐
+            │                          │                              │
+       NORMATIVE                   AUDITED                       OPERATIONAL
+       (PUBLIC)                   (PUBLIC)                       (INTERNAL)
+            │                          │                              │
+   ┌────────┴─────────┐      ┌─────────┴──────────┐         ┌────────┴────────┐
+   │                  │      │                    │         │                 │
+threat-model.md    mainline-     known-          empirical-     TODO.md   context/
+(EM threat model)  scope.md   limitations.md    state.md   (CRITICAL    (INTERNAL)
+section 6 = 6.1..6.6  (RW+RS-FEC  (gap  vs       (live cluster   PATH +     │
+constraints           position;   threat-       results 77 obs   item-by-   ├ 00-MINDMAP.md
+                      capabilities model;       per mega run)   item        │  (R0-R30 map)
+                      matrix)     drift list)                   tracker)    │
+                                                                            ├ STATUS.md
+                       │            │                    │                  │  (3 repos HEAD)
+                       │            │                    │                  │
+                       v            v                    v                  ├ context-recadrage.md
+                  ┌────────────────────────────────────────┐                │  (R0-R30 contract)
+                  │          DESIGN DOCS                    │                │
+                  │  ┌──────────────────┐                   │                ├ INLINE-MULTIBLOCK-DESIGN.md
+                  │  │ design.md        │ (current arch)    │                │  (substep 4-10 plan)
+                  │  │ format-v4.md     │ (CURRENT format,  │                │
+                  │  │                    naming inherited  │                └ patches/, archive/
+                  │  │                    from FTRFS;       │
+                  │  │                    actually beamfs   │
+                  │  │                    v1 fresh)         │
+                  │  │ format-v5-design.│ (TARGET, skeleton)│
+                  │  │ md               │                   │
+                  │  │ fsck.beamfs.md   │ (Phase 2 design)  │
+                  │  │ system-          │ (positioning vs   │
+                  │  │ architecture.md  │  dm-verity, etc.) │
+                  │  │ architecture-    │ (current cluster) │
+                  │  │ current.md       │                   │
+                  │  └──────────────────┘                   │
+                  └─────────────────────────────────────────┘
+                                       │
+                                       v
+                  ┌─────────────────────────────────────────┐
+                  │             ROADMAP                      │
+                  │  roadmap.md (Stage 1.5 → 5 + Phase 0-8)  │
+                  │  testing.md (validation chain)           │
+                  └─────────────────────────────────────────┘
 
-| Phase | Title                                  | Status      | Blocking items                |
-|-------|----------------------------------------|-------------|-------------------------------|
-| 1     | Format v5.0 minimal RFC-able           | not started | func-12                       |
-| 2     | fsck.beamfs MVP                        | design only | func-6                        |
-| 3     | Multiblock read_folio                  | active      | func-13 closed, substep 10 partial |
-| 4     | Stage 4 close + paper v3               | not started | func-3, upstream-7            |
-| 5     | DKMS + Yocto layer                     | not started | (no TODO item yet)            |
-| 6     | Build user base (anti-NAK)             | not started | upstream-8                    |
-| 7     | Documentation/filesystems + checkpatch | not started | upstream-3, upstream-4        |
-| 8     | RFC mainline + review cycle            | not started | upstream-5, upstream-6, upstream-2 |
 
-Each row maps an active TODO item to its phase. Items absent from
-this table are quality improvements not on the RFC critical path
-(see Tier 2/3 in Priority matrix at the bottom of this file).
+Cross-reference rules (enforced by document conventions)
+─────────────────────────────────────────────────────────
 
-See `Documentation/roadmap.md` for phase DoD definitions and effort
-estimates. Total residual effort across phase 1-8 : ~400h.
+  threat-model.md sec 6 ──> known-limitations.md  (gap items reference 6.N)
+                       ──> roadmap.md             (stage closure refs constraint)
+                       ──> mainline-scope.md      (sec 2 reproduces sec 6 list)
+
+  mainline-scope.md   ──> format-v5-design.md    (sec 3 = profiles spec)
+                      ──> roadmap.md Phase 0-8   (sec 5 = trajectory)
+
+  TODO.md (this file) ──> roadmap.md             (Phase mapping table)
+                      ──> known-limitations.md   (gap-N items)
+                      ──> All design docs        (See also section)
+
+
+Public vs Private classification
+─────────────────────────────────
+
+  PUBLIC (Documentation/) :
+    threat-model.md, mainline-scope.md, roadmap.md, format-v5-design.md,
+    format-v4.md, design.md, known-limitations.md, fsck.beamfs.md,
+    system-architecture.md, architecture-current.md, empirical-state.md,
+    testing.md
+
+  INTERNAL (Documentation/, gated by header) :
+    TODO.md (this file ; explicit "NEVER PUSH PUBLIC" header)
+
+  INTERNAL (context/, gitignored except whitelist) :
+    00-MINDMAP.md, STATUS.md, context-recadrage.md, INLINE-MULTIBLOCK-DESIGN.md
+```
+
+### 1.2 Code map (4 projects)
+
+### beamfs (kernel module + userspace tooling repo)
+
+```
+~/git/beamfs/
+│
+├── Kernel module sources (~5000 LOC C, out-of-tree)
+│   ├── beamfs.h            ── on-disk structs (SB, inode, RS event 40-byte) + feature flags
+│   │                          + version constants (BEAMFS_VERSION_V1 = 1, fresh format)
+│   │                          + 11 INCOMPAT / 4 RO_COMPAT / 3 COMPAT bits reserved
+│   │
+│   ├── super.c             ── mount/umount, SB CRC32+RS recovery, mount-time feature
+│   │                          flag enforcement (ext4-pattern), beamfs_log_rs_event
+│   │                          with Shannon entropy
+│   │
+│   ├── edac.c              ── RS(255,239) encode/decode + position list output for
+│   │                          forensic entropy ; LUT-based Shannon entropy Q16.16
+│   │                          (gen_entropy_lut.py auto-generated)
+│   │
+│   ├── inode.c             ── beamfs_iget + RS-protected inode write/read + i_nlink mgmt
+│   │
+│   ├── alloc.c             ── block + inode allocation + 2-layer canary defense
+│   │                          (S_IMMUTABLE + silent skip) against double-free
+│   │
+│   ├── dir.c               ── beamfs_dir_operations (readdir)
+│   ├── namei.c             ── beamfs_dir_inode_operations (lookup/create/unlink)
+│   │                          + dirent slot reuse fix (4b-dirent CLOSED)
+│   │
+│   ├── file.c              ── beamfs_file_operations (legacy non-INLINE path)
+│   │
+│   └── file_inline.c       ── INLINE multi-block path : write_begin/write_end (substep 4),
+│                              writepages (substep 5), truncate via setattr (substep 6),
+│                              mmap via generic_file_mmap (substep 8), tri-block folio
+│                              fix (substep 10) — Stage 3 metadata hardening
+│
+├── tools/                  ── userspace
+│   ├── checkpatch-precommit.sh  (lint pre-commit, no baseline yet)
+│   ├── decode_raf_journal.py    (RS journal forensic parser)
+│   ├── gen_entropy_lut.py       (regenerate edac.c LUT)
+│   └── fsck.beamfs/             (PLACEHOLDER, empty — Phase 2 deliverable)
+│
+├── Documentation/          ── 13 .md files (see schema 1)
+│
+├── context/                ── INTERNAL (gitignored except whitelist)
+│   ├── 00-MINDMAP.md       ── R0-R30 map + repo classification
+│   ├── STATUS.md           ── 3-repo HEAD tracker per session
+│   ├── context-recadrage.md  ── R0-R30 operational contract
+│   └── INLINE-MULTIBLOCK-DESIGN.md  ── substep 4-10 design
+│
+└── papers/
+    ├── 2026-04-beamfs-v1/  ── Zenodo published
+    ├── 2026-04-beamfs-v2/  ── Zenodo published (paper.pdf, CC-BY-4.0)
+    ├── 2026-04-beamfs-v3-findings/  ── lab notebook only (no paper.tex yet)
+    └── 2026-04-radfi-v1/   ── companion radfi paper PDF
+
+
+Lockstep contract with yocto-beamfs
+────────────────────────────────────
+  beamfs/{beamfs.h,super.c,file_inline.c,file.c,inode.c,dir.c,namei.c,
+          edac.c,alloc.c,...}
+                ↕  byte-identical (sha256-validated by R19 phase 0.2)
+  yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.0/{same files}
+```
+
+### yocto-beamfs (PRIVATE Yocto layer for cluster image)
+
+```
+~/git/yocto-beamfs/                     PRIVATE, branch diag/double-free-block
+│
+├── conf/                              ── layer + distro conf
+├── recipes-kernel/
+│   ├── linux/
+│   │   ├── linux-mainline_7.0.3.bb    ── kernel 7.0.3 stable
+│   │   ├── BEAMFS-arm64.cfg           ── kernel config aarch64
+│   │   └── files/multifs.cfg          ── multifs additional kernel options
+│   │
+│   ├── beamfs/
+│   │   ├── beamfs-module_0.1.0.bb     ── beamfs.ko (lockstep mirror)
+│   │   ├── mkfs-beamfs_0.1.0.bb       ── mkfs.beamfs userspace tool
+│   │   └── files/beamfs-0.1.0/        ── source mirror (12 files, lockstep)
+│   │
+│   ├── radfi/
+│   │   └── radfi-module_0.1.2.bb      ── radfi.ko companion EM injector
+│   │
+│   └── lttng/                         ── (kernel tracing, not active in R19)
+│
+├── recipes-beamfs/
+│   └── beamfsd/                       ── EM Resilience Journal daemon
+│
+├── recipes-hpc/                       ── slurm, munge, pmix (HPC stack ready,
+│                                         not activated — func-9)
+│   ├── slurm/                         ── slurm 25.11.4
+│   ├── munge/                         ── munge 0.5.18
+│   ├── pmix/                          ── pmix 5.0.3
+│   └── libevent/
+│
+├── recipes-core/
+│   └── images/
+│       └── hpc-arm64-research-beamfs.bb  ── ★ CANONICAL R23 image recipe
+│                                            (sole active image, deploys 4 VMs)
+│
+├── recipes-devtools/                  ── cmake, elfutils, llvm, qemu, rust, etc.
+├── recipes-extended/                  ── bash, libtirpc, unzip
+├── recipes-graphics/                  ── glslang
+├── recipes-support/                   ── gdbm, gmp
+│
+├── beamfs-bench/                      ── (subtree, deployed binary build)
+├── bin/                               ── helper scripts (lockstep-validate, etc.)
+│
+└── Documentation/
+    ├── beamfs-integration.md          ── (out-of-snapshot in R19 export)
+    └── runs/                          ── 1.6 GB of R19 manifests + tarballs
+                                          (excluded from snapshots, audit-grade
+                                          forensic archive only)
+```
+
+### beamfs-bench (PRIVATE Rust harness)
+
+```
+~/git/beamfs-bench/                     PRIVATE, branch main, ~5600 LOC Rust + 1029 shell
+│
+├── Cargo.toml + Cargo.lock            ── crate metadata
+│
+└── src/
+    ├── main.rs            (426 LOC)   ── CLI entry, sub-command dispatch
+    │
+    ├── pipeline.rs        (372 LOC)   ── R19 8-phase pipeline (lifecycle, bootstrap,
+    │                                     multifs, cluster, analyse, forensics, GPG)
+    │
+    ├── lifecycle.rs       (318 LOC)   ── VM destroy + start + SSH-wait parallel
+    │                                     + R-isolation enforcement
+    │
+    ├── bootstrap.rs       (132 LOC)   ── insmod + mkfs.beamfs + mount /data on 4 nodes
+    │
+    ├── cluster.rs         (276 LOC)   ── cluster_setup_all/attack_all/verify_all
+    │                                     orchestration over SSH
+    │
+    ├── ssh.rs             (136 LOC)   ── SSH transport (exec, exec_lenient, scp_to)
+    │
+    ├── multifs.rs         (408 LOC)   ── 5-FS head-to-head on USB pass-through
+    │                                     + worker.sh embedded via include_str!
+    │
+    ├── synthesis.rs       (463 LOC)   ── verdict derivation : multifs ladder
+    │                                     RS_RECOVERED|RS_PASSTHROUGH|RS_FAILED|
+    │                                     FS_PANIC|CORRUPTED_DATA + 9 cargo tests
+    │                                     (cluster ladder NOT YET WIRED)
+    │
+    ├── analyse.rs         (421 LOC)   ── Quick / Standard / Full scope orchestration
+    │
+    ├── forensics.rs       (371 LOC)   ── VM-side capture (dmesg, ftrace, perf, lsmod)
+    ├── forensics_host.rs  (292 LOC)   ── HOST-side capture + bpftrace opt-in
+    │                                     (block_rq_complete + sched_switch counts)
+    │
+    ├── bitrot.rs          (262 LOC)   ── offline bit-rot scenarios (5 FS x 4 cells)
+    ├── metadata.rs        (330 LOC)   ── deterministic block targeting (5 FS x 4 cells)
+    ├── crash.rs           (329 LOC)   ── virsh destroy mid-write + remount verify
+    ├── fsck.rs            (229 LOC)   ── offline FS check (beamfs returns NOT_IMPLEMENTED)
+    │
+    ├── devices.rs         (364 LOC)   ── USB device discovery + R12 anti-NAK prompt
+    ├── mega.rs            (463 LOC)   ── consolidated 10-phase mega run
+    │
+    └── worker.sh         (1029 LOC)   ── deployed via SCP to /tmp/beamfs-bench-worker.sh
+                                          on every VM ; 17 case actions :
+                                          setup/attack/verify (multifs)
+                                          cluster_setup/attack/verify
+                                          bootstrap_data
+                                          bitrot_setup/inject/verify
+                                          metadata_setup/inject/verify
+                                          crash_setup/start_writer/verify
+                                          fsck_check
+```
+
+### radfi (PRIVATE EM fault injection kernel module)
+
+```
+~/git/radfi/                            PRIVATE, tag v0.1.2-palier3-validated
+│
+├── README.md              (3 KB)      ── ★ DRIFT : says "PRE-ALPHA, no code yet"
+│                                          but code is shipped and runtime-validated
+│
+├── Documentation/
+│   ├── README.md
+│   ├── design-notes.md
+│   └── EMPIRICAL-RESULTS.md
+│
+├── papers/
+│   └── v1/                            ── 13 .tex sections + paper.tex + Makefile
+│       │                                 + refs.bib + paper.pdf (Zenodo published)
+│       └── (sections 00-abstract, 01-introduction, ..., 12-references)
+│
+└── src/radfi-0.1.2/       (500 LOC)   ── kernel module sources
+    ├── radfi.h            (66 LOC)    ── debugfs interface : target_dev, target_block,
+    │                                     probability, enabled, hook_blk, call_count,
+    │                                     flip_count
+    │                                     (target_block_range NOT YET implemented)
+    ├── radfi_main.c       (142 LOC)   ── init/exit + debugfs scaffolding
+    ├── radfi_inject.c     (86 LOC)    ── probabilistic flip selection (no FIEMAP yet)
+    ├── radfi_hooks_blk.c  (125 LOC)   ── block layer hook (bio path)
+    │                                     ★ DIRTY working tree (uncommitted edits)
+    ├── radfi_hooks_fs.c   (81 LOC)    ── FS layer hook (deferred)
+    └── Makefile
+```
+
+### beamfs-overlay (PRIVATE Gentoo overlay, not in snapshot scope)
+
+```
+/var/db/repos/beamfs-overlay/           PRIVATE, branch main, single commit 011bf20
+│
+└── sys-fs/
+    └── beamfs-bench/
+        └── beamfs-bench-9999.ebuild   ── installs /usr/bin/beamfs-bench from
+                                          file:///home/aurelien/git/beamfs-bench
+                                          + sudoers entry for libvirt group
+```
+
+### Cross-repo lockstep
+```
+   beamfs (PRIVATE devel, PUBLIC origin frozen)
+        │
+        │  byte-identical 12 sources
+        │  validated by R19 phase 0.2 SHA256
+        ↓
+   yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.0/
+        │
+        ↓
+   bitbake hpc-arm64-research-beamfs
+        │
+        ↓
+   /var/lib/libvirt/images/hpc-arm64/beamfs-{master,compute0[1-3]}.img
+        │
+        ↓
+   4 VMs running insmod beamfs.ko + radfi.ko
+        │
+        ↓
+   beamfs-bench full --auto-confirm  (R19 critical pre-push validation)
+```
+
+### 1.3 Architecture mindmap (target v5 mainline RFC-able)
+
+```
+                          ┌──────────────────────────────────────────┐
+                          │   beamfs - resilient filesystem          │
+                          │   "RW Linux FS with native RS-FEC,       │
+                          │    fills mainline gap (dm-fec is RO)"    │
+                          └────────────────┬─────────────────────────┘
+                                           │
+            ┌──────────────────┬───────────┼─────────────┬────────────────────┐
+            │                  │           │             │                    │
+            v                  v           v             v                    v
+    ┌──────────────┐   ┌─────────────┐  ┌─────────┐  ┌──────────┐    ┌───────────────┐
+    │ THREAT MODEL │   │  ON-DISK    │  │  CODE   │  │ USER     │    │  MAINLINE     │
+    │  (universal) │   │  FORMAT v5  │  │  PATH   │  │ TOOLING  │    │  TRAJECTORY   │
+    └──────┬───────┘   └──────┬──────┘  └────┬────┘  └─────┬────┘    └───────┬───────┘
+           │                  │              │             │                 │
+           v                  v              v             v                 v
+   ┌────────────────┐ ┌───────────────┐ ┌──────────┐ ┌────────────┐  ┌──────────────┐
+   │ SEU/MBU        │ │ SINGLE FORMAT │ │ READ     │ │mkfs.beamfs │  │ Phase 0 DONE │
+   │ NAND/DRAM age  │ │ + flags       │ │ → RS     │ │  --profile=│  │              │
+   │ IEMI attacks   │ │   (ext4-like) │ │   decode │ │  embedded  │  │ Phase 1 (50h)│
+   │ Voltage glitch │ │               │ │ → CRC32  │ │  server    │  │  v5.0 minimal│
+   │ Rowhammer      │ │ 11 INCOMPAT   │ │   verify │ │  dax       │  │  RFC-able    │
+   │ Cosmic rays    │ │  4 RO_COMPAT  │ │ → folio  │ │            │  │              │
+   │                │ │  3 COMPAT     │ │   pop    │ │fsck.beamfs │  │ Phase 2 (30h)│
+   └────────────────┘ │  bits         │ │          │ │  --check   │  │  fsck MVP    │
+            │         │               │ │ WRITE    │ │  --repair  │  │              │
+            v         │ Mount-time    │ │ → CRC32  │ │            │  │ Phase 3 (12h)│
+   addressed by ──→   │ enforcement   │ │   compute│ │tune.beamfs │  │  multiblock  │
+                      │ (live, Stage 3│ │ → RS     │ │  --upgrade-│  │  read_folio  │
+                      │  closed)      │ │   encode │ │  format    │  │              │
+                      │               │ │ → block  │ │            │  │ Phase 4 (100h)│
+                      │ s_version=V1  │ │   write  │ │            │  │  Stage 4     │
+                      │ (fresh)       │ │          │ │            │  │  + paper v3  │
+                      └───────────────┘ │ JOURNAL  │ └────────────┘  │              │
+                              │         │ → RS     │                 │ Phase 5 (25h)│
+                              v         │   event  │                 │  DKMS+meta   │
+                   ┌─────────────────┐  │   logged │                 │              │
+                   │ PROFILES        │  │   with   │                 │ Phase 6 (75h)│
+                   │                 │  │   Shannon│                 │  user base   │
+                   │ embedded        │  │   entropy│                 │  3-5 deploy  │
+                   │ (RFC v5.0)      │  │   Q16.16 │                 │              │
+                   │ - 32K..100GB    │  │          │                 │ Phase 7 (50h)│
+                   │ - 4K..1GB       │  └──────────┘                 │  rst+chkpatch│
+                   │ - HW-bound      │                               │  +xfstests   │
+                   │ - 0 flags       │                               │              │
+                   │                 │                               │ Phase 8 (60h)│
+                   │ server          │                               │  RFC mail    │
+                   │ - 1GB..16EB     │                               │  + review    │
+                   │ - 4K..16EB      │                               │              │
+                   │ - 50-300µs      │                               │ TOTAL: 405h  │
+                   │ - EXTENTS+64BIT │                               └──────────────┘
+                   │   +BLOCK_GROUPS │                                       │
+                   │   +JOURNAL      │                                       v
+                   │                 │                            ┌──────────────────┐
+                   │ dax             │                            │  KERNEL.ORG RFC  │
+                   │ - 64GB..100TB   │                            │  ┌────────────┐  │
+                   │ - 4K..16EB      │                            │  │ cover ltr  │  │
+                   │ - 1-10µs        │                            │  │ + patches  │  │
+                   │ - embedded+DAX  │                            │  │   atomic   │  │
+                   └─────────────────┘                            │  │ + paper v3 │  │
+                                                                  │  │   DOI cite │  │
+                                                                  │  │ + 3-5 user │  │
+                                                                  │  │   citations│  │
+                                                                  │  └────────────┘  │
+                                                                  │  linux-fsdevel   │
+                                                                  └──────────────────┘
+
+
+
+──────────────────────────────────────────────────────────────────────────────────
+                          OUT-OF-SCOPE (defended in cover letter)
+──────────────────────────────────────────────────────────────────────────────────
+
+  ❌ RAID native           → delegated to dm-raid / mdraid
+  ❌ Snapshots CoW         → delegated to LVM thin / btrfs subvol overlay
+  ❌ Encryption native     → delegated to dm-crypt
+  ❌ Compression           → orthogonal, possibly v6+
+  ❌ Network FS            → local block device only
+  ❌ MTD/UBI native        → block device only in v5
+  ❌ Migration in-place ext4→beamfs  → too complex, copy migration only
+
+
+
+──────────────────────────────────────────────────────────────────────────────────
+              ANTI-NAK DOCTRINE (lessons from FTRFS rejection 2025)
+──────────────────────────────────────────────────────────────────────────────────
+
+  Rule 1 :  RFC submission = embedded profile only (~5-8 k LoC)
+            Anti-NAK firewall, opposite of bcachefs all-at-once approach
+            Trajectory : f2fs / exfat (modest entry, growth via patches)
+
+  Rule 2 :  3-5 public deployments cited in cover letter (Phase 6 deliverable)
+            FTRFS was rejected primarily on "show me the users"
+
+  Rule 3 :  Paper v3 published Zenodo with DOI, cited in cover letter
+            Empirical anchor for the resilience claim ; without it,
+            same FTRFS trajectory ("toy fs", NAK)
+
+  Rule 4 :  Out-of-scope explicit and defended (above list)
+            Reviewers will probe each capability not listed ;
+            preemptive scope statement neutralizes 80% of objections
+
+  Rule 5 :  checkpatch.pl --strict zero (Phase 7 DoD)
+            Style-NAK fatal (bcachefs-style ejection)
+
+
+
+──────────────────────────────────────────────────────────────────────────────────
+                          COMPONENT FLOW (runtime, R19 validated)
+──────────────────────────────────────────────────────────────────────────────────
+
+    ┌──────────────────────┐
+    │ Application userspace│  ← read()/write()/mmap()/truncate() syscalls
+    └──────────┬───────────┘
+               │
+               v
+    ┌──────────────────────┐
+    │ VFS (Linux kernel)   │  ← inode_operations, file_operations
+    └──────────┬───────────┘
+               │
+               v
+    ┌──────────────────────────────────────────────────────────┐
+    │ beamfs.ko                                                 │
+    │  ┌─────────────────────────────────────────────────────┐ │
+    │  │ super.c : mount, feature flag enforcement,           │ │
+    │  │           SB CRC32+RS recovery, journal log         │ │
+    │  └─────────────────────────────────────────────────────┘ │
+    │  ┌─────────────────────────────────────────────────────┐ │
+    │  │ inode.c + namei.c + dir.c : VFS inode/dir ops       │ │
+    │  └─────────────────────────────────────────────────────┘ │
+    │  ┌─────────────────────────────────────────────────────┐ │
+    │  │ file_inline.c : INLINE multi-block read/write/mmap   │ │
+    │  │   (substep 4-10, 1249 LOC)                          │ │
+    │  └─────────────────────────────────────────────────────┘ │
+    │  ┌─────────────────────────────────────────────────────┐ │
+    │  │ alloc.c : block + inode allocation + canary defense │ │
+    │  └─────────────────────────────────────────────────────┘ │
+    │  ┌─────────────────────────────────────────────────────┐ │
+    │  │ edac.c : RS(255,239) encode/decode + entropy LUT     │ │
+    │  └─────────────────┬───────────────────────────────────┘ │
+    └────────────────────┼─────────────────────────────────────┘
+                         │ depends on
+                         v
+    ┌──────────────────────┐
+    │ lib/reed_solomon     │  ← mainline kernel
+    └──────────┬───────────┘
+               │
+               v
+    ┌──────────────────────┐
+    │ Block layer (bio)    │
+    └──────────┬───────────┘
+               │
+               v ← (validation only) radfi.ko hooks bio path here
+    ┌──────────────────────┐
+    │ Block device         │  ← /dev/vdb (cluster) or /dev/vdc..vdg (multifs USB)
+    └──────────────────────┘
+
+
+
+──────────────────────────────────────────────────────────────────────────────────
+              EMPIRICAL VALIDATION (closed runtime — Stage 3 results)
+──────────────────────────────────────────────────────────────────────────────────
+
+   4-VM aarch64 cluster (libvirt + QEMU TCG, kernel 7.0.3) :
+   ├ master    192.168.56.10    (orchestrator, never victim, R-isolation R21)
+   ├ compute01 192.168.56.11    (FS-test holder : 5 USB pass-through victims)
+   ├ compute02 192.168.56.12    (cluster member, beamfs on /data)
+   └ compute03 192.168.56.13    (cluster member, beamfs on /data)
+
+   beamfs-bench full (R19 canonical pre-push) results (mega 2026-05-01) :
+   ├ multifs   : beamfs RECOVERED 3/3 (probs 1k/100k/1M) ✅
+   ├ cluster   : beamfs RECOVERED 12/12 (4 nodes x 3 probs), DIFFS=0 ✅
+   ├ bitrot    : 20 observations across 5 FS x 4 cells ✅
+   ├ metadata  : 20 observations across 5 FS x 4 cells ✅
+   ├ crash     : 4 R/W FSes remount mount_rc=0, stable_files_ok=5/5, no PANIC ✅
+   ├ fsck      : ext4/ext3/btrfs rc=0 ; beamfs NOT_IMPLEMENTED (Phase 2 pending)
+   └ dmesg     : 0 BUG, 0 Oops, 0 WARN ✅
+
+   Empirical proof of RS-FEC functional correctness (Stage 3 metadata closed,
+   Stage 4 data block protection still pending — func-3).
+```
 
 ---
 
-## Documentation/code coherence gaps (4 items)
+## 2. Empirical state (factual, code-verified at 2026-05-02)
+
+This section enumerates capabilities that source inspection confirms
+are live runtime, regardless of what auxiliary documents claim.
+
+### 2.1 Kernel module (beamfs.ko)
+
+**Filesystem core**
+- `s_magic = 0x4245414D` (BEAM), `s_version = BEAMFS_VERSION_V1 = 1`
+  (fresh BEAMFS format ; no migration from v2/v3/v4 FTRFS lineage)
+- 4096-byte fixed block size
+- 256-byte fixed inode size
+- Direct (12) + indirect (1) + dindirect (1) + tindirect (1) addressing
+  ; max single-file capacity 524 inline-blocks (~2 MiB) per current
+  allocator
+- `mkfs.beamfs` userspace (`yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.0/mkfs.beamfs.c`)
+  emits `s_version = BEAMFS_VERSION_V1` consistent with kernel
+
+**RS-FEC error correction (Reed-Solomon 255,239)**
+- Bitmap protected by 16 RS sub-blocks (Stage 1.5 v2 closed)
+- Superblock protected by 13 RS sub-blocks of 211 data bytes,
+  with parity at offset 3888, total coverage 2709 bytes
+  (Stage 3 item 2 closed)
+- All inodes RS-protected unconditionally under
+  `s_data_protection_scheme = INODE_UNIVERSAL` (Stage 3 item 1 closed)
+- `beamfs_rs_decode` returns symbol count (>0) on success, 0 if no
+  errors detected, negative errno if uncorrectable, plus optional
+  `positions[]` output for forensic entropy estimation
+- `beamfs_rs_decode_region` symmetric variant for multi-subblock regions
+
+**Shannon entropy in RS journal (Stage 3 item 4)**
+- 40-byte `struct beamfs_rs_event` with `re_symbol_count`,
+  `re_entropy_q16_16`, `re_flags`, `re_reserved`, `re_crc32`,
+  `re_pad` (`beamfs.h:212-222`)
+- LUT-based entropy computation via
+  `beamfs_rs_compute_entropy_q16_16` in `edac.c:110` (no FPU,
+  no runtime division, deterministic in cycles)
+- `BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID` set when n_positions >= 2
+  (single-sample entries cleared)
+- `beamfs_log_rs_event` (`super.c:301`) records each correction
+  event with computed entropy in the on-disk journal of 64 entries
+  (1536 bytes embedded in superblock)
+- 40-byte struct sentinels enforced via `BUILD_BUG_ON` and
+  `static_assert` at compile time
+
+**Feature flag scaffolding (ext4-pattern)**
+- 3 COMPAT bits reserved (`RS_JOURNAL_VERBOSE`, `LABEL_LONG`,
+  `DIR_INDEX`)
+- 4 RO_COMPAT bits reserved (`LARGE_FILE`, `HUGE_FILE`,
+  `EXTRA_ISIZE`, `BTREE_DIR`)
+- 11 INCOMPAT bits reserved (`EXTENTS`, `64BIT`, `BIGALLOC`,
+  `BLOCK_GROUPS`, `BTREE_ALLOC`, `JOURNAL`, `DAX`, `RS_HEAVY`,
+  `PER_INODE_RS`, `BG_RS_PARITY`, `LARGE_BLOCK`)
+- Mount-time enforcement live (`super.c:570`):
+  - INCOMPAT unknown bit → mount refused
+  - RO_COMPAT unknown bit → forced read-only
+  - COMPAT unknown bit → informational log
+- `BEAMFS_FEAT_*_SUPP = 0` : **no flag is currently active runtime**
+  ; the scaffolding is ready, the per-flag implementations are not
+
+**INLINE multi-block read/write/mmap/truncate path**
+- `file_inline.c` 1249 LOC : write_begin/write_end multi-block
+  (substep 4), writepages multi-folio (substep 5), truncate via
+  setattr (substep 6 / func-2 closed), substep 7 closed,
+  mmap support via generic_file_mmap (substep 8 closed),
+  tri-block folio coverage fix (substep 10 / func-13 closed)
+- `beamfs_inline_inode_operations` registers `simple_getattr` +
+  `beamfs_inline_setattr`
+- `beamfs_inline_file_operations` uses `generic_file_mmap`,
+  `filemap_splice_read`, `generic_file_fsync`
+
+**Defense-in-depth canary (substep 10)**
+- 2-layer protection against double-free of reserved blocks
+- Layer 1 : `S_IMMUTABLE` flag on reserved inodes blocks unlink/setattr
+- Layer 2 : `beamfs_free_block` / `beamfs_free_inode_num` silent skip
+  + early return when called on reserved blocks/inodes (covers Layer 1
+  bypass via memory corruption)
+- `dump_stack()` after `pr_warn` on legitimate path triggers, for
+  forensic visibility (`alloc.c`)
+
+**Dirent slot reuse fix (Stage 3 item 4b-dirent, closed 2026-04-26)**
+- `beamfs_del_dirent` no longer zeros `d_rec_len`
+- readdir + lookup advance unconditionally by
+  `sizeof(struct beamfs_dir_entry)` ; free slot identified by
+  `d_ino == 0`
+- Static invariant `inv5_dirent_no_break_on_zero` as pre-commit guard
+
+### 2.2 Userspace tooling
+
+| Tool                       | State                          | Source                                                  |
+|----------------------------|--------------------------------|---------------------------------------------------------|
+| `mkfs.beamfs`              | implemented                    | yocto-beamfs/recipes-kernel/beamfs/files/.../mkfs.beamfs.c |
+| `beamfsd`                  | implemented                    | yocto-beamfs/recipes-beamfs/beamfsd/                    |
+| `inject_raf`               | implemented (legacy RAF acronym ; gap-1 rename pending) | beamfsd-bundled |
+| `decode_raf_journal.py`    | implemented                    | beamfs/tools/decode_raf_journal.py                      |
+| `gen_entropy_lut.py`       | implemented                    | beamfs/tools/gen_entropy_lut.py                         |
+| `checkpatch-precommit.sh`  | implemented (no baseline run archived) | beamfs/tools/checkpatch-precommit.sh             |
+| `fsck.beamfs`              | **not implemented (placeholder dir empty)** | beamfs/tools/fsck.beamfs/ (empty)         |
+| `tune.beamfs`              | not implemented                | n/a                                                     |
+
+### 2.3 RadFI companion
+
+- 500 LOC C across `radfi.h`, `radfi_main.c`, `radfi_inject.c`,
+  `radfi_hooks_blk.c`, `radfi_hooks_fs.c`
+- Tag `v0.1.2-palier3-validated` (validated against beamfs Stage 3)
+- debugfs interface : `target_dev`, `target_block`, `probability`,
+  `enabled`, `hook_blk`, `call_count`, `flip_count`
+- **Targeting** : `target_block=0` is broadcast across the device ;
+  no range or list interface yet (radfi improvement: targeting
+  precision pending, TODO line 730)
+- Paper v1 PDF compiled (`papers/2026-04-radfi-v1/aurelien-desbrieres-radfi-v1-20260429.pdf`),
+  Zenodo DOI 10.5281/zenodo.19885777
+- README.md says "PRE-ALPHA, no code yet" : **out of date**, code is
+  shipped and runtime-validated
+
+### 2.4 beamfs-bench harness
+
+- Rust binary `/usr/bin/beamfs-bench` 0.3.0
+- Sub-commands : `full` (canonical R19), `multifs`, `analyse`,
+  `bitrot`, `metadata`, `crash`, `fsck`, `mega`
+- Worker shell `src/worker.sh` (1029 LOC, embedded via
+  `include_str!` in multifs.rs) deployed to VMs via SCP, drives
+  17 case actions
+- Verdict derivation in Rust (`synthesis.rs` 463 LOC) : multifs
+  scope produces `RS_RECOVERED|RS_PASSTHROUGH|RS_FAILED|FS_PANIC|
+  CORRUPTED_DATA` ladder
+- 9 cargo unit tests cover the multifs decision matrix
+- Host-side forensic capture (`forensics_host.rs` 292 LOC) with
+  `--bpftrace` opt-in flag
+- R19 EXIT 0 reproducible 4 times in session 2026-05-02
+- **Cluster scope verdict derivation : not wired** (factual records
+  emitted, ladder not applied ; TODO line 871, 2-3h follow-up)
+
+### 2.5 4-VM aarch64 cluster (libvirt + QEMU TCG)
+
+- master (192.168.56.10), compute01..03 (.11/.12/.13)
+- compute01 holds 5 USB pass-through victims (vdc..vdg : ext4,
+  ext3, btrfs, squashfs, beamfs)
+- All 4 VMs run kernel 7.0.3 + beamfs.ko + radfi.ko
+- libvirt isolation enforced by `lifecycle.rs::assert_isolation_architecture()`
+  in beamfs-bench Phase 0
+- SSH `hpcadmin@<IP>` with `~/.ssh/hpclab_admin`
+
+### 2.6 Empirical validation results (last full mega run 2026-05-01)
+
+- multifs : beamfs RECOVERED 3/3 (probs 1k/100k/1M)
+- cluster : beamfs RECOVERED 12/12 (4 nodes x 3 probs), DIFFS=0
+- bitrot : 20 observations across 5 FS x 4 cells
+- metadata : 20 observations across 5 FS x 4 cells (A1 SB, A2 bitmap,
+  A3 inode, A4 saturation x3)
+- crash : all 4 R/W FSes (ext4, ext3, btrfs, beamfs) remount with
+  `mount_rc=0` and `stable_files_ok=5/5`, no DMESG_PANIC
+- fsck : ext4/ext3/btrfs return rc=0 ; beamfs returns
+  NOT_IMPLEMENTED
+- 0 BUG, 0 Oops, 0 WARN in dmesg across all R19 runs
+
+---
+
+
+---
+
+## 3. Target architecture (single source of truth on intent)
+
+### 4.1 Position
+
+beamfs is a read-write Linux filesystem with native inline RS-FEC
+correction on the read path. It fills a mainline gap : RS-FEC is
+currently only available via dm-fec, which is read-only and tied
+to dm-verity. No mainline RW filesystem performs RS-FEC correction
+on read-write storage.
+
+The threat model addressed is universal : any Linux storage subject
+to bit-flips of hardware (SEU/MBU, NAND/DRAM aging), environmental
+(cosmic rays, IEMI), or adversarial (rowhammer, voltage glitch)
+origin. The space deployment case is one specific instance ; the
+datacenter and embedded cases are equally addressed.
+
+### 4.2 Target on-disk format (v5 - per format-v5-design.md)
+
+Single on-disk format parameterised by feature flags, exposing 3
+mkfs profiles :
+
+| Profile  | Volume range | File range | Latency | Active flags                          |
+|----------|--------------|------------|---------|---------------------------------------|
+| embedded | 32 KB - 100 GB | 4 KB - 1 GB | hardware-bound | none (RFC v5.0 minimal baseline) |
+| server   | 1 GB - 16 EB | 4 KB - 16 EB | 50-300 µs | EXTENTS + 64BIT + BLOCK_GROUPS + JOURNAL |
+| dax      | 64 GB - 100 TB | 4 KB - 16 EB | 1-10 µs | embedded flags + DAX                |
+
+Migration : copy migration via mkfs + rsync (always supported) ;
+in-place via `tune.beamfs --upgrade-format` for compatible flag
+upgrades. Migration from ext4/btrfs/xfs requires copy.
+
+### 4.3 RFC trajectory (per mainline-scope.md + roadmap.md Phase 0-8)
+
+- **RFC v5.0 = embedded profile only** (~5-8 k LoC, anti-NAK firewall)
+- Patch series 15-25 commits, atomic, rebased linear
+- Subsequent patches activate flags one by one (f2fs/exfat
+  trajectory, opposite of bcachefs all-at-once ejection)
+- Cover letter cites paper v3 Zenodo DOI + 3-5 public deployments
+  (anti-FTRFS-NAK doctrine)
+
+### 4.4 Out of scope (explicit, defended in cover letter)
+
+- RAID native (delegated to dm-raid/mdraid)
+- Snapshots CoW (delegated to LVM thin / btrfs subvol overlay)
+- Encryption native (delegated to dm-crypt)
+- Compression (orthogonal, possibly v6+)
+- Network FS (local only)
+- MTD/UBI native (block device only in v5)
+
+---
+
+
+---
+
+## 4. Critical path to kernel.org RFC (Phases 0-8)
+
+This is the consolidated RAF (reste à faire) ordered by phase
+dependency, with effort estimates from `roadmap.md`. Phase
+preconditions are strict (Phase N+1 cannot start before Phase N DoD
+passes).
+
+### 4.2 Phase 1 - Format v5.0 minimal RFC-able (50h)
+
+**DoD** : `beamfs.h` v5 + `mkfs.beamfs` userspace, format mountable
+R/W on device.
+
+What's already there :
+- v5 feature flag bit allocations declared in `beamfs.h`
+- Mount-time enforcement of unknown INCOMPAT/RO_COMPAT/COMPAT bits
+- ext4-pattern feature flag detection live
+
+What's missing :
+- `s_version` bump to 5 (currently V1)
+- format-v5.md complete (currently skeleton, sections 4-12 marked TBD)
+- Per-flag implementation : `EXTENTS`, `64BIT`, `BLOCK_GROUPS`,
+  `JOURNAL`, `DAX`, `BIGALLOC`, `BTREE_ALLOC`, etc. — none active
+  in the RFC submission ; the embedded profile has 0 flags active
+- mkfs.beamfs `--profile=embedded` (default) explicitly emits v5 SB
+- Migration script v1 → v5 (`tune.beamfs --upgrade-format`) — for
+  internal lab volumes, not deployment users
+
+**TODO ID** : `func-12` (PER_INODE_RS feature flag is one specific
+sub-item, not the whole Phase 1)
+
+### 4.3 Phase 2 - fsck.beamfs MVP (30h)
+
+**DoD** : `fsck.beamfs --check-only` passes 5 passes (SB, bitmap,
+inode walk, bitmap rebuild, RS journal validation), exit codes per
+fsck convention.
+
+What's already there :
+- `tools/fsck.beamfs/` directory placeholder
+- `Documentation/fsck.beamfs.md` design document with implementation
+  plan in 8 sub-phases (Phase 0 DONE, Phases 1-8 PENDING)
+- Test D integration design in `beamfs-bench fsck`
+
+What's missing :
+- All 8 implementation sub-phases (skeleton + 5 passes + manpage +
+  bench integration)
+- `fsck.beamfs.8` manpage in mandoc format
+
+**TODO ID** : `func-6`
+
+### 4.4 Phase 3 - Multiblock read_folio (12h)
+
+**DoD** : 15 boundary tests pass, fsstress 1h no corruption.
+
+What's already there :
+- Substeps 4 (write_begin), 5 (writepages), 6 (truncate / func-2),
+  7 (closed), 8 (mmap), 10 (tri-block folio fix / func-13) all
+  closed and validated
+- Manifest 20260502T133223Z confirms substep 9 R19 EXIT 0
+- 18/18 frontier scan N=1..50 OK after func-13 fix
+
+What's missing :
+- 15 boundary tests as a formal regression set in beamfs-bench
+  (currently the frontier scan exists ad-hoc, not packaged in a
+  cargo test or scope)
+- fsstress 1h run never executed on beamfs ; required for DoD
+- Per-`beamfs-bench evolution: INLINE frontier scan methodology`
+  TODO entry, this is the path to DoD closure
+
+**TODO ID** : `beamfs-bench evolution: INLINE frontier scan methodology`
+
+### 4.5 Phase 4 - Stage 4 close + paper v3 draft (100h)
+
+**DoD** : Paper v3 draft + Zenodo upload + arXiv preprint.
+
+What's already there :
+- `papers/2026-04-beamfs-v3-findings/SCIENTIFIC-FINDINGS-2026-04-30.md`
+  : 16 KB raw findings note (lab notebook)
+- LuaLaTeX + gnuplot stack validated on spartian-1
+- paper v2 already published Zenodo (CC-BY-4.0)
+- paper v1 RadFI companion published Zenodo
+
+What's missing :
+- Stage 4 data block protection : choice between scheme 2
+  (UNIVERSAL_INLINE), scheme 3 (UNIVERSAL_SHADOW), scheme 4
+  (UNIVERSAL_EXTENT) — design decision then implementation (2-4
+  weeks)
+- Paper v3 LaTeX tree (`papers/2026-04-beamfs-v3/`)
+- Empirical validation post-Stage-4 (paper v3 needs the post-Stage-4
+  numbers, not the current Stage 3 numbers)
+- arXiv preprint upload
+- Zenodo upload + DOI mint
+- Cross-citations updated (paper v3 references RadFI v1, v2 paper)
+
+**TODO IDs** : `func-3` (Stage 4 data block protection),
+`upstream-7` (paper v3 publication)
+
+### 4.6 Phase 5 - DKMS + Yocto layer (25h)
+
+**DoD** : `dkms install` works on Debian, Ubuntu, Fedora, Gentoo ;
+Yocto recipe ready for upstream meta-beamfs.
+
+What's already there :
+- yocto-beamfs internal layer (private, lab use)
+- beamfs-overlay Gentoo overlay (private, dev use)
+- `mkfs.beamfs` userspace builds via cargo + Makefile
+
+What's missing :
+- DKMS configuration (`packaging/dkms.conf`)
+- `packaging/debian/` (debian/control, debian/rules)
+- `packaging/rpm/` (.spec)
+- Public meta-beamfs Yocto layer (separate from yocto-beamfs lab
+  layer)
+- Distribution-side packaging review and per-distro testing
+
+### 4.7 Phase 6 - Build user base (75h)
+
+**DoD** : 3-5 public deployments cited, technical blog post,
+linux-fsdevel low-volume presence.
+
+What's already there :
+- Project foundations : 4 published papers (FTRFS v1, FTRFS v2,
+  beamfs v1, beamfs v2) on Zenodo
+- Phoronix coverage of FTRFS RFC v3 (lineage, not directly beamfs)
+
+What's missing :
+- 0 public beamfs deployments today
+- Blog (technical writeup) on beamfs.org or equivalent
+- Conference submission (FOSDEM, Kernel Recipes, EuroSys)
+- Identifiable user base : DKMS package adopters, Yocto layer
+  adopters, academic lab deployments, industrial deployments
+- Each deployment must be public and citable (testimonial,
+  technical writeup, or conference talk)
+
+**TODO ID** : `upstream-8`
+
+### 4.8 Phase 7 - Documentation/filesystems mainline + checkpatch zero (50h)
+
+**DoD** :
+- `Documentation/filesystems/beamfs.rst` Sphinx-ready
+- `MAINTAINERS` entry
+- `checkpatch.pl --strict` : 0 errors, 0 warnings on every .c/.h
+- `fs/beamfs/` restructure (mainline kernel paths, not out-of-tree)
+- selftests under `tools/testing/selftests/beamfs/`
+- xfstests subset PASS (generic/{001,002,010,098,257} minimum)
+
+What's already there :
+- `Documentation/` (Markdown, project-internal)
+- `Documentation/process/coding-assistants.rst` not yet present
+- `tools/checkpatch-precommit.sh` script exists, no baseline run
+- xfstests not run on beamfs (only generic Stage 3 R19 validation)
+
+What's missing :
+- `.md` → `.rst` transformation of `mainline-scope.md`,
+  `format-v5-design.md`, `threat-model.md`, `known-limitations.md`,
+  with adaptation to kernel doc tone
+- `Documentation/process/coding-assistants.rst` policy doc (AI
+  tooling disclosure required by linux-fsdevel)
+- `MAINTAINERS` entry under `F: fs/beamfs/`, `F: Documentation/filesystems/beamfs.rst`
+- Checkpatch baseline run, then iterative cleanup until zero
+- Out-of-tree → in-tree restructure (`fs/beamfs/` per kernel layout)
+- xfstests subset configuration (`local.config`, exclusion list,
+  PASS report archived)
+- selftests under `tools/testing/selftests/beamfs/` for
+  format-specific edge cases
+
+**TODO IDs** : `upstream-1` (xfstests), `upstream-3` (checkpatch
+baseline), `upstream-4` (Documentation/filesystems entry)
+
+### 4.9 Phase 8 - RFC mainline + review cycle (60h)
+
+**DoD** : Patch series merged OR explicit NAK with corrective
+actions for v5.1.
+
+What's already there :
+- nothing (Phase 8 is gated by all previous phases)
+
+What's missing :
+- Cover letter [PATCH RFC 0/N] (~2-3 pages)
+- Patch series 15-25 commits, atomic, rebased linear, all GPG-signed,
+  all `Signed-off-by` correct
+- `git send-email` config validated for `aurelien@hackers.camp`
+- linux-fsdevel mailing list subscription confirmed at
+  `majordomo@vger.kernel.org`
+- DKIM/SPF on hackers.camp validated against vger.kernel.org
+- Test mail self-loop validates the full chain
+- After mail : 3-6 months reviewer cycle, integrating feedback,
+  resending v1, v2, ... until merge or explicit NAK
+
+**TODO IDs** : `upstream-2` (reviewer feedback integration, post-mail),
+`upstream-5` (cover letter), `upstream-6` (send-email + subscription)
+
+### 4.10 Cumulative effort
+
+| Phase | Hours | Cumulative | Status                  |
+|-------|-------|------------|-------------------------|
+| 0     | 3     | 3          | DONE 2026-04-30         |
+| 1     | 50    | 53         | scaffolding done, flags pending |
+| 2     | 30    | 83         | design done, code 0%    |
+| 3     | 12    | 95         | substeps 4-10 done, formal DoD pending |
+| 4     | 100   | 195        | Stage 4 + paper v3, 0%  |
+| 5     | 25    | 220        | DKMS + meta-beamfs, 0%  |
+| 6     | 75    | 295        | user base, 0%           |
+| 7     | 50    | 345        | rst + checkpatch + xfstests, 0% |
+| 8     | 60    | 405        | RFC mail + review, 0%   |
+
+**Realistic** : 405 focused-work hours, **dominated by Phase 4
+(100h paper v3) + Phase 6 (75h user base) + Phase 8 (60h review)**
+which together account for 235h ≈ 58% of the budget.
+
+The roadmap precondition graph is :
+
+    Phase 0 (done)
+       └→ Phase 1 ───┬→ Phase 2
+                    ├→ Phase 3
+                    ├→ Phase 4 (also needs 2, 3)
+                    └→ Phase 5
+                                └→ Phase 6
+                                          └→ Phase 7 (also needs 1-3)
+                                                    └→ Phase 8 (needs all)
+
+The longest path = 0 → 1 → 4 → 6 → 7 → 8 ≈ 240h (all serial).
+With concurrent execution where preconditions allow, calendar can
+collapse to ~3-4 months sprint at 8h/day, or ~8 months at sustainable
+pace 2-3h/day.
+
+---
+
+
+---
+
+## 5. Strategic decisions queued
+
+The following are not technical blockers but strategic forks that
+will redirect ~50-100h of work each. They cannot be deferred
+indefinitely without risk of rework.
+
+### 5.1 Stage 4 data block protection scheme
+
+Three documented options (`design.md` + `threat-model.md`) :
+- **Scheme 2 UNIVERSAL_INLINE** : RS parity inline within each data
+  block. Lower latency, smaller useful capacity per block. Already
+  has empirical validation footprint (multifs scope tests it
+  partially via INLINE multi-block).
+- **Scheme 3 UNIVERSAL_SHADOW** : RS parity in dedicated out-of-band
+  region. Higher latency for parity I/O, full data capacity per block.
+- **Scheme 4 UNIVERSAL_EXTENT** : RS parity as filesystem attribute
+  (xattr-style). Most flexible, most complex.
+
+Decision impacts Phase 4 effort estimate (currently aggregate 100h
+includes paper writing, but actual implementation can swing by 1-2
+weeks).
+
+### 5.2 RadFI mainline submission positioning
+
+Three options :
+- Out-of-tree permanent (lab tool only, distributed via beamfs-bench)
+- Co-submission with beamfs (bundled RFC, single review cycle)
+- Separate RFC track (independent companion to `lib/fault-inject.c`,
+  `dm-flakey`, `fail_make_request`)
+
+Decision impacts Phase 8 cover letter strategy.
+
+### 5.3 Block size policy v5
+
+`mainline-scope.md` declares 4096 fixed. But `BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK`
+flag bit (10) is reserved for `block_size > PAGE_SIZE`.
+Decision : keep 4096 strict for v5.0 RFC, defer LARGE_BLOCK to v5.x ?
+Or activate LARGE_BLOCK from v5.0 with x86_64 + aarch64 page size
+auto-detection ? Affects mkfs.beamfs CLI design.
+
+### 5.4 Migration v1 → v5 scope
+
+`format-v5-design.md` section 11 documents two paths but does not
+choose. For Phase 1 Phase 5 transition, one of these is required.
+- copy migration (always works, safe, simple)
+- in-place upgrade (risky, complex tune.beamfs userspace tool)
+
+For lab volumes only, copy migration is sufficient. For production
+adopters (Phase 6 user base), in-place may be a hard ask.
+
+---
+
+
+---
+
+## 6. Non-targets and project hygiene (explicit out-of-scope)
+
+For honest record-keeping, the following items mentioned in some
+session memories are explicitly **not part of beamfs target
+architecture** :
+
+- **Bpfs/distributed FS** : no, beamfs is local block-device only
+  (mainline-scope.md section 6)
+- **MTD/UBI native** : no in v5 (mainline-scope.md section 6)
+- **PQC metadata authentication** : roadmap.md "post-merge long-term
+  vision", post-v5
+- **Encryption native** : delegated to dm-crypt (not in scope)
+- **Compression** : orthogonal, possibly v6+
+- **Snapshots CoW** : delegated to LVM thin / btrfs subvol
+- **RAID native** : delegated to dm-raid/mdraid
+- **Bpifrance/SASU/financing structure** : explicitly out of scope
+  by user decision (recadrage Phase 0 acquis)
+- **Migration in-place ext4 → beamfs** : declined for v5,
+  reconsidered v6+ if demand
+
+---
+
+
+---
+
+## 7. Documentation drift to repair (1-2h, doc-only commit)
+
+These items are immediate doc-only fixes ; the underlying code is
+already live runtime.
+
+| Doc claim                                                            | File                          | Empirical reality                                |
+|----------------------------------------------------------------------|-------------------------------|--------------------------------------------------|
+| `Item 4 - Shannon entropy in RS journal (PENDING)`                   | roadmap.md L354               | All 6 sub-commits A-F shipped (struct, LUT, signature, call sites, mkfs, format-v4.md) |
+| `6.4 Shannon entropy in RS journal \| Not implemented`               | known-limitations.md L49      | Entropy computed and stored in RS journal at runtime |
+| `BEAMFS PRE-ALPHA, no code yet`                                      | radfi/README.md               | 500 LOC C shipped, validated v0.1.2 tag          |
+| `tag v0.3.0-metadata-hardening` (planned closing tag)                | roadmap.md L466 ish           | Tag never created, but content is on HEAD        |
+| `format-v4.md` is authoritative for "v4"                             | format-v4.md                  | Document describes the **current** beamfs v1 format, naming inherited from FTRFS lineage |
+| `Stage 3 ACTIVE`                                                     | roadmap.md L26                | Stage 3 is effectively closed (items 1, 2, 3, 4, 4a, 4b-dirent all CLOSED) ; only the closing tag and v1.0 release ceremony remain |
+
+These do not block any technical work. They block clarity of state
+for any future reviewer (including future Claude sessions).
+
+---
+
+
+---
+
+## 8. Documentation/code coherence gaps (4 items)
 
 These are residual incoherences after the naming + EM rename passes.
 None are blocking but they are visible to a reviewer.
@@ -127,7 +1152,7 @@ post-rename tarball.
 
 ---
 
-## Functional gaps (8 items)
+## 9. Functional gaps
 
 These are missing features or known bugs in the beamfs/bench code.
 
@@ -228,7 +1253,7 @@ Architecture documented in this commit's companion file `architecture-current.md
 
 ---
 
-## Upstream submission status
+## 10. Upstream submission status
 
 beamfs has not been submitted to linux-fsdevel. The previous "RFC v3
 sent" status referred to the FTRFS lineage (Zenodo v1, v1.1, v1.2
@@ -725,7 +1750,7 @@ or mkfs.
 
 ---
 
-## radfi improvements
+## 11. radfi improvements
 
 ### radfi improvement: targeting precision (range/list/file-aware)
 
@@ -795,7 +1820,7 @@ Decision needed before phase 8 (RFC mainline submission of beamfs) :
 submit radfi as a separate RFC track, bundle it with beamfs as a
 co-submission, or keep it permanently out-of-tree as a lab tool ?
 
-## beamfs improvements
+## 12. beamfs improvements
 
 ### beamfs improvement: on-disk format stability discipline
 
@@ -866,7 +1891,7 @@ Required surveillance per session :
     skip with `WARN_ONCE` or `pr_err+BUG_ON` for diagnosis, then
     restore silent skip.
 
-## beamfs-bench improvements
+## 13. beamfs-bench improvements
 
 ### beamfs-bench improvement: cluster scope verdict derivation
 
@@ -921,7 +1946,7 @@ See `beamfs-bench evolution: cluster_*/multifs worker duplication`
 above. Single source of truth ; no duplicate content here to avoid
 drift.
 
-## Priority matrix
+## 14. Priority matrix
 
 Three tiers, ordered by impact on the kernel.org RFC critical path.
 
@@ -976,7 +2001,7 @@ the budget.
 
 ---
 
-## See also
+## 15. See also
 
 - `Documentation/architecture-current.md` : current runtime architecture
 - `Documentation/threat-model.md` : EM threat model + v4 journal nomenclature
