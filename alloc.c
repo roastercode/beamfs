@@ -326,10 +326,15 @@ void beamfs_free_block(struct super_block *sb, u64 block)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
 
-	if (block < sbi->s_data_start) {
-		pr_err("beamfs: attempt to free non-data block %llu\n", block);
+	/* Layer 2 defense: silently skip reserved blocks. Any caller
+	 * reaching this path with block < s_data_start is either a
+	 * legitimate truncate of a reserved-pointing inode (canary, only
+	 * possible if Layer 1 S_IMMUTABLE was bypassed by corruption) or
+	 * a stale pointer from a corrupted indirect block. In both cases,
+	 * silently rejecting preserves bitmap integrity without log spam.
+	 */
+	if (block < sbi->s_data_start)
 		return;
-	}
 
 	bit = (unsigned long)(block - sbi->s_data_start);
 	if (bit >= sbi->s_nblocks) {
@@ -341,6 +346,7 @@ void beamfs_free_block(struct super_block *sb, u64 block)
 
 	if (test_bit(bit, sbi->s_block_bitmap)) {
 		pr_warn("beamfs: double free of block %llu\n", block);
+		dump_stack();
 		spin_unlock(&sbi->s_lock);
 		return;
 	}
@@ -415,10 +421,11 @@ void beamfs_free_inode_num(struct super_block *sb, u64 ino)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
-	if (ino < 2 || ino > sbi->s_ninodes) {
-		pr_err("beamfs: attempt to free invalid inode %llu\n", ino);
+	/* Layer 2 defense: silently skip reserved inodes (root, canary).
+	 * Range check covers both reserved range and bitmap bounds.
+	 */
+	if (beamfs_ino_is_reserved(ino) || ino > sbi->s_ninodes)
 		return;
-	}
 
 	spin_lock(&sbi->s_lock);
 

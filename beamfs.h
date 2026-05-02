@@ -81,6 +81,26 @@
 #define BEAMFS_CANARY_HEADER_STR      "BEAMFS-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
 
 /*
+ * Reserved inode numbers.
+ *
+ * Inodes [0 .. BEAMFS_FIRST_USER_INO) are reserved for FS-internal
+ * fixtures (root directory, canary block alias). User-visible inode
+ * allocation starts at BEAMFS_FIRST_USER_INO.
+ *
+ * Operations that would mutate or free reserved inodes are rejected
+ * by defense-in-depth: VFS layer (S_IMMUTABLE) and allocator layer
+ * (range check in beamfs_free_block / beamfs_free_inode_num).
+ */
+#define BEAMFS_RESERVED_INO_ROOT      1
+#define BEAMFS_RESERVED_INO_CANARY    2
+#define BEAMFS_FIRST_USER_INO         3
+
+static inline bool beamfs_ino_is_reserved(u64 ino)
+{
+	return ino < BEAMFS_FIRST_USER_INO;
+}
+
+/*
  * Translation helpers for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
  *
  * The user-visible file_offset (in bytes) maps to a logical block index

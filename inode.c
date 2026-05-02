@@ -154,6 +154,14 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	fi->i_tindirect = raw->i_tindirect;
 	fi->i_flags     = le32_to_cpu(raw->i_flags);
 
+	/* Layer 1 defense: mark reserved inodes (canary) as immutable.
+	 * VFS rejects open(O_TRUNC), setattr(ATTR_SIZE), unlink, chmod
+	 * with EPERM before reaching beamfs hooks. Layer 2 in alloc.c
+	 * provides the safety net if VFS check is bypassed (corruption).
+	 */
+	if (beamfs_ino_is_reserved((u64)ino) && ino != BEAMFS_RESERVED_INO_ROOT)
+		inode->i_flags |= S_IMMUTABLE;
+
 	/* Set ops based on file type */
 	if (S_ISDIR(inode->i_mode)) {
 		inode->i_op  = &beamfs_dir_inode_operations;
