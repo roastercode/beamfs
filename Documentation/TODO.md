@@ -431,6 +431,32 @@ Cluster scope still emits factual records but does not yet apply the
 
 ### beamfs-bench evolution: host-side forensic capture + bpftrace opt-in [CLOSED 2026-05-02]
 
+### beamfs-bench evolution: bpftrace VM-side via Yocto recipe [NEW 2026-05-02]
+
+**Status** : not implemented. Required for VM-side BPF probes.
+**Effort** : 1-2 days (recipe + kernel BTF/BPF features + runtime validation).
+**Repo** : yocto-beamfs (recipes-kernel/bpftrace/) + IMAGE_INSTALL.
+
+`bpftrace` is currently absent from the active Yocto layers (poky
+styhead, meta-openembedded styhead). Host-side bpftrace is enabled
+in `forensics_host.rs --bpftrace` ; VM-side requires :
+
+  1. New local recipe `recipes-kernel/bpftrace/bpftrace_X.Y.bb`
+     (sources upstream tarball, depends on libbpf/libelf/clang/llvm).
+  2. Kernel config additions for BPF/BTF support in
+     `recipes-kernel/linux/BEAMFS-arm64.cfg` :
+       CONFIG_BPF_SYSCALL=y
+       CONFIG_BPF_JIT=y
+       CONFIG_DEBUG_INFO_BTF=y
+       CONFIG_BPF_EVENTS=y
+  3. Add bpftrace to `hpc-arm64-research-beamfs.bb` IMAGE_INSTALL.
+  4. Validate runtime via `ssh compute01 sudo bpftrace -V` after
+     image rebuild + VM redeploy.
+
+When done, `forensics.rs::pre_capture_all` could optionally launch
+guest-side bpftrace probes alongside the existing ftrace path under
+`Scope::Full`.
+
 **Status** : closed substep 10. New module `forensics_host.rs` (companion
 to `forensics.rs` VM-side). Captures host context into `<run_dir>/host/`
 so the existing `make_tarball` naturally embarks both VM and host
