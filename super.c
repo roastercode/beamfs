@@ -257,16 +257,28 @@ void beamfs_dirty_super(struct beamfs_sb_info *sbi)
 	 */
 	memcpy(fsb, sbi->s_beamfs_sb, sizeof(*fsb));
 
-	/* Encode RS parity over CRC32-covered region (skipping s_crc32). */
+	/* Encode RS parity over CRC32-covered region (skipping s_crc32).
+	 * staging is BEAMFS_SB_RS_STAGING_BYTES (2743 bytes); allocated on
+	 * the heap to keep this function under the kernel 2 KB stack budget.
+	 * On OOM, skip the RS encode -- CRC32 below is still updated, and
+	 * the previous on-disk RS parity remains valid for the previous
+	 * payload.
+	 */
 	{
-		u8 staging[BEAMFS_SB_RS_STAGING_BYTES];
+		u8 *staging = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES, GFP_NOFS);
 		u8 *parity_dst = (u8 *)fsb + BEAMFS_SB_RS_PARITY_OFFSET;
 
-		beamfs_sb_to_rs_staging(fsb, staging);
-		beamfs_rs_encode_region(staging, BEAMFS_SB_RS_DATA_LEN,
-				       parity_dst, BEAMFS_RS_PARITY,
-				       BEAMFS_SB_RS_DATA_LEN,
-				       BEAMFS_SB_RS_SUBBLOCKS);
+		if (!staging) {
+			pr_warn("beamfs: dirty_super: kvmalloc(%u) failed; skipping RS re-encode\n",
+				BEAMFS_SB_RS_STAGING_BYTES);
+		} else {
+			beamfs_sb_to_rs_staging(fsb, staging);
+			beamfs_rs_encode_region(staging, BEAMFS_SB_RS_DATA_LEN,
+						parity_dst, BEAMFS_RS_PARITY,
+						BEAMFS_SB_RS_DATA_LEN,
+						BEAMFS_SB_RS_SUBBLOCKS);
+			kvfree(staging);
+		}
 	}
 
 	crc = beamfs_crc32_sb(fsb);
@@ -430,12 +442,30 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	/* Verify CRC32 of superblock (excluding the crc32 field itself) */
 	crc = beamfs_crc32_sb(fsb);
 	if (crc != le32_to_cpu(fsb->s_crc32)) {
-		u8 staging[BEAMFS_SB_RS_STAGING_BYTES];
+		u8 *staging = NULL;
 		u8 *parity_src = (u8 *)fsb + BEAMFS_SB_RS_PARITY_OFFSET;
-		int rs_results[BEAMFS_SB_RS_SUBBLOCKS];
-		int rs_positions[BEAMFS_SB_RS_SUBBLOCKS *
-				 (BEAMFS_RS_PARITY / 2)];
+		int *rs_results = NULL;
+		int *rs_positions = NULL;
 		int rc;
+
+		/*
+		 * Heap-allocate the RS scratch buffers (2743 + 52 + 416 bytes
+		 * total) to keep beamfs_fill_super under the 2 KB stack budget.
+		 */
+		staging      = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES, GFP_NOFS);
+		rs_results   = kvmalloc_array(BEAMFS_SB_RS_SUBBLOCKS,
+					      sizeof(*rs_results), GFP_NOFS);
+		rs_positions = kvmalloc_array(BEAMFS_SB_RS_SUBBLOCKS *
+					      (BEAMFS_RS_PARITY / 2),
+					      sizeof(*rs_positions), GFP_NOFS);
+		if (!staging || !rs_results || !rs_positions) {
+			errorf(fc, "beamfs: superblock RS recovery: out of memory");
+			ret = -ENOMEM;
+			kvfree(staging);
+			kvfree(rs_results);
+			kvfree(rs_positions);
+			goto out_brelse;
+		}
 
 		pr_warn("beamfs: superblock CRC32 mismatch (got 0x%08x, expected 0x%08x), attempting RS recovery\n",
 			crc, le32_to_cpu(fsb->s_crc32));
@@ -450,14 +480,21 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 					    BEAMFS_RS_PARITY / 2);
 		if (rc < 0) {
 			errorf(fc, "beamfs: superblock CRC32 mismatch and RS uncorrectable");
+			kvfree(staging);
+			kvfree(rs_results);
+			kvfree(rs_positions);
 			goto out_brelse;
 		}
 
 		beamfs_sb_from_rs_staging(staging, fsb);
+		kvfree(staging);
+		staging = NULL;
 
 		crc = beamfs_crc32_sb(fsb);
 		if (crc != le32_to_cpu(fsb->s_crc32)) {
 			errorf(fc, "beamfs: superblock CRC32 still mismatch after RS recovery");
+			kvfree(rs_results);
+			kvfree(rs_positions);
 			goto out_brelse;
 		}
 
@@ -512,6 +549,10 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 				}
 			}
 		}
+
+		/* Heap buffers consumed; free before continuing. */
+		kvfree(rs_results);
+		kvfree(rs_positions);
 	}
 
 	/*
