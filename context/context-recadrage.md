@@ -1119,10 +1119,48 @@ si le cache gpg-agent a ete populated par un signing interactif
 anterieur dans la fenetre TTL. Pour mega run, le preauth se fait au
 debut de la session avant invocation `beamfs-bench mega`.
 
+**Pre-requis environnement (Gentoo OpenRC + Sway Wayland + foot)** :
+
+1. **`GPG_TTY` doit etre exporte dans le shell** ou on lance `gpg` ou
+   `git commit -S`. Sans ca, `pinentry-curses` ne peut pas se connecter
+   au tty et fallback en batchmode error. Verifier avec `echo $GPG_TTY`
+   (doit etre `/dev/pts/N`). Si vide, faire `export GPG_TTY=$(tty)`.
+
+2. **`~/.gnupg/gpg-agent.conf` doit declarer `pinentry-program
+   /usr/bin/pinentry-curses`**. Sous Sway/Wayland sans X, pinentry-gtk
+   et pinentry-gnome3 echouent silencieusement. Le default Gentoo via
+   `eselect pinentry` peut etre incorrect ; forcer explicitement curses.
+
+3. **Diagnostic du cache** :
+   ```bash
+   gpg-connect-agent 'KEYINFO --list' /bye
+   # Retour : `S KEYINFO <fpr> D - - - <state> - - -`
+   # state=`P` (no cache) ou `1` (cached). `P` = preauth requis.
+   ```
+
+4. **Procedure complete debut de session** :
+   ```bash
+   echo $GPG_TTY                              # verif export
+   gpg-connect-agent 'KEYINFO --list' /bye    # verif cache
+   # Si state=P (no cache) :
+   echo preauth | gpg --sign --output /tmp/preauth.sig -
+   rm /tmp/preauth.sig
+   # Pinentry-curses prompt au TTY ; passphrase entree ; cache 3600s.
+   ```
+
+5. **Cas SSH** : Sway/foot ne demarre PAS `ssh-agent` automatiquement.
+   Si la cle SSH a une passphrase, `git push` prompt a chaque push.
+   Solution session : `eval $(ssh-agent -s) && ssh-add ~/.ssh/<key>`.
+   Solution durable : ajouter au River init / Sway init (hors scope
+   beamfs-devel).
+
 **Pour Claude generant des blocs shell multi-commit** : ne pas inserer
 de pseudo-preauth `gpg --batch --pinentry-mode loopback` en tete de
 bloc. Si plusieurs commits sont attendus, le premier `git commit -S`
 populate le cache pour les suivants, sans ceremonie supplementaire.
+Avant le premier commit d'une session, **verifier explicitement le
+cache** via `gpg-connect-agent 'KEYINFO --list' /bye`. Si state=`P`,
+livrer un bloc preauth au lieu de tenter direct un commit batch.
 
 ---
 
