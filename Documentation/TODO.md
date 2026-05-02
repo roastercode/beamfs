@@ -50,6 +50,33 @@ the cross-repo lockstep R19 audit.
 
 ---
 
+## Critical path to kernel.org RFC
+
+beamfs has not been submitted to linux-fsdevel. Distance to first
+RFC mail measured against `Documentation/roadmap.md` Phase 1 to 8.
+
+### Phase mapping (status per phase)
+
+| Phase | Title                                  | Status      | Blocking items                |
+|-------|----------------------------------------|-------------|-------------------------------|
+| 1     | Format v5.0 minimal RFC-able           | not started | func-12                       |
+| 2     | fsck.beamfs MVP                        | design only | func-6                        |
+| 3     | Multiblock read_folio                  | active      | func-13 closed, substep 10 partial |
+| 4     | Stage 4 close + paper v3               | not started | func-3, upstream-7            |
+| 5     | DKMS + Yocto layer                     | not started | (no TODO item yet)            |
+| 6     | Build user base (anti-NAK)             | not started | upstream-8                    |
+| 7     | Documentation/filesystems + checkpatch | not started | upstream-3, upstream-4        |
+| 8     | RFC mainline + review cycle            | not started | upstream-5, upstream-6, upstream-2 |
+
+Each row maps an active TODO item to its phase. Items absent from
+this table are quality improvements not on the RFC critical path
+(see Tier 2/3 in Priority matrix at the bottom of this file).
+
+See `Documentation/roadmap.md` for phase DoD definitions and effort
+estimates. Total residual effort across phase 1-8 : ~400h.
+
+---
+
 ## Documentation/code coherence gaps (4 items)
 
 These are residual incoherences after the naming + EM rename passes.
@@ -201,12 +228,18 @@ Architecture documented in this commit's companion file `architecture-current.md
 
 ---
 
-## Upstream submission gaps
+## Upstream submission status
+
+beamfs has not been submitted to linux-fsdevel. The previous "RFC v3
+sent" status referred to the FTRFS lineage (Zenodo v1, v1.1, v1.2
+published, project reached its limit). beamfs is a separate codebase,
+re-pitched as RW + native RS-FEC per `Documentation/mainline-scope.md`,
+and starts its mainline trajectory at Phase 1.
 
 ### upstream-1 : xfstests pass status unknown
 
 **Status** : not run  
-**Effort** : 1-2 weeks of real validation work  
+**Effort** : 1-2 weeks of real validation work (Phase 7 budget)  
 **Repo** : beamfs
 
 For linux-fsdevel mainline submission, reviewers will request "which
@@ -215,14 +248,133 @@ before mainline acceptance.
 
 ### upstream-2 : Reviewer feedback integration
 
-**Status** : RFC v3 sent, feedback pending  
-**Effort** : variable  
+**Status** : not yet engaged. beamfs RFC v0 has NOT been sent to
+linux-fsdevel.  
+**Effort** : variable, materialises after first beamfs RFC mail  
 **Repo** : beamfs
 
-Cover Message-ID `<20260414120726.5713-1-aurelien@hackers.camp>`.
-Active reviewers : Matthew Wilcox, Darrick J. Wong, Andreas Dilger,
-Pedro Falcato, Gao Xiang. Phoronix coverage. AI tooling disclosure
-per `Documentation/process/coding-assistants.rst`.
+Pre-requisites : upstream-1, upstream-3, upstream-4, upstream-5,
+upstream-6, upstream-7, upstream-8, and Phase 1-7 DoD per roadmap.
+
+### upstream-3 : checkpatch.pl --strict baseline
+
+**Status** : `tools/checkpatch-precommit.sh` exists, no baseline run
+archived. Current count of errors/warnings on .c/.h is unknown.  
+**Effort** : 1-2 days clean-up after baseline run (variable per
+finding count) (Phase 7 budget)  
+**Repo** : beamfs
+
+For Phase 7 DoD : 0 errors, 0 warnings, --strict, on every .c/.h
+under root + new files added in Phase 1-6. Baseline run is
+prerequisite to estimate the clean-up scope.
+
+### upstream-4 : Documentation/filesystems/beamfs.rst
+
+**Status** : absent. All current docs are .md under `Documentation/`
+(project-internal format, not kernel canonical).  
+**Effort** : 2-4 days (write + review for kernel doc style) (Phase 7
+budget)  
+**Repo** : beamfs
+
+Mainline kernel filesystem docs follow restructuredText format and
+live under `Documentation/filesystems/<fs>.rst`. Required for Phase 7
+alongside checkpatch zero. Should mirror the structure of
+`Documentation/filesystems/ext4.rst` :
+- Overview + on-disk format pointer
+- Mount options
+- Feature flags inventory
+- Userspace tools (mkfs.beamfs, fsck.beamfs)
+- Limitations (cross-ref `Documentation/known-limitations.md`)
+- References
+
+Source content already exists in `Documentation/mainline-scope.md`,
+`format-v5-design.md`, `threat-model.md`, `known-limitations.md`.
+Phase 7 work = transformation .md -> .rst + adaptation to kernel doc
+tone.
+
+### upstream-5 : cover letter [PATCH RFC 0/N]
+
+**Status** : no draft. No cover* file in repo.  
+**Effort** : 1-2 days writing + iteration (Phase 8 budget)  
+**Repo** : beamfs (Documentation/upstream/cover-letter-rfc-v0.md or similar)
+
+Cover letter for first beamfs RFC submission to linux-fsdevel. Must
+include :
+- Position statement (RW + native RS-FEC, gap vs dm-fec RO)
+- Threat model summary (cross-ref `threat-model.md`)
+- Capabilities matrix (cross-ref `mainline-scope.md` section 3)
+- Out-of-scope explicit list (RAID, snapshots, encryption...)
+- Validation methodology (RadFI harness, cross-ref paper v3 DOI)
+- User base summary (post Phase 6, cross-ref upstream-8)
+- AI tooling disclosure per `Documentation/process/coding-assistants.rst`
+  (this file does not exist yet either ; see Phase 7).
+
+linux-fsdevel reviewers expect ~2-3 pages, dense, factual. Cover
+should also explicitly position vs FTRFS lineage (which reached its
+limit) to defuse possible reviewer pattern matching.
+
+### upstream-6 : git send-email + linux-fsdevel subscription
+
+**Status** : `git send-email` configuration for `aurelien@hackers.camp`
+not validated. linux-fsdevel mailing list subscription status unknown.
+yocto-docs subscription was required for the prior `96377f88c` patch
+resend (cf userMemories) ; same pattern likely applies.  
+**Effort** : 30 min config + subscription confirmation (Phase 8 budget)  
+**Repo** : tooling, no commit needed
+
+Pre-flight before any RFC mail :
+- `git send-email --dry-run` must produce SMTP output without
+  authentication failure (msmtp + Gmail App Password setup per
+  userMemories nullmailer config).
+- `subscribe linux-fsdevel <email>` to `majordomo@vger.kernel.org`
+  acked.
+- DKIM/SPF on hackers.camp checked (cover letter from this address
+  must not be bounced or marked spam by vger.kernel.org).
+- Test mail to self via `git send-email` validates the full chain.
+
+### upstream-7 : paper v3 published on Zenodo with DOI
+
+**Status** : `papers/2026-04-beamfs-v3-findings/SCIENTIFIC-FINDINGS-2026-04-30.md`
+is a 16 KB raw findings note, not a finished paper. No LaTeX tree, no
+PDF, no Zenodo DOI assigned.  
+**Effort** : 100h per Phase 4 budget (writing + review + Zenodo
+upload + DOI minting)  
+**Repo** : beamfs (papers/2026-04-beamfs-v3-findings/)
+
+Paper v3 is a Phase 4 deliverable. Once published, the Zenodo DOI is
+cite-able in the RFC cover letter (upstream-5). Without a public paper
+backing the resilience claim, the RFC narrative loses its empirical
+anchor — same FTRFS pattern that led to NAK.
+
+Workflow : LuaLaTeX + gnuplot per userMemories. Stack already
+installed and validated on spartian-1.
+
+Pre-requisites : Stage 4 close (func-3 data block protection), to not
+publish a paper that becomes obsolete on Stage 4 merge.
+
+### upstream-8 : user base 3-5 public deployments (anti-FTRFS-NAK)
+
+**Status** : zero public beamfs deployments today.  
+**Effort** : Phase 6 budget = 75h  
+**Repo** : beamfs + external (deployment partners)
+
+Phase 6 anti-FTRFS-NAK doctrine (cf `roadmap.md` Phase 6 + recadrage
+acquis Phase 0) : reviewer pattern in linux-fsdevel for new
+filesystems is "show me the users". FTRFS was rejected primarily on
+this axis. beamfs RFC must cite >=3 public deployments at submission
+time.
+
+Possible deployment angles (to firm up as Phase 6 starts) :
+- DKMS package on a Gentoo overlay or AUR (low barrier)
+- Yocto layer dependency for an embedded distro
+- One academic lab using beamfs+RadFI for radiation-tolerance research
+- One specific industrial/commercial use case (OIV/HPC, ANSSI client...)
+- Phoronix Test Suite integration (volume but anonymous)
+
+Each deployment must be public, citable, and ideally backed by a
+short testimonial or technical writeup. Quantity matters but quality
+of citation matters more (Phoronix benchmark run alone is weaker than
+one university lab using it in published research).
 
 ---
 
@@ -765,32 +917,62 @@ corrected events.
 
 ### beamfs-bench improvement: factor multifs/cluster worker duplication
 
-**Status** : already tracked under "cluster_*/multifs worker
-duplication" section above. Cross-referenced here for visibility.
-**Effort** : 4-6h refactor + tests.
-**Repo** : beamfs-bench (worker.sh).
+See `beamfs-bench evolution: cluster_*/multifs worker duplication`
+above. Single source of truth ; no duplicate content here to avoid
+drift.
 
-Same logic lives twice (`setup`/`attack`/`verify` for multifs vs
-`cluster_setup`/`cluster_attack`/`cluster_verify` for cluster).
-The substep 10 worker redesign had to patch both in lockstep ;
-a common helper layer (`_setup_layout`, `_run_attack`,
-`_compute_observation`) would prevent the next session from
-discovering the same bug at two scopes after one fix.
+## Priority matrix
 
-See section above ("beamfs-bench evolution: cluster_*/multifs
-worker duplication") for details.
+Three tiers, ordered by impact on the kernel.org RFC critical path.
 
-## Priority matrix (recommendation)
+### Tier 1 - RFC critical path (Phases 1-8)
 
-This is a recommendation, not a prescription.
+| Item        | Phase | Effort                | Note                                     |
+|-------------|-------|-----------------------|------------------------------------------|
+| func-12     | 1     | ~200 LOC + format bump| INLINE+INODE_RS feature flag             |
+| func-6      | 2     | 3-5 days              | fsck.beamfs MVP                          |
+| func-3      | 4     | 2-4 weeks             | Stage 4 data block protection            |
+| upstream-7  | 4     | 100h                  | paper v3 Zenodo DOI                      |
+| upstream-8  | 6     | 75h                   | user base 3-5 public deployments         |
+| upstream-1  | 7     | 1-2 weeks             | xfstests pass status                     |
+| upstream-3  | 7     | 1-2 days              | checkpatch baseline + cleanup            |
+| upstream-4  | 7     | 2-4 days              | Documentation/filesystems/beamfs.rst     |
+| upstream-5  | 8     | 1-2 days              | cover letter draft                       |
+| upstream-6  | 8     | 30 min                | git send-email + subscription            |
+| upstream-2  | 8     | variable              | reviewer feedback integration (post-mail)|
 
-| Tier            | Items                                  | Cumulative effort |
-|-----------------|----------------------------------------|-------------------|
-| Quick wins      | gap-1, gap-3, func-4, func-7           | ~4.5h             |
-| Stage 3 closing | func-5 (partial diag DONE 2026-05-02)  | ~1 day            |
-| Stage 4 prep    | func-3 (data block RS)                 | 2-4 weeks         |
-| Upstream prep   | func-6 (fsck), upstream-1 (xfstests)   | 3-5 weeks         |
-| HPC activation  | func-8, func-9                         | 7-9 days hardware-gated |
+### Tier 2 - Quality (visible to reviewer, not strictly blocking)
+
+| Item    | Effort  | Note                                          |
+|---------|---------|-----------------------------------------------|
+| gap-1   | 2-3h    | RAF acronym renaming                          |
+| gap-3   | 1-2 min | kernel module redeploy                        |
+| gap-4   | 0       | tarball audit-trail (informational)           |
+| func-4  | 1.5h    | RadFI seed reproducibility                    |
+| func-5  | 30 min+ | CRC32 mismatch scheme=2 diagnostic            |
+| func-7  | 30 min  | Phase 09 post-forensics restructure           |
+| func-10 | ~10 LOC | phys bound check in lookup_or_alloc_phys      |
+| func-11 | ~30 LOC | pointer-corruption forensic counter           |
+
+### Tier 3 - Nice-to-have (post-RFC or scope-extension)
+
+| Item                                                | Effort | Note                          |
+|-----------------------------------------------------|--------|-------------------------------|
+| func-8                                              | 2-3 d  | multi-node FS-test            |
+| func-9                                              | 7-9 d  | HPC stack activation          |
+| All `beamfs-bench evolution:` items (open)          | varies | bench infrastructure          |
+| All `beamfs-bench improvement:` items               | varies | bench infrastructure          |
+| All `radfi improvement:` items                      | varies | companion module evolution    |
+| All `beamfs improvement:` items                     | ongoing| discipline + observability    |
+
+func-8 and func-9 are hardware-gated (15 USB homogeneous + hub budget).
+
+### Cumulative effort to first RFC mail (Tier 1 only)
+
+~400h, ~3-4 months sprint solo or ~8 months calendar at sustainable
+pace. Critical path = upstream-7 (100h paper) + upstream-8 (75h user
+base) + func-3 (2-4 weeks Stage 4) + func-6 (3-5 days fsck) ≈ 70% of
+the budget.
 
 ---
 
@@ -799,5 +981,9 @@ This is a recommendation, not a prescription.
 - `Documentation/architecture-current.md` : current runtime architecture
 - `Documentation/threat-model.md` : EM threat model + v4 journal nomenclature
 - `Documentation/system-architecture.md` : positioning vs dm-verity, squashfs, VxWorks, PikeOS
-- `Documentation/roadmap.md` : Stage 3 / Stage 4 / Stage 5 plan
+- `Documentation/roadmap.md` : Stage 3 / Stage 4 / Stage 5 plan ; Phase 0-8 mainline preparation roadmap (DoD per phase)
+- `Documentation/mainline-scope.md` : v5 position, threat model, capabilities matrix, out-of-scope
+- `Documentation/format-v5-design.md` : v5 on-disk format design (skeleton, populated phase by phase)
+- `Documentation/fsck.beamfs.md` : fsck.beamfs design (Phase 2 deliverable)
 - `Documentation/known-limitations.md` : current scheme limitations
+- `context/context-recadrage.md` : R0-R30 operational rules + Phase 0 strategic acquis (PRIVATE)
