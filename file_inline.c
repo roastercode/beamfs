@@ -459,8 +459,11 @@ out_brelse:
 /* per index, INLINE disk block carries BEAMFS_DATA_INLINE_BYTES (3824) user */
 /* bytes. Therefore a folio at index N spans user-byte range                 */
 /*   [N * PAGE_SIZE, (N+1) * PAGE_SIZE)                                      */
-/* and intersects EXACTLY one or two consecutive INLINE disk blocks (never   */
-/* three, since 4096 < 2 * 3824).                                            */
+/* and intersects 1, 2, or 3 consecutive INLINE disk blocks. Tri-block       */
+/* coverage occurs when k_first > 2*INLINE_BYTES - PAGE_SIZE (= 3552), at    */
+/* folio indices N where (N * PAGE_SIZE) mod INLINE_BYTES > 3552. With       */
+/* INLINE_BYTES=3824 and PAGE_SIZE=4096, this is periodic with period 14    */
+/* (folios N=14, 28, 42, ...).                                              */
 /*                                                                           */
 /* Outputs:                                                                  */
 /*   *out_b_first         disk block index covering folio_start_byte         */
@@ -471,12 +474,15 @@ out_brelse:
 /*   *out_folio_user_bytes total user bytes in this folio (1..PAGE_SIZE)     */
 /*                                                                           */
 /* Invariants on success:                                                    */
-/*   out_b_last == out_b_first || out_b_last == out_b_first + 1              */
+/*   out_b_first <= out_b_last <= out_b_first + 2                            */
 /*   1 <= out_len_in_b_last <= BEAMFS_DATA_INLINE_BYTES                      */
 /*   out_k_first < BEAMFS_DATA_INLINE_BYTES                                  */
 /*   if b_last == b_first: out_folio_user_bytes == out_len_in_b_last         */
-/*   else: out_folio_user_bytes ==                                           */
+/*   else if b_last == b_first + 1: out_folio_user_bytes ==                  */
 /*           (BEAMFS_DATA_INLINE_BYTES - k_first) + out_len_in_b_last        */
+/*   else (b_last == b_first + 2): out_folio_user_bytes ==                   */
+/*           (BEAMFS_DATA_INLINE_BYTES - k_first) + BEAMFS_DATA_INLINE_BYTES */
+/*           + out_len_in_b_last                                             */
 /*                                                                           */
 /* Returns 0 on success, -ERANGE if folio_index is at or beyond i_size       */
 /* (caller should zero-fill and end_read in that case, per VFS).             */
@@ -512,10 +518,21 @@ static int beamfs_inline_folio_coverage(struct inode *inode,
 
 	fub = (u32)(folio_end_byte - folio_start_byte);
 
+	/*
+	 * lbl (len in b_last) is the number of user bytes the folio occupies
+	 * within b_last. For bi-block (b_last == b_first + 1), this is
+	 * fub - (INLINE_BYTES - k_first). For tri-block (b_last == b_first + 2,
+	 * which occurs when k_first > 2*INLINE_BYTES - PAGE_SIZE = 3552),
+	 * the b_first slice is (INLINE_BYTES - k_first), the intermediate is
+	 * INLINE_BYTES full, and lbl is fub - (INLINE_BYTES - k_first) - INLINE_BYTES.
+	 * General formula: lbl = fub - (INLINE_BYTES - k_first)
+	 *                            - (b_last - b_first - 1) * INLINE_BYTES
+	 */
 	if (b_last == b_first)
 		lbl = fub;
 	else
-		lbl = fub - (BEAMFS_DATA_INLINE_BYTES - k_first);
+		lbl = fub - (BEAMFS_DATA_INLINE_BYTES - k_first)
+			  - (u32)(b_last - b_first - 1) * BEAMFS_DATA_INLINE_BYTES;
 
 	*out_b_first         = b_first;
 	*out_k_first         = k_first;
@@ -594,13 +611,16 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 
 		if (b == b_first) {
 			slice_offset_in_block = k_first;
-			slice_length = (b_last == b_first)
+			slice_length = (b == b_last)
 				? len_in_b_last
 				: (BEAMFS_DATA_INLINE_BYTES - k_first);
-		} else {
-			/* b == b_first + 1 == b_last */
+		} else if (b == b_last) {
 			slice_offset_in_block = 0;
 			slice_length = len_in_b_last;
+		} else {
+			/* Intermediate block (tri-block case): full INLINE block */
+			slice_offset_in_block = 0;
+			slice_length = BEAMFS_DATA_INLINE_BYTES;
 		}
 
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
@@ -811,13 +831,16 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 
 		if (b == b_first) {
 			slice_offset_in_block = k_first;
-			slice_length = (b_last == b_first)
+			slice_length = (b == b_last)
 				? len_in_b_last
 				: (BEAMFS_DATA_INLINE_BYTES - k_first);
-		} else {
-			/* b == b_first + 1 == b_last */
+		} else if (b == b_last) {
 			slice_offset_in_block = 0;
 			slice_length = len_in_b_last;
+		} else {
+			/* Intermediate block (tri-block case): full INLINE block */
+			slice_offset_in_block = 0;
+			slice_length = BEAMFS_DATA_INLINE_BYTES;
 		}
 
 		/* Serialize block allocation against concurrent writeback. */

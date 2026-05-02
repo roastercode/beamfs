@@ -14,16 +14,16 @@
 work across the three beamfs repositories. Each item carries an empirical
 status, an effort estimate, and a cross-repo reference.
 
-**Last updated**: 2026-05-01
+**Last updated**: 2026-05-02
 
 **Cross-repository scope**:
 
 | Repo                                    | Branch          | Visibility | Latest commit |
 |-----------------------------------------|-----------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `mainline-prep` | PRIVATE    | `04ab5bd`     |
+| `roastercode/beamfs-devel`              | `mainline-prep` | PRIVATE    | `390676b`     |
 | `roastercode/beamfs` (vitrine, frozen)  | `mainline-prep` | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `main`          | PRIVATE    | `3a47e91`     |
-| `roastercode/beamfs-bench`              | `main`          | PRIVATE    | `88e748e`     |
+| `roastercode/yocto-beamfs`              | `main`          | PRIVATE    | `99cf71e`     |
+| `roastercode/beamfs-bench`              | `main`          | PRIVATE    | `6c1e0c0`     |
 
 ---
 
@@ -313,6 +313,107 @@ inodes *in addition to* INLINE data blocks. Combined coverage:
 
 **Defers** : Phase 1 of mainline-prep roadmap (50h budget).
 Cf `Documentation/format-v5-design.md` section 4.2 (profile flags).
+
+---
+
+### func-13 : INLINE multi-block tri-block folio coverage [CLOSED 2026-05-02]
+
+**Status** : CLOSED 2026-05-02 (commit pending in this session)
+**Effort actual** : 1.5h (diagnosis 1h + patch 30min)
+**Repo** : beamfs (file_inline.c)
+**Discovered** : 2026-05-02 substep 9 xfstests preparation
+
+**Symptom** : Files between 17 and 524 INLINE blocks (~65 KB to ~2 MB)
+became corrupted after umount/remount. Read returned EINVAL at offset
+57344 (= folio index 14, the first tri-block folio). The frontier was
+deterministic and reproducible.
+
+**Root cause** : `beamfs_inline_folio_coverage` correctly computed
+b_first/b_last for tri-block folios (when k_first > 2*INLINE_BYTES -
+PAGE_SIZE = 3552, occurring at folio indices 14, 28, 42, ...). But the
+code documentation and the loops in `beamfs_inline_read_folio` and
+`beamfs_inline_writeback_folio` assumed b_last == b_first OR
+b_first + 1 (bi-block max). The `else` branch in both loops applied
+b_last semantics (slice_offset=0, slice_length=len_in_b_last) to ALL
+b > b_first, including intermediate blocks in the tri-block case. This
+caused intermediate blocks to be written/read with wrong slice
+parameters, leading to silent on-disk corruption.
+
+The bug was masked by:
+- Substep 4-7 canary scope: file size 8000 bytes = 3 INLINE blocks
+  (always bi-block max, never tri-block).
+- Substep 8 mmap canary: 8000 bytes (same scope).
+- Tests with file content not flushed: pagecache served reads correctly
+  even when on-disk content was corrupted.
+
+**Fix** : Three-way branch in read_folio + writeback_folio loops:
+- b == b_first : slice [k_first, INLINE_BYTES) or [k_first, k_first+lbl)
+  if b_last == b_first
+- b == b_last : slice [0, len_in_b_last)
+- b intermediate (tri-block case) : slice [0, INLINE_BYTES) full block
+
+Plus correction of `lbl` calculation in `folio_coverage` for tri-block:
+`lbl = fub - (INLINE_BYTES - k_first) - (b_last - b_first - 1) * INLINE_BYTES`.
+
+Doc comments updated to reflect "1, 2, or 3 blocks" reality and to
+document the tri-block periodicity (every 14 folios).
+
+**Validation** :
+- Frontier scan N=1..50: 18/18 OK after fix (was: N>=17 CORRUPTED).
+- Large file scan 100 KB..1500 KB: all OK after fix.
+- 2000 KB CORRUPTED with `iblock 524 beyond v1 indirect capacity` -
+  this is the v1 format limit by design (12 direct + 512 indirect
+  pointers = 524 blocks max ~ 2 MB), not a bug.
+- 0 BUG/Oops/WARN in dmesg.
+- checkpatch --strict: 0 errors / 0 warnings / 0 checks (90 lines).
+
+**Defers / dependencies** : Closes the substep 9 xfstests blocker for
+files in [3 INLINE blocks, 524 INLINE blocks] = ~12 KB to ~2 MB range.
+Substep 9 xfstests subset can now proceed.
+
+---
+
+### bench-1 : beamfs-bench INLINE frontier scan methodology [NEW 2026-05-02]
+
+**Status** : not implemented
+**Effort** : 4-6h
+**Repo** : beamfs-bench
+
+**Motivation** : The tri-block bug (func-13) was discovered manually
+during substep 9 preparation, not by automated regression testing. A
+similar regression in future could go undetected if the test suite
+does not exercise the full INLINE folio-coverage state space.
+
+**Proposed scope** : Add a new beamfs-bench scope or sub-scope (e.g.
+`beamfs-bench inline-frontier`) that systematically tests file sizes
+across the INLINE block boundary regions:
+
+1. **Frontier scan** : Test sizes N * BEAMFS_DATA_INLINE_BYTES for
+   N in {1..50, 100, 200, 500} - covers tri-block periodicity (every
+   14th folio) and the v1 indirect capacity boundary (~524 blocks).
+
+2. **Read/write integrity** : For each size, write urandom content,
+   sync, capture sha256 pre-umount, umount/remount, verify sha256
+   matches. Report any divergence as CORRUPTED.
+
+3. **Mmap sub-scope** : Same scan via mmap+msync paths to cover the
+   address_space ops used by mmap-write workloads (substep 8).
+
+4. **Truncate sub-scope** : Same sizes via ftruncate (extends + shrinks)
+   to cover the setattr path (substep 6).
+
+5. **Multi-file** : Mix of file sizes in same FS to exercise allocator
+   and indirect block sharing-or-not patterns.
+
+6. **Output format** : Compatible with manifest.json schema, signed
+   GPG audit trail like other scopes.
+
+**Defers / dependencies** : independent. Highly synergistic with
+substep 9 xfstests (which exercises some but not all of these patterns
+through generic test programs). Adding inline-frontier scope means
+that any future kernel module change is regression-tested before
+xfstests is even invoked, with deterministic boundaries (xfstests
+generic tests don't deterministically hit folio-14 etc).
 
 ---
 
