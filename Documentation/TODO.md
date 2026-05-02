@@ -415,6 +415,155 @@ that any future kernel module change is regression-tested before
 xfstests is even invoked, with deterministic boundaries (xfstests
 generic tests don't deterministically hit folio-14 etc).
 
+### bench-2 : worker.sh attack/verify semantic mismatch [NEW 2026-05-02]
+
+**Status** : new finding from substep 9 R19 run 20260502T133223Z  
+**Effort** : 2-3h redesign + worker.sh refactor  
+**Repo** : beamfs-bench (worker.sh + multifs.rs + cluster.rs)
+
+Empirical : after the d_file_type DT_REG=8 / DT_DIR=4 alignment fix
+(commit a7bdc9a beamfs + 71672aa yocto-beamfs), `find -type f` on a
+mounted beamfs returns the actual files, which exposes a long-standing
+semantic flaw in `worker.sh attack`/`worker.sh verify` and their
+cluster equivalents.
+
+The `attack` action does:
+  head -c 3072 /dev/urandom > $MNT/dir-B/file-B2.bin
+
+This intentionally rewrites file-B2.bin with new random bytes BEFORE
+the `verify` action recomputes hashes. So the verdict path
+`DIFFS_PRE_REMOUNT == 0 -> RECOVERED` is impossible by construction:
+the file was deliberately changed at the user level, the FS persisted
+the new content correctly (which is the right behaviour), and verify
+sees a hash difference.
+
+Why this masquerade worked historically: when d_file_type=1 was
+written on disk (interpreted as DT_FIFO by the kernel), `find -type f`
+returned an empty set. POST_FILE was empty in cluster_verify, PRE_FILE
+also empty -> diff(empty, empty) = 0 -> "RECOVERED". Pure vacuous
+truth. The multifs verify path catches it via `! -s POST_FILE` and
+emits FS_PANIC, but cluster_verify has no such guard.
+
+Required redesign:
+
+1. `attack` should inject RadFI on READ of pristine files, not
+   overwrite them. Pattern: arm RadFI on target_block of an existing
+   data block, drop_caches, cat that file. Bit-flips happen in flight
+   on the bio path; RS-FEC at decode_block_into_buf either corrects
+   or returns EIO.
+
+2. `verify` should check that `cat $TARGET_FILE` returns bytes
+   matching the pre-attack sha256 (RS-FEC corrected, RECOVERED) or
+   returns EIO (uncorrectable, FS_PANIC).
+
+3. Add an explicit `RS_CORRECTED_COUNT` field by parsing dmesg for
+   `beamfs/inline: ino=N iblock=I subblock=S: K symbol(s) corrected`
+   between attack and verify timestamps.
+
+Until this is done, all multifs/cluster verdicts on beamfs are not
+meaningful as RS-FEC functional proof. The pipeline overall_rc=0
+even with CORRUPTED_DATA 12/12 because the worker emits a "verdict"
+not a failure code; this is by design (the bench is descriptive),
+but the semantics of the verdict itself is broken.
+
+Forensic dmesg evidence shows RS-FEC IS firing and correcting (e.g.
+run 20260502T133223Z compute01: ino=10 iblock=0 subblock=0/8/13
+corrected; bitmap subblock 11 corrected). So the FS works; it is the
+test that lies.
+
+### bench-3 : cluster_*/multifs duplication in worker.sh [NEW 2026-05-02]
+
+**Status** : new finding from substep 9 review  
+**Effort** : 4-6h refactor + tests  
+**Repo** : beamfs-bench (worker.sh)
+
+`worker.sh` defines `setup`/`attack`/`verify` (multifs scope, master
+USB targets) and `cluster_setup`/`cluster_attack`/`cluster_verify`
+(cluster scope, `/data` on each node). The two trios share ~80% of
+the logic: same dir-A/B/C layout, same 9 random files, same
+`find -type f -exec sha256sum`, same RadFI arm/disarm sequence, same
+verdict ladder.
+
+Differences are minimal: cluster uses `$SUBDIR=/data/beamfs-bench-$TS`
+instead of `$MNT=/mnt/test-$FS`, cluster_verify lacks the `! -s
+POST_FILE -> FS_PANIC` guard, and cluster_attack hard-codes `vdb`.
+
+This duplication is the reason bug-2 was discovered late: the same
+flaw lives twice. A common helper (`_setup_layout`, `_run_attack`,
+`_compute_verdict`) that both paths call would have caught it.
+
+### mkfs-1 : mkfs.beamfs robustness + integration tests in beamfs-bench [NEW 2026-05-02]
+
+**Status** : not implemented
+**Effort** : 1-2 days
+**Repo** : yocto-beamfs (mkfs-beamfs userspace tool) + beamfs-bench
+
+**Motivation** : Multiple issues observed during substep 9 R19 forensic
+investigation suggest that mkfs.beamfs and the resulting filesystem
+state are not as robust as the kernel module:
+
+1. Root directory baseline nlink count appears wrong (observed
+   Links=9 then Links=10 across mkfs invocations on freshly zeroed
+   /dev/vdb, expected Links=2). Possibly a stale VFS buffer cache
+   issue from prior mounts that was never properly invalidated, but
+   could also be a real bug in how mkfs initializes the root inode
+   on-disk i_nlink field.
+
+2. After mkfs, `mkdir <subdir>` returns "File exists" even on the
+   freshly formatted filesystem, suggesting either (a) the directory
+   block of the root inode is not properly zeroed at mkfs time and
+   contains residual dirents from a previous filesystem, or (b)
+   the kernel module sees stale buffer heads and reports phantom
+   entries.
+
+3. multifs scenario beamfs verdict regressed from RECOVERED 3/3
+   (manifest 092901Z, pre-K) to FS_PANIC 3/3 (manifest 112736Z,
+   post-K). Forensics show 0 dmesg WARN/BUG/Oops, just "read failed"
+   from userspace `find ... | sha256sum` returning empty. Root cause
+   is not yet isolated and may be:
+   - Genuine regression introduced by commit K (tri-block fix)
+     interacting with a mkfs-time edge case
+   - Pre-existing mkfs bug masked in cluster scope (which uses a
+     different /dev/vdb backing) but exposed in multifs scope
+     (USB passthrough disk on compute01 vdg)
+
+**Proposed scope** :
+
+1. **mkfs.beamfs hardening** :
+   - Add explicit memset(0) of root directory block(s) at mkfs time,
+     before writing the `.` and `..` initial entries.
+   - Verify on-disk root inode i_nlink is initialized to 2.
+   - Add `--zero-data` flag (default on for safety) that zeros the
+     full data area before writing the bitmap. Already idempotent
+     in design but add explicit verification.
+   - Add `mkfs.beamfs --check` post-format pass that re-reads the
+     filesystem from disk and verifies all expected invariants
+     (root inode mode, nlink, dirent count = 2 for `.` and `..`,
+     superblock CRC, bitmap CRC, etc).
+
+2. **beamfs-bench mkfs-roundtrip scope** :
+   - Wipe device with dd zero
+   - mkfs.beamfs
+   - mount + sync + verify root nlink == 2, root dirents == [".", "..", "canary"]
+   - Create N subdirs, M files per subdir, mix of sizes (1 INLINE,
+     N INLINE direct, N INLINE indirect, tri-block aligned)
+   - sync + drop_caches + umount + remount
+   - Verify all entries readable, all sha256 match, root nlink correct
+   - Repeat with different mkfs flags (-s inline, -s inode_universal,
+     -N <inodes>, ...)
+
+3. **Integration in R19 pipeline** :
+   - Add as new phase between bootstrap and analyse
+   - Failure must propagate to overall_rc to avoid silent regression
+     like the one observed in 112736Z
+
+**Defers / dependencies** : Should run BEFORE multifs phase in R19
+to detect mkfs/baseline bugs early. Resolves the diagnosis-by-bisection
+problem where multifs regressions could be caused by either kernel
+or mkfs.
+
+---
+
 ---
 
 ## Priority matrix (recommendation)
