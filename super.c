@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Superblock operations
+ * beamfs - Superblock operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
@@ -701,7 +701,7 @@ static int beamfs_get_tree(struct fs_context *fc)
  * beamfs_reconfigure - handle mount -o remount
  *
  * xfstests calls remount,ro after each test to verify filesystem
- * integrity. BEAMFS accepts the reconfigure request without
+ * integrity. beamfs accepts the reconfigure request without
  * taking any action - ro/rw transitions are handled by the VFS.
  */
 static int beamfs_reconfigure(struct fs_context *fc)

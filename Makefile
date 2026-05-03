@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# BEAMFS - Fault-Tolerant Radiation-Robust Filesystem
+# beamfs - resilient filesystem
 #
 
 obj-$(CONFIG_BEAMFS_FS) += beamfs.o

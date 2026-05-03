@@ -254,7 +254,7 @@ struct beamfs_rs_event {
  *
  * BINS    -- number of histogram bins over the codeword position range.
  *            Power of 2 chosen so that bin_index = pos * BINS / code_len
- *            fits in u32 arithmetic without overflow for any BEAMFS
+ *            fits in u32 arithmetic without overflow for any beamfs
  *            codeword length (max 239 bytes).
  * Q       -- fractional bits in the Q-format LUT (Q16.16 = 16 frac bits).
  *
@@ -291,9 +291,9 @@ struct beamfs_rs_event {
  *         (8 -> 13 subblocks). See Documentation/format-v4.md.
  *
  * Mount policy: strict equality with BEAMFS_VERSION_CURRENT.
- * BEAMFS is a fresh format (v1); no legacy v2/v3 images exist to
+ * beamfs is a fresh format (v1); no legacy v2/v3 images exist to
  * migrate from. Volumes created with mkfs.ftrfs (different magic)
- * are NOT mountable as BEAMFS by design (distinct filesystem).
+ * are NOT mountable as beamfs by design (distinct filesystem).
  */
 #define BEAMFS_VERSION_V1        1
 #define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V1

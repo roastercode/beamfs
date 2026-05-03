@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - EDAC layer: CRC32 + Reed-Solomon FEC
+ * beamfs - EDAC layer: CRC32 + Reed-Solomon FEC
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Reed-Solomon encoding/decoding uses the kernel's lib/reed_solomon

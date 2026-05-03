@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Block and inode allocator
+ * beamfs - Block and inode allocator
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Both block and inode allocators use in-memory bitmaps loaded at mount
