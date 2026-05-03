@@ -799,13 +799,48 @@ passes).
 
 **Sub-1.A status** : CLOSED 2026-05-03 (commit `c44fc96` beamfs +
 `03bc009` yocto-beamfs lockstep). `BEAMFS_VERSION_V5 = 5` declared
-in `beamfs.h` alongside `BEAMFS_VERSION_V1 = 1`.
-`BEAMFS_VERSION_CURRENT` remains pinned to V1: no-op runtime, no
-build behaviour change. Symbol now available for sub-1.B-1.F to
-reference. Validated R19 `beamfs-bench full` exit 0.
+in `beamfs.h` alongside `BEAMFS_VERSION_V1 = 1`. Symbol available
+for sub-1.B-1.F to reference. v1 still mountable at this point.
 
-**Sub-1.B-1.F** : pending. Reference plan in commit message of
-c44fc96.
+**Sub-1.B status** : CLOSED 2026-05-03 (no-code closure). The three
+`BEAMFS_FEAT_(COMPAT|INCOMPAT|RO_COMPAT)_SUPP` masks were already
+declared in `beamfs.h` (lines 370-372) with value `0ULL`, which is
+exactly the v5.0 minimal RFC-able policy: no feature bit supported,
+all 18 bits (3 COMPAT + 4 RO_COMPAT + 11 INCOMPAT) reserved for
+future evolution (v5.1+). Mount-time enforcement at super.c:570-574
+already references these masks. No code change required; sub-1.B
+closed by documentation in this TODO entry.
+
+**Sub-1.C status** : CLOSED 2026-05-03 (commit `1f56e9b` yocto-beamfs).
+`mkfs.beamfs --profile=embedded` long-option added via `getopt_long`.
+When `--profile=embedded` is passed, mkfs writes `s_version=5`;
+otherwise the default behaviour was preserved at V1 (intentional
+gate before sub-1.D). Runtime-validated host-side: gcc clean,
+`s_version=5` verified at struct offset 56 with od.
+
+**Sub-1.D status** : CLOSED 2026-05-03 (commit `83708da` beamfs +
+`458817b` yocto-beamfs lockstep). Two atomic changes:
+  - kernel `BEAMFS_VERSION_CURRENT` switched V1 -> V5; mount of
+    pre-v5 images now fails with "unsupported on-disk version 1
+    (this kernel requires v5)".
+  - mkfs.beamfs `format_version` default bumped V1 -> V5 in lockstep,
+    so all newly-created images are v5 by default;
+    `--profile=embedded` becomes idempotent (still valid, adds the
+    `[embedded]` info-line tag for explicit traceability).
+
+R19 cycle on the bundle (sub-1.A+B+C+D): `beamfs-bench full
+--auto-confirm` exit 0, cluster Phase 6 12/12 VERIFIED, Phase 5
+multifs beamfs MOUNTED 3/3 with HASH_PRE==HASH_POST under RadFI
+v0.1.3 attack at prob=1k/100k/1M (FLIP_DELTA up to 8 with full RS
+recovery). beamfs.ko sha256 changed from `0c0bbe42...` to
+`e955b536...`, confirming the V5 binary is what's loaded in-VM.
+
+**Sub-1.E** : pending -- finalise `Documentation/format-v5.md`
+sections 4-12 (currently TBD/TODO from Phase 0). Reference plan in
+`Documentation/mainline-scope.md` section 5.
+
+**Sub-1.F** : pending -- xfstests + checkpatch baseline pass on the
+v5 mount path. Reference plan in roadmap.md Phase 1 final gate.
 
 **DoD** : `beamfs.h` v5 + `mkfs.beamfs` userspace, format mountable
 R/W on device.
