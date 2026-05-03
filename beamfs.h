@@ -291,13 +291,19 @@ struct beamfs_rs_event {
  *         (8 -> 13 subblocks). See Documentation/format-v4.md.
  *
  * Mount policy: strict equality with BEAMFS_VERSION_CURRENT.
- * beamfs is a fresh format (v1); no legacy v2/v3 images exist to
- * migrate from. Volumes created with mkfs.ftrfs (different magic)
- * are NOT mountable as beamfs by design (distinct filesystem).
+ * As of Phase 1 sub-1.D, BEAMFS_VERSION_CURRENT = V5 (v5.0 minimal
+ * RFC-able, mainline target). v1 images created by mkfs.beamfs
+ * pre-Phase-1 are NOT mountable; they require offline reformat via
+ * `mkfs.beamfs --profile=embedded`. Dual-format in-kernel parsing
+ * is intentionally avoided (doubles audit surface for KASAN /
+ * syzkaller for no operational benefit on a niche FS).
+ *
+ * Volumes created with mkfs.ftrfs (different magic) are NOT
+ * mountable as beamfs by design (distinct filesystem).
  */
 #define BEAMFS_VERSION_V1        1
 #define BEAMFS_VERSION_V5        5
-#define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V1
+#define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V5
 
 /*
  * Data protection scheme values for s_data_protection_scheme.
