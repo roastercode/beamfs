@@ -457,7 +457,7 @@ phase à n'importe quel moment.
 
 | Phase | Effort | Scope court                                 |
 |-------|--------|---------------------------------------------|
-| 0     | 3 h    | Cadrage formalisé (mainline-scope, format-v5-design, fsck.beamfs, roadmap update) |
+| 0     | 3 h    | Cadrage formalisé (mainline-scope, format-v5, fsck.beamfs, roadmap update) |
 | 1     | 50 h   | Format v5.0 minimal RFC-able                |
 | 2     | 30 h   | fsck.beamfs MVP                             |
 | 3     | 12 h   | Multiblock read_folio sub-steps 4-10        |
@@ -514,7 +514,7 @@ Migration entre profiles via `tune.beamfs -O +flags` (in-place).
 Migration depuis ext4/btrfs/xfs via copie + rsync.
 
 11 INCOMPAT bits réservés, 4 RO_COMPAT bits réservés, 3 COMPAT
-bits réservés. Détails dans `Documentation/format-v5-design.md`.
+bits réservés. Détails dans `Documentation/format-v5.md`.
 
 ### Trajectoire RFC mainline
 
@@ -546,7 +546,7 @@ actuels.
 
 **3824/4096 mismatch v4** : décision option A (garder + multiblock
 sub-steps 4-10) OU option B (INODE_UNIVERSAL séparé). Documentée
-dans `format-v5-design.md` section 4.3, décision pendante Phase 1.
+dans `format-v5.md` section 4.3, décision pendante Phase 1.
 
 **Allocator scaling** : multi-bitmap chained insuffisant pour 16 EB.
 Block groups (ext-style) suffit jusqu'à 256 TB. Btree allocator
@@ -583,7 +583,7 @@ branche `mainline-prep`)
 
 b84e61a docs(fsck): add fsck.beamfs.md design document
 a46c462 docs(scope): add mainline-scope.md formalizing v5 trajectory
-0c0b590 docs(format): add format-v5-design.md skeleton
+0c0b590 docs(format): add format-v5.md skeleton
 c604c85 docs(roadmap): add 8-phase mainline preparation roadmap
 
 

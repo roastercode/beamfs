@@ -96,7 +96,7 @@ Documentation/
 ├── known-limitations.md       -- gap impl vs threat model
 ├── roadmap.md                 -- Phase 0-8 + Stage 1.5-5
 ├── format-v4.md               -- on-disk v4 (normative current)
-├── format-v5-design.md        -- on-disk v5 (RFC-able future)
+├── format-v5.md               -- on-disk v5 (RFC-able future)
 ├── fsck.beamfs.md             -- offline checker design
 ├── testing.md                 -- test methodology
 ├── empirical-state.md         -- empirical state snapshot
@@ -174,7 +174,7 @@ Estimated total : 405h. beamfs-bench saved ~85h regression budget.
 - Current state ? → `context/STATUS.md`
 - Deferred work ? → `context/TODO.md`
 - Threat model ? → `Documentation/threat-model.md`
-- On-disk format ? → `Documentation/format-v4.md` (current) + `format-v5-design.md` (future)
+- On-disk format ? → `Documentation/format-v4.md` (current) + `format-v5.md` (future)
 - Bench harness ? → `~/git/beamfs-bench/README.md`
 - Yocto image ? → `yocto-beamfs/recipes-core/images/hpc-arm64-research-beamfs.bb`
 - Plan ? → `Documentation/roadmap.md`
