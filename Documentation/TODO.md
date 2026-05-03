@@ -16,20 +16,20 @@ opener (read top to bottom in 5 minutes for context). It supersedes
 fragmentary status across `roadmap.md`, `known-limitations.md`, and
 prior session handoffs.
 
-**Last updated**: 2026-05-02
+**Last updated**: 2026-05-03
 
 **Cross-repository scope**:
 
 | Repo                                    | Branch                  | Visibility | Latest commit |
 |-----------------------------------------|-------------------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `2253564`     |
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `749ff0e`     |
 | `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `8e5ee1c`     |
-| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `f007934`     |
-| `roastercode/radfi`                     | `main`                  | PRIVATE    | `bcf13d3`*    |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `81c57ef`     |
+| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `e6c7441`     |
+| `roastercode/radfi`                     | `main`                  | PRIVATE    | `1fb9aeb`     |
 
-\* radfi has uncommitted edits in working tree (`radfi.h`,
-`radfi_hooks_blk.c`) -- flagged for next radfi session.
+All 4 PRIVATE repos pushed and clean as of 2026-05-03 R19 validation
+(post-radfi v0.1.3, beamfs-bench full exit 0 on cluster 12/12 VERIFIED).
 
 ---
 
@@ -797,6 +797,16 @@ passes).
 
 ### 4.2 Phase 1 - Format v5.0 minimal RFC-able (50h)
 
+**Sub-1.A status** : CLOSED 2026-05-03 (commit `c44fc96` beamfs +
+`03bc009` yocto-beamfs lockstep). `BEAMFS_VERSION_V5 = 5` declared
+in `beamfs.h` alongside `BEAMFS_VERSION_V1 = 1`.
+`BEAMFS_VERSION_CURRENT` remains pinned to V1: no-op runtime, no
+build behaviour change. Symbol now available for sub-1.B-1.F to
+reference. Validated R19 `beamfs-bench full` exit 0.
+
+**Sub-1.B-1.F** : pending. Reference plan in commit message of
+c44fc96.
+
 **DoD** : `beamfs.h` v5 + `mkfs.beamfs` userspace, format mountable
 R/W on device.
 
@@ -1052,6 +1062,15 @@ Decision impacts Phase 8 cover letter strategy.
 
 ### 5.3 Block size policy v5
 
+**Status** : DECIDED 2026-05-03 (decision already locked in Phase 0
+via `Documentation/mainline-scope.md` section 4.3, this entry
+consolidates). Strict 4096-byte block size for v5.0; `BIGALLOC`
+feature flag (bit 2, declared in `beamfs.h`) handles cluster_size
+> 4 KiB. `LARGE_BLOCK` (bit 10) reserved but not activable in v5.0
+(would multiply review surface vs page-cache pitfalls; deferred
+to v5.1+). No further work required for sub-1.C `mkfs.beamfs
+--profile=embedded`: profile writes block_size=4096 unconditionally.
+
 `mainline-scope.md` declares 4096 fixed. But `BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK`
 flag bit (10) is reserved for `block_size > PAGE_SIZE`.
 Decision : keep 4096 strict for v5.0 RFC, defer LARGE_BLOCK to v5.x ?
@@ -1188,6 +1207,51 @@ those drifts are now repaired by the same actions.
 | README en violation R17 | 3         | 1 (beamfs OK ; yocto + radfi pending) |
 
 ---
+
+### 7.6 R17 cleanup post-audit (2026-05-03 - applied)
+
+Audit R17 (canonical tagline `beamfs - resilient filesystem`,
+all lowercase, hyphen-minus) revealed FTRFS-lineage descriptors
+still present in code-side metadata that the 2026-05-02 audit had
+missed (focused on Markdown only). Fixes applied lockstep beamfs
+<-> yocto-beamfs in commit `d02b1ec` + `516e26d`:
+
+- `Makefile` descriptor: `BEAMFS - Fault-Tolerant Radiation-Robust
+  Filesystem` -> `beamfs - resilient filesystem`
+- `Kconfig`: header comment, tristate label
+  (`BEAMFS Beam Electromagnetic File System (EM resilience)` ->
+  `beamfs - resilient filesystem`), 2 prose lines in help text
+- 8 SPDX headers in `.c` files (alloc, dir, edac, file, file_inline,
+  inode, namei, super): `BEAMFS - <X>` -> `beamfs - <X>`
+- 6 prose comments in `.c`/`.h` (file_inline:550,569; namei:523;
+  super:704; beamfs.h:257,294,296)
+- `recipes-kernel/radfi/radfi-module_*.bb` DESCRIPTION: `BEAMFS v1`
+  -> `beamfs v1` (commit `81c57ef` yocto-beamfs)
+- `radfi/README.md`: scientific positioning section, one
+  occurrence (commit `1fb9aeb` radfi standalone)
+
+Untouched (legitimate): C macro identifiers (`BEAMFS_*`,
+`CONFIG_BEAMFS_FS`, `BEAMFS_MAGIC`); academic citations of FTRFS
+(Fuchs, Langer, Trinitis 2015) in Kconfig help text and READMEs;
+audit log entries in `Documentation/archive/` and prior TODO sections.
+Lockstep R9 verified post-patch: 11/11 source files identical
+beamfs <-> yocto-beamfs.
+
+### 7.7 R31 added to context-recadrage.md (2026-05-03 - applied)
+
+Operational rule R31 added to recadrage (commit `749ff0e`)
+following Phase 0.7 identity check failure during sub-1.A push
+session. R31 enforces that any commit touching kernel files
+(`.c`/`.h`) in lockstep beamfs <-> yocto-beamfs must verify the
+changes are reflected in the `beamfs.ko` loaded by the cluster
+VMs BEFORE invoking `beamfs-bench full` and BEFORE pushing.
+
+Founding incident: QEMU was actively writing to
+`beamfs-master.ext2` during a redeploy `cp`, causing rootfs to
+diverge from canonical. Fix applied: `virsh destroy` + `cp -f`
+canonical .ext2 + relaunch. Subsequently codified as a
+preventive check inside `beamfs-bench` itself (cf section 13
+evolution closure).
 
 ## 8. Documentation/code coherence gaps (4 items)
 
@@ -1841,6 +1905,18 @@ or mkfs.
 
 ### radfi improvement: targeting precision (range/list/file-aware)
 
+**Status** : PARTIAL 2026-05-03. First sub-item closed: `target_block`
+filter extended to the bio-layer hook (commit `1fb9aeb` radfi v0.1.3).
+Previously `target_block` applied only on the fs hook (sb_bread /
+submit_bh path); now also enforced on the blk hook
+(submit_bio_noacct path), unifying targeting semantics across both
+transport layers. Validated R19 with `RADFI_VERSION 0.1.3` loaded
+in-VM, `FLIP_DELTA=2/8` at prob=100k/1M with HASH_POST stable on
+beamfs (RS_PASSTHROUGH 3/3).
+
+Remaining sub-items (range filter, list filter, file-aware
+targeting): OPEN.
+
 **Status** : not implemented. Identified empirically from R19 runs of
 beamfs-bench substep 10.
 **Effort** : 2-4 days (radfi API + beamfs FIEMAP support).
@@ -2032,6 +2108,43 @@ corrected events.
 See `beamfs-bench evolution: cluster_*/multifs worker duplication`
 above. Single source of truth ; no duplicate content here to avoid
 drift.
+
+### beamfs-bench evolution: R31 invariant + tarball forensic enrichment [CLOSED 2026-05-03]
+
+Three commits applied to `beamfs-bench` following the Phase 0.7
+identity check failure incident (cf section 7.7 R31).
+
+**Commit `62a0640` -- fix(pipeline): R31 verify .ext2 byte-identity** :
+  `redeploy_4_vms()` now adds `sync(1)` after `destroy_all_vms`
+  to force libvirt/QEMU FD release; computes canonical .ext2
+  sha256 once before the loop; after each `cp` + `chown`,
+  syncs again and verifies deployed .ext2 sha256 matches
+  canonical (mismatch -> `bail!` with diagnostic pointing to
+  R31). Catches stale FDs from out-of-pipeline VMs at Phase 0.5
+  instead of surfacing only at Phase 0.7.
+
+**Commit `5f8ad6f` -- feat(forensics): tarball R31 audit trail** :
+  `forensics_host.rs::pre_capture_host` extended with 9 new
+  artefacts per run: `git-{repo}.txt` x 4 (HEAD signatures,
+  status, branch, remotes); `bitbake-provenance.log`;
+  `vm-rootfs-format.log` (qemu-img info + sha256 canonical vs 4
+  VMs); `identity-{vm}.txt` x 4 (in-VM beamfs.ko sha256 + lsmod);
+  `vm-state-{vm}.log` x 4 (df, mount, lsblk, ip a, cmdline,
+  os-release); `modinfo-{vm}.log` x 4 (full modinfo for beamfs,
+  reed_solomon, radfi). `analyse.rs::make_tarball` extended:
+  copies `manifest-<TS>.json{,.asc}` into `host/`; writes
+  `MANIFEST.sha256` at run_dir root (post-extraction integrity).
+
+**Commit `e6c7441` -- fix(forensics): R31 capture bugs** :
+  Three bugs caught at first R19 retry of the enriched tarball:
+  (A) known_hosts desynchronization on identity-{vm}.txt after
+  VM rebuild (R13 piege) -> add `ssh-keygen -R <ip>` before each
+  ssh_capture + `StrictHostKeyChecking=accept-new`. (B) multi-line
+  shell script quoting via Rust Debug-format collapsed newlines
+  -> base64-encode remote_cmd, decode + pipe to `bash -s`
+  remote-side. (C) manifest .json copy never landed because
+  filter included .json.asc; sort + last() picked .asc -> tighten
+  filter to `ends_with('.json')`.
 
 ## 14. Priority matrix
 
