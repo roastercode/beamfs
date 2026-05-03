@@ -22,10 +22,10 @@ prior session handoffs.
 
 | Repo                                    | Branch                  | Visibility | Latest commit |
 |-----------------------------------------|-------------------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `7d79a90` |
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `28e7a22` |
 | `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `458817b` |
-| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `e6c7441` |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `28e7a22` |
+| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `28e7a22` |
 | `roastercode/radfi`                     | `main`                  | PRIVATE    | `1fb9aeb`     |
 
 All 4 PRIVATE repos pushed and clean as of 2026-05-03 R19 validation
@@ -836,7 +836,7 @@ v0.1.3 attack at prob=1k/100k/1M (FLIP_DELTA up to 8 with full RS
 recovery). beamfs.ko sha256 changed from `0c0bbe42...` to
 `e955b536...`, confirming the V5 binary is what's loaded in-VM.
 
-**Sub-1.E** : pending -- finalise `Documentation/format-v5.md`
+**Sub-1.E** status : CLOSED 2026-05-03 (`28e7a22` beamfs)
 sections 4-11 (currently TBD/TODO from Phase 0). Reference plan in
 `Documentation/mainline-scope.md` section 5.
 
