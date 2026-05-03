@@ -22,10 +22,10 @@ prior session handoffs.
 
 | Repo                                    | Branch                  | Visibility | Latest commit |
 |-----------------------------------------|-------------------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `c12bb13` |
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `7d79a90` |
 | `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `c12bb13` |
-| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `c12bb13` |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `458817b` |
+| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `e6c7441` |
 | `roastercode/radfi`                     | `main`                  | PRIVATE    | `1fb9aeb`     |
 
 All 4 PRIVATE repos pushed and clean as of 2026-05-03 R19 validation
@@ -840,7 +840,7 @@ recovery). beamfs.ko sha256 changed from `0c0bbe42...` to
 sections 4-11 (currently TBD/TODO from Phase 0). Reference plan in
 `Documentation/mainline-scope.md` section 5.
 
-**Sub-1.F** : pending -- xfstests + checkpatch baseline pass on the
+**Sub-1.F** status : CLOSED 2026-05-03 (`7d79a90` beamfs)
 v5 mount path. Reference plan in roadmap.md Phase 1 final gate.
 
 **DoD** : `beamfs.h` v5 + `mkfs.beamfs` userspace, format mountable
