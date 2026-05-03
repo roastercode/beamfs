@@ -308,6 +308,21 @@ allocator for the v5 server profile is `BLOCK_GROUPS` (bit 3),
 which has an established mainline-precedent design (ext4) and
 scales to 16 EiB via 64-bit descriptors.
 
+**Note on `PER_INODE_RS`.** Bit 8 activates RS(255,239) protection
+on all inodes regardless of `s_data_protection_scheme`. When set,
+mkfs.beamfs MUST compute and write per-inode parity at format time
+into the 16-byte parity region of each inode (`i_reserved[0..15]`,
+at offset 156..171, covering `BEAMFS_INODE_RS_DATA = 172` bytes of
+inode payload). At mount time, the kernel applies RS decoding on
+any inode whose CRC32 mismatches, and re-verifies CRC32 on the
+corrected buffer before accepting the inode. The flag is
+composable with `s_data_protection_scheme = UNIVERSAL_INLINE` (2)
+to obtain combined data-block + inode RS coverage; it is also
+composable with `INODE_UNIVERSAL` (5) where it is functionally
+redundant (scheme 5 already enforces inode RS unconditionally).
+Reverting a volume formatted with this bit set requires offline
+rewrite of every inode block; in-place clear is not supported.
+
 Bits 11 and higher in each bitmap are reserved and MUST be zero
 on write.
 
