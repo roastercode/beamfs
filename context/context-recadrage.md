@@ -1392,5 +1392,42 @@ Cree 2026-05-03 lors de cette session.
 
 ---
 
-**Fin R0-R34. Lecture obligatoire de R0-R34 en debut de session.**
+---
+
+## R35 - R-secrets-never-in-chat : aucun secret vivant ne transite par un chat IA
+
+Les chats IA (claude.ai, ChatGPT, Gemini, etc.) ne sont pas des
+canaux securises pour transporter des secrets vivants : cles API,
+mots de passe, tokens GitHub/GitLab, cles GPG privees, secrets
+OAuth, bearer tokens, etc.
+
+Risques :
+- Conservation dans l'historique de la conversation cote provider
+  (potentiellement utilisee pour audit, fine-tuning, support).
+- Persistance dans les transcripts copies/colles (handoffs,
+  emails, tickets de bug). Le secret fuit a chaque copie.
+- Acces administratifs des employes du provider en cas
+  d'incident ou d'investigation.
+- Exposition immediate a l'IA elle-meme, dont les usages
+  downstream ne sont pas controles par l'utilisateur.
+
+Regle :
+
+- Les secrets sont configures cote shell uniquement, par
+  l'humain, dans `~/.bash_profile` ou un gestionnaire de
+  secrets dedie (pass, GNOME Keyring, sops).
+- Les programmes generes par Claude lisent les secrets via
+  variables d'environnement uniquement (ex:
+  `std::env::var("ANTHROPIC_API_KEY")`), jamais en dur.
+- Si un secret est colle accidentellement dans un chat :
+  revocation immediate sur la console du provider, puis
+  generation d'un nouveau secret saisi cote shell uniquement.
+
+Decouverte 2026-05-03 : cle API Anthropic collee dans le chat
+lors de la preparation du tool handoff Rust. Cle revoquee,
+nouvelle generee cote shell, jamais entree dans la conversation.
+
+---
+
+**Fin R0-R35. Lecture obligatoire de R0-R35 en debut de session.**
 
