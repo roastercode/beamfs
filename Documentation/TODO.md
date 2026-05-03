@@ -22,14 +22,16 @@ prior session handoffs.
 
 | Repo                                    | Branch                  | Visibility | Latest commit |
 |-----------------------------------------|-------------------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `749ff0e`     |
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `799d9d3`     |
 | `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `81c57ef`     |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `458817b`     |
 | `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `e6c7441`     |
 | `roastercode/radfi`                     | `main`                  | PRIVATE    | `1fb9aeb`     |
 
 All 4 PRIVATE repos pushed and clean as of 2026-05-03 R19 validation
-(post-radfi v0.1.3, beamfs-bench full exit 0 on cluster 12/12 VERIFIED).
+on the sub-1.B+C+D bundle (`beamfs-bench full --auto-confirm` exit 0,
+cluster Phase 6 12/12 VERIFIED, multifs beamfs MOUNTED 3/3 with full
+RS recovery under RadFI v0.1.3 attack at prob=1k/100k/1M).
 
 ---
 
