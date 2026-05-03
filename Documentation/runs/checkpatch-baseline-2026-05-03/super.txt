@@ -1,0 +1,75 @@
+CHECK: Alignment should match open parenthesis
+#200: FILE: super.c:200:
++static void beamfs_sb_to_rs_staging(const struct beamfs_super_block *sb,
++				   u8 staging[BEAMFS_SB_RS_STAGING_BYTES])
+
+CHECK: Alignment should match open parenthesis
+#229: FILE: super.c:229:
++static void beamfs_sb_from_rs_staging(const u8 staging[BEAMFS_SB_RS_STAGING_BYTES],
++				     struct beamfs_super_block *sb)
+
+CHECK: Alignment should match open parenthesis
+#302: FILE: super.c:302:
++void beamfs_log_rs_event(struct super_block *sb,
++			u64 block_no,
+
+CHECK: Unnecessary parentheses around 'n_positions == 0'
+#325: FILE: super.c:325:
++	if (WARN_ON_ONCE((n_positions == 0) != (positions == NULL)))
+
+CHECK: Unnecessary parentheses around 'positions == NULL'
+#325: FILE: super.c:325:
++	if (WARN_ON_ONCE((n_positions == 0) != (positions == NULL)))
+
+CHECK: Comparison to NULL could be written "!positions"
+#325: FILE: super.c:325:
++	if (WARN_ON_ONCE((n_positions == 0) != (positions == NULL)))
+
+CHECK: Alignment should match open parenthesis
+#343: FILE: super.c:343:
++		entropy_q16 = beamfs_rs_compute_entropy_q16_16(positions,
++							      n_positions,
+
+WARNING: Block comments use a trailing */ on a separate line
+#435: FILE: super.c:435:
++	 * surface (KASAN, syzkaller) for no operational benefit on a niche FS. */
+
+CHECK: Alignment should match open parenthesis
+#475: FILE: super.c:475:
++		rc = beamfs_rs_decode_region(staging, BEAMFS_SB_RS_DATA_LEN,
++					    parity_src, BEAMFS_RS_PARITY,
+
+WARNING: Block comments use a trailing */ on a separate line
+#506: FILE: super.c:506:
++		 * corrected on disk, only the journal record is lost. */
+
+WARNING: Too many leading tabs - consider code refactoring
+#530: FILE: super.c:530:
++						if (rs_results[i] <= 0)
+
+WARNING: Too many leading tabs - consider code refactoring
+#533: FILE: super.c:533:
++						if (np > BEAMFS_RS_PARITY / 2)
+
+WARNING: Block comments use a trailing */ on a separate line
+#640: FILE: super.c:640:
++	 * (SB events first, then bitmap events) reflects mount sequence. */
+
+CHECK: Alignment should match open parenthesis
+#646: FILE: super.c:646:
++			beamfs_log_rs_event(sb,
++					   pending[i].block_no,
+
+WARNING: Block comments use a trailing */ on a separate line
+#686: FILE: super.c:686:
++	 * occurred between capture and replay; the events are dropped. */
+
+total: 0 errors, 6 warnings, 9 checks, 797 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+super.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

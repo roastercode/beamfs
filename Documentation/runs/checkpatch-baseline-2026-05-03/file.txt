@@ -1,0 +1,44 @@
+CHECK: Alignment should match open parenthesis
+#36: FILE: file.c:36:
++static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
++			     unsigned int flags, struct iomap *iomap,
+
+CHECK: Alignment should match open parenthesis
+#146: FILE: file.c:146:
++static int beamfs_iomap_end(struct inode *inode, loff_t pos, loff_t length,
++			   ssize_t written, unsigned int flags,
+
+CHECK: Alignment should match open parenthesis
+#162: FILE: file.c:162:
++static struct folio *beamfs_iomap_get_folio(struct iomap_iter *iter,
++					   loff_t pos, unsigned int len)
+
+CHECK: Alignment should match open parenthesis
+#168: FILE: file.c:168:
++static void beamfs_iomap_put_folio(struct inode *inode, loff_t pos,
++				  unsigned int copied, struct folio *folio)
+
+CHECK: Alignment should match open parenthesis
+#189: FILE: file.c:189:
++static ssize_t beamfs_writeback_range(struct iomap_writepage_ctx *wpc,
++				     struct folio *folio, u64 offset,
+
+CHECK: Alignment should match open parenthesis
+#198: FILE: file.c:198:
++		ret = beamfs_iomap_begin(wpc->inode,
++					offset, INT_MAX, 0,
+
+CHECK: Alignment should match open parenthesis
+#212: FILE: file.c:212:
++static int beamfs_writepages(struct address_space *mapping,
++			    struct writeback_control *wbc)
+
+total: 0 errors, 0 warnings, 7 checks, 261 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+file.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

@@ -1,0 +1,98 @@
+WARNING: please, no spaces at the start of a line
+#78: FILE: edac.c:78:
++    [0] = { 0, },    /* [0] unused */$
+
+WARNING: please, no spaces at the start of a line
+#79: FILE: edac.c:79:
++    [1] = {     0,     0,     0,     0,     0,     0,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#80: FILE: edac.c:80:
++    [2] = {     0, 32768,     0,     0,     0,     0,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#81: FILE: edac.c:81:
++    [3] = {     0, 34624, 25557,     0,     0,     0,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#82: FILE: edac.c:82:
++    [4] = {     0, 32768, 32768, 20400,     0,     0,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#83: FILE: edac.c:83:
++    [5] = {     0, 30434, 34654, 28979, 16878,     0,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#84: FILE: edac.c:84:
++    [6] = {     0, 28235, 34624, 32768, 25557, 14365,     0,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#85: FILE: edac.c:85:
++    [7] = {     0, 26283, 33842, 34333, 30235, 22724, 12493,     0,     0 },$
+
+WARNING: please, no spaces at the start of a line
+#86: FILE: edac.c:86:
++    [8] = {     0, 24576, 32768, 34776, 32768, 27774, 20400, 11047,     0 },$
+
+CHECK: Please use a blank line after function/struct/union/enum declarations
+#88: FILE: edac.c:88:
++};
++/* SENTINEL_LUT_END */
+
+CHECK: Alignment should match open parenthesis
+#111: FILE: edac.c:111:
++__u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
++				      unsigned int n_positions,
+
+WARNING: Block comments use a trailing */ on a separate line
+#131: FILE: edac.c:131:
++		 * pos < 239 and BINS = 8, max product = 1912. */
+
+WARNING: Block comments use a trailing */ on a separate line
+#145: FILE: edac.c:145:
++	 * by LUT convention. Total guaranteed < 3 * 65536. */
+
+CHECK: Prefer kernel type 'u8' over 'uint8_t'
+#168: FILE: edac.c:168:
++int beamfs_rs_encode(uint8_t *data, size_t len, uint8_t *parity)
+
+CHECK: Prefer kernel type 'u16' over 'uint16_t'
+#170: FILE: edac.c:170:
++	uint16_t par[BEAMFS_RS_PARITY];
+
+CHECK: Alignment should match open parenthesis
+#218: FILE: edac.c:218:
++int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
++		    int *positions, unsigned int max_positions)
+
+WARNING: Block comments use a trailing */ on a separate line
+#240: FILE: edac.c:240:
++	 * forces the kernel into the apply branch (decode_rs.c line 315). */
+
+WARNING: Block comments use a trailing */ on a separate line
+#252: FILE: edac.c:252:
++	 * relevant for the entropy estimator. */
+
+WARNING: Block comments use a trailing */ on a separate line
+#264: FILE: edac.c:264:
++	 * compute_entropy on the positions buffer they passed in. */
+
+CHECK: Alignment should match open parenthesis
+#290: FILE: edac.c:290:
++int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
++			   u8 *parity_buf, size_t parity_stride,
+
+CHECK: Alignment should match open parenthesis
+#332: FILE: edac.c:332:
++int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
++			   u8 *parity_buf, size_t parity_stride,
+
+total: 0 errors, 14 warnings, 7 checks, 417 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+edac.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

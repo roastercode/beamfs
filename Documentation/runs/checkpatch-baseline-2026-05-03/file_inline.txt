@@ -1,0 +1,73 @@
+CHECK: Alignment should match open parenthesis
+#51: FILE: file_inline.c:51:
++static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
++				    struct dentry *dentry,
+
+CHECK: Alignment should match open parenthesis
+#233: FILE: file_inline.c:233:
++			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
++					  (unsigned long long)indirect_blk);
+
+CHECK: Alignment should match open parenthesis
+#274: FILE: file_inline.c:274:
++	pr_err_ratelimited("beamfs/inline: iblock %llu beyond v1 indirect capacity (write)\n",
++			  (unsigned long long)iblock_logical);
+
+CHECK: Comparison to NULL could be written "!dst_buf"
+#333: FILE: file_inline.c:333:
++	if (WARN_ON_ONCE(dst_buf == NULL))
+
+CHECK: Lines should not end with a '('
+#353: FILE: file_inline.c:353:
++	beamfs_rs_decode_region(
+
+CHECK: Alignment should match open parenthesis
+#371: FILE: file_inline.c:371:
++			beamfs_log_rs_event(sb,
++				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+
+CHECK: Alignment should match open parenthesis
+#391: FILE: file_inline.c:391:
++			beamfs_log_rs_event(sb,
++				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+
+CHECK: Lines should not end with a '('
+#636: FILE: file_inline.c:636:
++			ret = beamfs_inline_decode_block_into_buf(
+
+CHECK: Alignment should match open parenthesis
+#707: FILE: file_inline.c:707:
++	folio = __filemap_get_folio(mapping, index,
++				   FGP_WRITEBEGIN | FGP_NOFS,
+
+CHECK: Comparison to NULL could be written "!folio->mapping"
+#798: FILE: file_inline.c:798:
++	if (!folio_test_dirty(folio) || folio->mapping == NULL) {
+
+CHECK: Alignment should match open parenthesis
+#856: FILE: file_inline.c:856:
++			pr_err_ratelimited("beamfs/inline: writeback_folio: sb_bread phys=%llu failed\n",
++					  (unsigned long long)phys);
+
+CHECK: Lines should not end with a '('
+#885: FILE: file_inline.c:885:
++		ret = beamfs_rs_encode_region(
+
+CHECK: Alignment should match open parenthesis
+#891: FILE: file_inline.c:891:
++			pr_err_ratelimited("beamfs/inline: writeback_folio: rs_encode_region failed: %d\n",
++					  ret);
+
+CHECK: Lines should not end with a '('
+#1150: FILE: file_inline.c:1150:
++	ret = beamfs_rs_encode_region(
+
+total: 0 errors, 0 warnings, 14 checks, 1249 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+file_inline.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

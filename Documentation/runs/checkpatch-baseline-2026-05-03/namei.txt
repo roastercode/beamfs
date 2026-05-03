@@ -1,0 +1,78 @@
+CHECK: Alignment should match open parenthesis
+#90: FILE: namei.c:90:
++static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
++			    u64 ino, unsigned int file_type)
+
+CHECK: Lines should not end with a '('
+#125: FILE: namei.c:125:
++				de->d_rec_len   = cpu_to_le16(
+
+CHECK: Alignment should match open parenthesis
+#132: FILE: namei.c:132:
++				inode_set_mtime_to_ts(dir,
++					current_time(dir));
+
+CHECK: Alignment should match open parenthesis
+#216: FILE: namei.c:216:
++				inode_set_mtime_to_ts(dir,
++					current_time(dir));
+
+CHECK: Alignment should match open parenthesis
+#302: FILE: namei.c:302:
++static int beamfs_create(struct mnt_idmap *idmap, struct inode *dir,
++			struct dentry *dentry, umode_t mode, bool excl)
+
+CHECK: Alignment should match open parenthesis
+#338: FILE: namei.c:338:
++static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
++				  struct dentry *dentry, umode_t mode)
+
+CHECK: Alignment should match open parenthesis
+#353: FILE: namei.c:353:
++	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT(".", 1),
++			       inode->i_ino, DT_DIR);
+
+CHECK: Alignment should match open parenthesis
+#358: FILE: namei.c:358:
++	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT("..", 2),
++			       dir->i_ino, DT_DIR);
+
+CHECK: Alignment should match open parenthesis
+#367: FILE: namei.c:367:
++	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino,
++			       DT_DIR);
+
+CHECK: Logical continuations should be on the previous line
+#450: FILE: namei.c:450:
++			    !(de->d_name_len == 2 && de->d_name[0] == '.'
++			      && de->d_name[1] == '.')) {
+
+CHECK: Alignment should match open parenthesis
+#475: FILE: namei.c:475:
++static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
++		      struct dentry *dentry)
+
+CHECK: Alignment should match open parenthesis
+#514: FILE: namei.c:514:
++static int beamfs_rename(struct mnt_idmap *idmap,
++			struct inode *old_dir, struct dentry *old_dentry,
+
+CHECK: Alignment should match open parenthesis
+#557: FILE: namei.c:557:
++	ret = beamfs_add_dirent(new_dir, &new_dentry->d_name,
++			       old_inode->i_ino,
+
+CHECK: Alignment should match open parenthesis
+#581: FILE: namei.c:581:
++		ret = beamfs_add_dirent(old_inode, &dotdot,
++				       new_dir->i_ino, DT_DIR);
+
+total: 0 errors, 0 warnings, 14 checks, 629 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+namei.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

@@ -1,0 +1,14 @@
+CHECK: Alignment should match open parenthesis
+#145: FILE: dir.c:145:
++struct dentry *beamfs_lookup(struct inode *dir,
++			    struct dentry *dentry,
+
+total: 0 errors, 0 warnings, 1 checks, 199 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+dir.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.
