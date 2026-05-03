@@ -372,10 +372,15 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
 #define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
 
-/* All flags supported by this kernel module (none active in v5.0) */
+/* Flags supported by this kernel module.
+ * PER_INODE_RS: per-inode RS(255,239) parity protection. The kernel
+ * write path has always computed the parity on every inode write
+ * (namei.c::beamfs_write_inode_raw); enabling this bit in SUPP
+ * unlocks the read-side decoder under any s_data_protection_scheme.
+ */
 #define BEAMFS_FEAT_COMPAT_SUPP    0ULL
 #define BEAMFS_FEAT_RO_COMPAT_SUPP 0ULL
-#define BEAMFS_FEAT_INCOMPAT_SUPP  0ULL
+#define BEAMFS_FEAT_INCOMPAT_SUPP  BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS
 
 /*
  * On-disk superblock - block 0
@@ -481,6 +486,7 @@ struct beamfs_sb_info {
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
+	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 };
 
 /*
