@@ -84,8 +84,7 @@ constraints           position;   threat-       results 77 obs   item-by-   ├ 
                   │  │                    from FTRFS;       │
                   │  │                    actually beamfs   │
                   │  │                    v1 fresh)         │
-                  │  │ format-v5-design.│ (TARGET, skeleton)│
-                  │  │ md               │                   │
+                  │  │ format-v5.md      │ (TARGET, skeleton)│
                   │  │ fsck.beamfs.md   │ (Phase 2 design)  │
                   │  │ system-          │ (positioning vs   │
                   │  │ architecture.md  │  dm-verity, etc.) │
@@ -109,7 +108,7 @@ Cross-reference rules (enforced by document conventions)
                        ──> roadmap.md             (stage closure refs constraint)
                        ──> mainline-scope.md      (sec 2 reproduces sec 6 list)
 
-  mainline-scope.md   ──> format-v5-design.md    (sec 3 = profiles spec)
+  mainline-scope.md   ──> format-v5.md    (sec 3 = profiles spec)
                       ──> roadmap.md Phase 0-8   (sec 5 = trajectory)
 
   TODO.md (this file) ──> roadmap.md             (Phase mapping table)
@@ -121,7 +120,7 @@ Public vs Private classification
 ─────────────────────────────────
 
   PUBLIC (Documentation/) :
-    threat-model.md, mainline-scope.md, roadmap.md, format-v5-design.md,
+    threat-model.md, mainline-scope.md, roadmap.md, format-v5.md,
     format-v4.md, design.md, known-limitations.md, fsck.beamfs.md,
     system-architecture.md, architecture-current.md, empirical-state.md,
     testing.md
@@ -752,7 +751,7 @@ to bit-flips of hardware (SEU/MBU, NAND/DRAM aging), environmental
 origin. The space deployment case is one specific instance ; the
 datacenter and embedded cases are equally addressed.
 
-### 4.2 Target on-disk format (v5 - per format-v5-design.md)
+### 4.2 Target on-disk format (v5 - per format-v5.md)
 
 Single on-disk format parameterised by feature flags, exposing 3
 mkfs profiles :
@@ -838,7 +837,7 @@ recovery). beamfs.ko sha256 changed from `0c0bbe42...` to
 `e955b536...`, confirming the V5 binary is what's loaded in-VM.
 
 **Sub-1.E** : pending -- finalise `Documentation/format-v5.md`
-sections 4-12 (currently TBD/TODO from Phase 0). Reference plan in
+sections 4-11 (currently TBD/TODO from Phase 0). Reference plan in
 `Documentation/mainline-scope.md` section 5.
 
 **Sub-1.F** : pending -- xfstests + checkpatch baseline pass on the
@@ -854,9 +853,9 @@ What's already there :
 
 What's missing :
 - `s_version` bump to 5 (currently V1)
-- format-v5.md complete (currently skeleton, sections 4-12 marked TBD)
+- format-v5.md complete (currently skeleton, sections 4-11 marked TBD)
 - Per-flag implementation : `EXTENTS`, `64BIT`, `BLOCK_GROUPS`,
-  `JOURNAL`, `DAX`, `BIGALLOC`, `BTREE_ALLOC`, etc. — none active
+  `JOURNAL`, `DAX`, `BIGALLOC`, `BTREE_ALLOC`, etc. - none active
   in the RFC submission ; the embedded profile has 0 flags active
 - mkfs.beamfs `--profile=embedded` (default) explicitly emits v5 SB
 - Migration script v1 → v5 (`tune.beamfs --upgrade-format`) — for
@@ -988,7 +987,7 @@ What's already there :
 
 What's missing :
 - `.md` → `.rst` transformation of `mainline-scope.md`,
-  `format-v5-design.md`, `threat-model.md`, `known-limitations.md`,
+  `format-v5.md`, `threat-model.md`, `known-limitations.md`,
   with adaptation to kernel doc tone
 - `Documentation/process/coding-assistants.rst` policy doc (AI
   tooling disclosure required by linux-fsdevel)
@@ -1116,7 +1115,7 @@ auto-detection ? Affects mkfs.beamfs CLI design.
 
 ### 5.4 Migration v1 → v5 scope
 
-`format-v5-design.md` section 11 documents two paths but does not
+`format-v5.md` section 11 documents two paths but does not
 choose. For Phase 1 Phase 5 transition, one of these is required.
 - copy migration (always works, safe, simple)
 - in-place upgrade (risky, complex tune.beamfs userspace tool)
@@ -1501,7 +1500,7 @@ alongside checkpatch zero. Should mirror the structure of
 - References
 
 Source content already exists in `Documentation/mainline-scope.md`,
-`format-v5-design.md`, `threat-model.md`, `known-limitations.md`.
+`format-v5.md`, `threat-model.md`, `known-limitations.md`.
 Phase 7 work = transformation .md -> .rst + adaptation to kernel doc
 tone.
 
@@ -1670,14 +1669,14 @@ inode in scheme=2 produces irreversible CRC32 mismatch (no RS).
 
 **Proposed** : v5 INCOMPAT feature flag
 `BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS` (already reserved in
-`Documentation/format-v5-design.md`) activates RS-protection on
+`Documentation/format-v5.md`) activates RS-protection on
 inodes *in addition to* INLINE data blocks. Combined coverage:
 - data blocks: RS(255,239) inline (existing scheme=2)
 - inodes: RS encode/decode at write_inode/read_inode
   (existing scheme=5 path, ported to inline-aware code)
 
 **Defers** : Phase 1 of mainline-prep roadmap (50h budget).
-Cf `Documentation/format-v5-design.md` section 4.2 (profile flags).
+Cf `Documentation/format-v5.md` section 4.2 (profile flags).
 
 ---
 
@@ -2027,7 +2026,7 @@ co-submission, or keep it permanently out-of-tree as a lab tool ?
 **Status** : architectural concern. No code change required if
 discipline is held.
 **Effort** : ongoing (review every format-touching commit).
-**Repo** : beamfs (Documentation/format-v5-design.md).
+**Repo** : beamfs (Documentation/format-v5.md).
 
 Format on-disk has had several revisions during pre-mainline work :
 
@@ -2046,7 +2045,7 @@ and ongoing format evolution :
   - mainline RFC needs the format to be defendable
 
 Resolution requires holding the discipline already documented in
-`format-v5-design.md` : freeze v5 minimal at RFC submission time,
+`format-v5.md` : freeze v5 minimal at RFC submission time,
 add features only via INCOMPAT/RO_COMPAT/COMPAT flags (ext4 pattern),
 never break existing on-disk layouts. The discipline is documented ;
 enforcement is per-commit reviewer responsibility.
@@ -2245,7 +2244,7 @@ the budget.
 - `Documentation/system-architecture.md` : positioning vs dm-verity, squashfs, VxWorks, PikeOS
 - `Documentation/roadmap.md` : Stage 3 / Stage 4 / Stage 5 plan ; Phase 0-8 mainline preparation roadmap (DoD per phase)
 - `Documentation/mainline-scope.md` : v5 position, threat model, capabilities matrix, out-of-scope
-- `Documentation/format-v5-design.md` : v5 on-disk format design (skeleton, populated phase by phase)
+- `Documentation/format-v5.md` : v5 on-disk format design (skeleton, populated phase by phase)
 - `Documentation/fsck.beamfs.md` : fsck.beamfs design (Phase 2 deliverable)
 - `Documentation/known-limitations.md` : current scheme limitations
 - `context/context-recadrage.md` : R0-R30 operational rules + Phase 0 strategic acquis (PRIVATE)

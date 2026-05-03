@@ -915,7 +915,7 @@ concrete deliverable, and an effort estimate in focused work hours.
 |-------------|-----------------------------------------------------|
 | Effort      | 3 hours                                             |
 | DoD         | Documents committed on `mainline-prep`              |
-| Deliverable | mainline-scope.md, format-v5-design.md, fsck.beamfs.md |
+| Deliverable | mainline-scope.md, format-v5.md, fsck.beamfs.md |
 | Risk        | Scope creep, mitigated by atomic commits            |
 | Precondition| None                                                |
 
