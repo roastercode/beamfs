@@ -1284,5 +1284,113 @@ suite a cet incident pour eviter la recurrence.
 
 ---
 
-**Fin R0-R31. Lecture obligatoire de R0-R31 en debut de session.**
+## R32 - R-base64-markdown-content : encoder le contenu markdown sensible en base64
+
+Le frontend chat (claude.ai web/app) auto-linkifie certains tokens
+dans tout texte affiché dans un bloc shell : extensions de fichier
+courantes (.md, .h, .py, .sh, .bb, .rs, .json), mais aussi tout
+path qui ressemble vaguement à un chemin web. Cette transformation
+se produit CÔTÉ UI, AVANT que le shell ne reçoive le bloc.
+Conséquence : un heredoc bash `cat << 'EOF' ... EOF` contenant du
+markdown ou de la prose technique avec ces tokens devient un
+script invalide une fois colle dans le terminal -- le linkifier
+a injecte des `[xxx](http://xxx)` dans le contenu, ce qui casse
+la grammaire shell ou produit du contenu corrompu sur disque.
+
+Règle :
+
+- INTERDIT : `cat << 'EOF' ... EOF` ou `cat > file << 'EOF' ... EOF`
+  contenant du markdown, du C, du Rust, du Python, du Bitbake, ou
+  toute prose mentionnant des extensions courantes.
+- AUTORISE : Python heredoc `python3 << 'PYEOF' ... PYEOF` qui
+  ecrit le contenu via `Path.write_text()` ou `Path.write_bytes()`,
+  avec le contenu lui-meme construit ligne par ligne ou decode
+  depuis un base64 string opaque.
+- AUTORISE : `bytes([...]).decode()` pour reconstituer un nom de
+  fichier sensible cote runtime.
+
+Pattern recommande pour markdown long :
+
+```
+python3 << 'PYEOF'
+import base64
+from pathlib import Path
+B64 = (
+    "...base64 du markdown complet..."
+)
+Path('cible.md').write_text(base64.b64decode(B64).decode('utf-8'))
+PYEOF
+```
+
+Pour markdown court, construction ligne par ligne avec unicode
+escapes (`\u00e9` pour é, `\u00c9` pour É) evite aussi le risque
+de transcription accent decompose vs precompose.
+
+Decouverte 2026-05-03 apres incident terminal kill lors de la
+creation du tool handoff (heredoc bash avec markdown contenant
+`.md` -> linkifier corrompt -> shell invalide -> tty perdu).
+
+---
+
+## R33 - R-xdg-bin-install : binaires CLI personnels dans ~/.local/bin
+
+Sur le poste Gentoo de reference (`spartian-1`), `~/.local/bin`
+est dans le PATH par defaut alors que `~/bin` ne l'est pas. Cela
+suit la convention XDG Base Directory.
+
+Règle :
+
+- Tout symlink ou binaire CLI personnel -> `~/.local/bin/<nom>`.
+- Pas de modification de `~/.bash_profile` pour ajouter `~/bin`
+  au PATH : changer le PATH demande un reload shell, alors
+  qu'utiliser `~/.local/bin` est immediatement fonctionnel.
+
+Decouverte 2026-05-03 lors de l'install du tool handoff
+(symlink dans `~/bin` -> `command not found` dans le shell
+courant ; deplacement vers `~/.local/bin` -> fonctionnel
+immediatement).
+
+---
+
+## R34 - R-handoff-tool : utiliser le tool handoff en fin de session
+
+Le repo PRIVATE `roastercode/handoff` heberge un outil CLI
+(`handoff`) qui :
+
+- Genere un prompt de handoff template avec l'état reel des
+  repos trackes (tips git, dirty, unpushed) -> `handoff`
+- Lint un handoff existant et commit+push si OK ->
+  `handoff --analyse FILE`
+- Migre les anciens handoffs ad-hoc vers l'archive canonique
+  -> `handoff --migrate` (one-shot)
+
+Convention canonique : `~/git/handoff/handoffs/YYYY-MM-DD-<slug>.md`.
+
+Sections obligatoires (linted) :
+- `## Repos state`
+- `## Ce qui a été fait`
+- `## État pré-suite`
+- `## Action item suivant`
+
+Interdits dans la prose (linted) :
+- Adresser le prochain Claude comme une personne
+- Citer les regles methodologiques (R\d+)
+- Langage prescriptif (il faut, tu dois, n'oublie pas)
+- Paths absolus `/home/<user>/...` hors fenced code blocks
+- Fichier > 500 lignes
+
+Règle :
+
+- En fin de session, le handoff est ecrit, valide et pushe
+  via le tool `handoff`. Pas de fichier ad-hoc dans
+  `~/context/handoff/` ou autre emplacement legacy.
+- Le tool est self-tracked : `~/git/handoff` figure dans
+  TRACKED_REPOS du linter. Ses propres commits hashes peuvent
+  etre cites dans un handoff sans flag.
+
+Cree 2026-05-03 lors de cette session.
+
+---
+
+**Fin R0-R34. Lecture obligatoire de R0-R34 en debut de session.**
 
