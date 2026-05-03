@@ -1227,5 +1227,62 @@ R30 est ajoutee suite a ces violations pour eviter la recurrence.
 
 ---
 
-**Fin R0-R30. Lecture obligatoire de R0-R30 en debut de session.**
+## R31 - R-rebuild-yocto-avant-bench : integration des changements lockstep dans les VM avant R19
+
+Tout commit qui touche un fichier kernel (`.c`/`.h`) en lockstep beamfs
+<-> yocto-beamfs doit etre suivi, AVANT tout `beamfs-bench full` et
+AVANT tout push, par une verification empirique que les changements
+sont bien integres dans le `beamfs.ko` charge par les VMs cluster.
+
+**Procedure obligatoire** :
+
+1. Lockstep sha256 beamfs <-> yocto-beamfs (R9) : deja obligatoire.
+
+2. Bitbake doit avoir vu le delta source. Yocto utilise le SRC_URI
+   pointant vers `recipes-kernel/beamfs/files/beamfs-0.1.0/`. Si les
+   fichiers de cette branche ont change depuis le dernier build,
+   bitbake refait do_compile au prochain `bitbake beamfs-module` ou
+   `bitbake hpc-arm64-research-beamfs`.
+
+3. L'image `.ext2` canonique doit avoir ete regeneree APRES le delta
+   source. Verifier le timestamp de
+   `tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2`
+   et s'assurer qu'il est posterieur au dernier `mv`/`write_text` sur
+   la copie yocto-beamfs des sources.
+
+4. Le redeploy `.ext2` -> VM doit etre complet. La VM demarree doit
+   charger le `beamfs.ko` dont le sha256 == sha256 du `.ko` extrait
+   par 7z/debugfs de l'`.ext2` canonique.
+
+5. Phase 0.7 du pipeline `beamfs-bench full` enforce cet invariant
+   automatiquement : identity FAIL bloque le bench. Cette protection
+   est intentionnelle et NE DOIT PAS etre contournee.
+
+**Si Phase 0.7 fail avec divergence in-VM != reference** :
+
+- verifier que le redeploy s'est bien fait (timestamp `.img` VM
+  posterieur au timestamp `.ext2` canonique)
+- verifier que la VM a redemarre sur la nouvelle `.img`
+- en dernier recours : `virsh destroy` + `cp -f` `.ext2` -> `.img` +
+  `virsh start` manuel pour forcer le redeploiement
+- relancer `beamfs-bench full`
+
+**Anti-pattern interdit** : modifier le code lockstep, lancer
+`beamfs-bench full` directement sans verifier que bitbake a bien
+detecte le delta. Si SRC_URI utilise file:// avec des sha256sums
+pinnes, bitbake peut ignorer les changements silencieusement et
+builder une image avec les anciennes sources.
+
+**Incident fondateur** (2026-05-03, session sub-1.A push) : apres
+commits `d02b1ec` (R17 cleanup) et `c44fc96` (sub-1.A V5 declaration)
+en lockstep beamfs <-> yocto-beamfs, l'invocation `beamfs-bench full`
+a fail en Phase 0.7 avec divergence in-VM (sha256 ancien) vs reference
+(sha256 nouveau, post-bitbake). Le redeploy `.ext2` -> VM a ete
+incomplet : la VM master a charge un `beamfs.ko` plus ancien que
+celui extrait de l'`.ext2` canonique. Cette regle R31 est ajoutee
+suite a cet incident pour eviter la recurrence.
+
+---
+
+**Fin R0-R31. Lecture obligatoire de R0-R31 en debut de session.**
 
