@@ -296,6 +296,7 @@ struct beamfs_rs_event {
  * are NOT mountable as beamfs by design (distinct filesystem).
  */
 #define BEAMFS_VERSION_V1        1
+#define BEAMFS_VERSION_V5        5
 #define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V1
 
 /*
