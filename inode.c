@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Inode operations
+ * beamfs - Inode operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
@@ -60,12 +60,15 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	 * by crc32_le on architectures that support it.
 	 *
 	 * Stage B: RS FEC, only invoked if CRC32 fails AND the format
-	 * declares RS protection on inodes (s_data_protection_scheme ==
-	 * INODE_UNIVERSAL). For images formatted under the legacy
-	 * INODE_OPT_IN scheme (v0.1.0 / v0.2.0 baseline), no per-inode
-	 * parity was ever written by mkfs, so attempting RS would be
-	 * useless or actively harmful (random bytes interpreted as parity
-	 * could push the decoder into a false correction).
+	 * declares RS protection on inodes. Two activation paths:
+	 *   - s_data_protection_scheme == INODE_UNIVERSAL (legacy v4)
+	 *   - s_feat_incompat & BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS (v5)
+	 * Both paths share the same on-disk parity layout in i_reserved
+	 * [0..15] (16 bytes covering BEAMFS_INODE_RS_DATA = 172 data
+	 * bytes). The kernel write path always emits this parity
+	 * (namei.c::beamfs_write_inode_raw) and mkfs.beamfs always seeds
+	 * it at format time (rs_encode_inode), so the decoder is safe to
+	 * invoke whenever either path is active.
 	 *
 	 * After a successful RS correction we re-verify CRC32 on the
 	 * corrected buffer before accepting the inode. This guards
@@ -79,9 +82,12 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			BEAMFS_SB(sb)->s_beamfs_sb->s_data_protection_scheme);
 		int nerr;
 
-		if (scheme != BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL) {
-			pr_err("beamfs: inode %lu CRC32 mismatch (no RS available, scheme=%u)\n",
-			       ino, scheme);
+		if (scheme != BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL &&
+		    !(BEAMFS_SB(sb)->s_feat_incompat &
+		      BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS)) {
+			pr_err("beamfs: inode %lu CRC32 mismatch (no RS available, scheme=%u feat_incompat=0x%016llx)\n",
+			       ino, scheme,
+			       (unsigned long long)BEAMFS_SB(sb)->s_feat_incompat);
 			brelse(bh);
 			iget_failed(inode);
 			return ERR_PTR(-EIO);
@@ -153,6 +159,14 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	fi->i_dindirect = raw->i_dindirect;
 	fi->i_tindirect = raw->i_tindirect;
 	fi->i_flags     = le32_to_cpu(raw->i_flags);
+
+	/* Layer 1 defense: mark reserved inodes (canary) as immutable.
+	 * VFS rejects open(O_TRUNC), setattr(ATTR_SIZE), unlink, chmod
+	 * with EPERM before reaching beamfs hooks. Layer 2 in alloc.c
+	 * provides the safety net if VFS check is bypassed (corruption).
+	 */
+	if (beamfs_ino_is_reserved((u64)ino) && ino != BEAMFS_RESERVED_INO_ROOT)
+		inode->i_flags |= S_IMMUTABLE;
 
 	/* Set ops based on file type */
 	if (S_ISDIR(inode->i_mode)) {

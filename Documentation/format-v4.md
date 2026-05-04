@@ -2,6 +2,14 @@
 
 **Status:** Authoritative specification for `BEAMFS_VERSION_V1` with
 `BEAMFS_FORMAT_V4` superblock layout.
+
+> **Naming clarification.** The kernel version constant is
+> `BEAMFS_VERSION_V1 = 1` (fresh BEAMFS format, no migration from
+> earlier FTRFS-lineage formats). The "v4" naming refers to the
+> on-disk superblock layout family inherited from the FTRFS lineage;
+> v1, v2, v3, v4 are layout iterations documented historically by
+> `Documentation/design.md`. This is **beamfs (kernel module
+> v0.1.x)** with on-disk layout v4 = `BEAMFS_VERSION_V1 = 1`.
 **Audience:** Kernel reviewers, certification auditors, forensic analysts,
 userspace tooling authors.
 **Companion documents:**

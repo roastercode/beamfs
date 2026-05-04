@@ -101,7 +101,7 @@ deployments without exposing the individual flags to end users.
 The format reserves three categories of feature flags. Compat flags
 are informational. RO-compat flags force read-only mount if unknown.
 Incompat flags refuse mount if unknown. Bit allocations are listed
-in Documentation/format-v5-design.md.
+in Documentation/format-v5.md.
 
 ### 4.2 mkfs profiles
 
@@ -135,7 +135,7 @@ INLINE) and PAGE_SIZE (4096 bytes) is resolved in v5 by either:
   bytes per disk block.
 
 The decision between A and B is documented in
-Documentation/format-v5-design.md and is independent of the scope
+Documentation/format-v5.md and is independent of the scope
 defined in this document.
 
 ## 5. Roadmap to mainline
@@ -187,7 +187,7 @@ conversion without reserving twice the storage.
 
 - Documentation/threat-model.md (current baseline, sections 4, 6)
 - Documentation/format-v4.md (current on-disk format)
-- Documentation/format-v5-design.md (target on-disk format)
+- Documentation/format-v5.md (target on-disk format)
 - Documentation/fsck.beamfs.md (offline checker design)
 - Documentation/roadmap.md "Mainline preparation roadmap" section
 - linux/Documentation/admin-guide/device-mapper/verity.rst (dm-fec)

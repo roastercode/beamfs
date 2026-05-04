@@ -1,0 +1,22 @@
+CHECK: Lines should not end with a '('
+#106: FILE: alloc.c:106:
++		beamfs_rs_decode_region(
+
+CHECK: Alignment should match open parenthesis
+#129: FILE: alloc.c:129:
++				beamfs_log_rs_event(sb,
++					(u64)bitmap_blk * BEAMFS_BITMAP_SUBBLOCKS + i,
+
+CHECK: Lines should not end with a '('
+#244: FILE: alloc.c:244:
++	beamfs_rs_encode_region(
+
+total: 0 errors, 0 warnings, 3 checks, 444 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+alloc.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

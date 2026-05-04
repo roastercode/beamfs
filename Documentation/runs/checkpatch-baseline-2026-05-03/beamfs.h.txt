@@ -1,0 +1,168 @@
+CHECK: line length of 103 exceeds 100 columns
+#57: FILE: beamfs.h:57:
++#define BEAMFS_DATA_INLINE_BYTES      (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_SUBBLOCK_DATA)  /* 3824 */
+
+CHECK: line length of 103 exceeds 100 columns
+#58: FILE: beamfs.h:58:
++#define BEAMFS_DATA_INLINE_TOTAL      (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_SUBBLOCK_TOTAL) /* 4080 */
+
+CHECK: line length of 102 exceeds 100 columns
+#59: FILE: beamfs.h:59:
++#define BEAMFS_DATA_INLINE_PAD        (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL)         /* 16  */
+
+CHECK: line length of 102 exceeds 100 columns
+#79: FILE: beamfs.h:79:
++#define BEAMFS_CANARY_PAYLOAD_LEN     (BEAMFS_DATA_INLINE_BYTES - BEAMFS_CANARY_HEADER_LEN) /* 3760 */
+
+CHECK: line length of 102 exceeds 100 columns
+#80: FILE: beamfs.h:80:
++#define BEAMFS_CANARY_USER_BYTES      BEAMFS_DATA_INLINE_BYTES                              /* 3824 */
+
+CHECK: Please don't use multiple blank lines
+#131: FILE: beamfs.h:131:
++
++
+
+ERROR: code indent should use tabs where possible
+#174: FILE: beamfs.h:174:
++                                          /* index in s_pad[]: 1175     */$
+
+ERROR: code indent should use tabs where possible
+#216: FILE: beamfs.h:216:
++^I                                 *         from re_error_bits in v3) */$
+
+WARNING: Block comments use a trailing */ on a separate line
+#216: FILE: beamfs.h:216:
++	                                 *         from re_error_bits in v3) */
+
+WARNING: Block comments should align the * on each line
+#216: FILE: beamfs.h:216:
++	__le32  re_symbol_count;      /* 16..19  symbols corrected (renamed
++	                                 *         from re_error_bits in v3) */
+
+CHECK: Prefer using the BIT macro
+#249: FILE: beamfs.h:249:
++#define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  (1U << 0)
+
+CHECK: Prefer using the BIT macro
+#250: FILE: beamfs.h:250:
++#define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  (1U << 1)
+
+CHECK: Prefer using the BIT_ULL macro
+#352: FILE: beamfs.h:352:
++#define BEAMFS_FEATURE_COMPAT_RS_JOURNAL_VERBOSE  (1ULL << 0)
+
+CHECK: Prefer using the BIT_ULL macro
+#353: FILE: beamfs.h:353:
++#define BEAMFS_FEATURE_COMPAT_LABEL_LONG          (1ULL << 1)
+
+CHECK: Prefer using the BIT_ULL macro
+#354: FILE: beamfs.h:354:
++#define BEAMFS_FEATURE_COMPAT_DIR_INDEX           (1ULL << 2)
+
+CHECK: Prefer using the BIT_ULL macro
+#357: FILE: beamfs.h:357:
++#define BEAMFS_FEATURE_RO_COMPAT_LARGE_FILE       (1ULL << 0)
+
+CHECK: Prefer using the BIT_ULL macro
+#358: FILE: beamfs.h:358:
++#define BEAMFS_FEATURE_RO_COMPAT_HUGE_FILE        (1ULL << 1)
+
+CHECK: Prefer using the BIT_ULL macro
+#359: FILE: beamfs.h:359:
++#define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      (1ULL << 2)
+
+CHECK: Prefer using the BIT_ULL macro
+#360: FILE: beamfs.h:360:
++#define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        (1ULL << 3)
+
+CHECK: Prefer using the BIT_ULL macro
+#363: FILE: beamfs.h:363:
++#define BEAMFS_FEATURE_INCOMPAT_EXTENTS           (1ULL << 0)
+
+CHECK: Prefer using the BIT_ULL macro
+#364: FILE: beamfs.h:364:
++#define BEAMFS_FEATURE_INCOMPAT_64BIT             (1ULL << 1)
+
+CHECK: Prefer using the BIT_ULL macro
+#365: FILE: beamfs.h:365:
++#define BEAMFS_FEATURE_INCOMPAT_BIGALLOC          (1ULL << 2)
+
+CHECK: Prefer using the BIT_ULL macro
+#366: FILE: beamfs.h:366:
++#define BEAMFS_FEATURE_INCOMPAT_BLOCK_GROUPS      (1ULL << 3)
+
+CHECK: Prefer using the BIT_ULL macro
+#367: FILE: beamfs.h:367:
++#define BEAMFS_FEATURE_INCOMPAT_BTREE_ALLOC       (1ULL << 4)
+
+CHECK: Prefer using the BIT_ULL macro
+#368: FILE: beamfs.h:368:
++#define BEAMFS_FEATURE_INCOMPAT_JOURNAL           (1ULL << 5)
+
+CHECK: Prefer using the BIT_ULL macro
+#369: FILE: beamfs.h:369:
++#define BEAMFS_FEATURE_INCOMPAT_DAX               (1ULL << 6)
+
+CHECK: Prefer using the BIT_ULL macro
+#370: FILE: beamfs.h:370:
++#define BEAMFS_FEATURE_INCOMPAT_RS_HEAVY          (1ULL << 7)
+
+CHECK: Prefer using the BIT_ULL macro
+#371: FILE: beamfs.h:371:
++#define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      (1ULL << 8)
+
+CHECK: Prefer using the BIT_ULL macro
+#372: FILE: beamfs.h:372:
++#define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
+
+CHECK: Prefer using the BIT_ULL macro
+#373: FILE: beamfs.h:373:
++#define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
+
+CHECK: line length of 105 exceeds 100 columns
+#483: FILE: beamfs.h:483:
++	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
+
+CHECK: Alignment should match open parenthesis
+#558: FILE: beamfs.h:558:
++void beamfs_log_rs_event(struct super_block *sb,
++			u64 block_no,
+
+CHECK: Alignment should match open parenthesis
+#614: FILE: beamfs.h:614:
++int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
++		    int *positions, unsigned int max_positions);
+
+CHECK: Alignment should match open parenthesis
+#631: FILE: beamfs.h:631:
++__u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
++				      unsigned int n_positions,
+
+CHECK: Alignment should match open parenthesis
+#650: FILE: beamfs.h:650:
++int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
++			   u8 *parity_buf, size_t parity_stride,
+
+CHECK: Alignment should match open parenthesis
+#653: FILE: beamfs.h:653:
++int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
++			   u8 *parity_buf, size_t parity_stride,
+
+CHECK: Alignment should match open parenthesis
+#670: FILE: beamfs.h:670:
++struct dentry *beamfs_lookup(struct inode *dir, struct dentry *dentry,
++			    unsigned int flags);
+
+total: 2 errors, 2 warnings, 33 checks, 676 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+NOTE: Whitespace errors detected.
+      You may wish to use scripts/cleanpatch or scripts/cleanfile
+
+beamfs.h has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

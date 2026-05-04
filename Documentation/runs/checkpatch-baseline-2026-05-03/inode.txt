@@ -1,0 +1,27 @@
+CHECK: Lines should not end with a '('
+#78: FILE: inode.c:78:
++		u32 scheme = le32_to_cpu(
+
+CHECK: Alignment should match open parenthesis
+#94: FILE: inode.c:94:
++			nerr = beamfs_rs_decode((u8 *)raw, BEAMFS_INODE_RS_DATA,
++					       raw->i_reserved,
+
+WARNING: Block comments use a trailing */ on a separate line
+#115: FILE: inode.c:115:
++			 * only DATA positions used by the entropy estimator. */
+
+CHECK: Alignment should match open parenthesis
+#122: FILE: inode.c:122:
++				beamfs_log_rs_event(sb, (u64)ino,
++						   positions, np,
+
+total: 0 errors, 1 warnings, 3 checks, 195 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+inode.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

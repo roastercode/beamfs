@@ -457,7 +457,7 @@ phase à n'importe quel moment.
 
 | Phase | Effort | Scope court                                 |
 |-------|--------|---------------------------------------------|
-| 0     | 3 h    | Cadrage formalisé (mainline-scope, format-v5-design, fsck.beamfs, roadmap update) |
+| 0     | 3 h    | Cadrage formalisé (mainline-scope, format-v5, fsck.beamfs, roadmap update) |
 | 1     | 50 h   | Format v5.0 minimal RFC-able                |
 | 2     | 30 h   | fsck.beamfs MVP                             |
 | 3     | 12 h   | Multiblock read_folio sub-steps 4-10        |
@@ -514,7 +514,7 @@ Migration entre profiles via `tune.beamfs -O +flags` (in-place).
 Migration depuis ext4/btrfs/xfs via copie + rsync.
 
 11 INCOMPAT bits réservés, 4 RO_COMPAT bits réservés, 3 COMPAT
-bits réservés. Détails dans `Documentation/format-v5-design.md`.
+bits réservés. Détails dans `Documentation/format-v5.md`.
 
 ### Trajectoire RFC mainline
 
@@ -546,7 +546,7 @@ actuels.
 
 **3824/4096 mismatch v4** : décision option A (garder + multiblock
 sub-steps 4-10) OU option B (INODE_UNIVERSAL séparé). Documentée
-dans `format-v5-design.md` section 4.3, décision pendante Phase 1.
+dans `format-v5.md` section 4.3, décision pendante Phase 1.
 
 **Allocator scaling** : multi-bitmap chained insuffisant pour 16 EB.
 Block groups (ext-style) suffit jusqu'à 256 TB. Btree allocator
@@ -583,7 +583,7 @@ branche `mainline-prep`)
 
 b84e61a docs(fsck): add fsck.beamfs.md design document
 a46c462 docs(scope): add mainline-scope.md formalizing v5 trajectory
-0c0b590 docs(format): add format-v5-design.md skeleton
+0c0b590 docs(format): add format-v5.md skeleton
 c604c85 docs(roadmap): add 8-phase mainline preparation roadmap
 
 
@@ -1164,5 +1164,270 @@ livrer un bloc preauth au lieu de tenter direct un commit batch.
 
 ---
 
-**Fin R0-R29. Lecture obligatoire de R0-R29 en debut de session.**
+## R30 - R-no-pager : neutraliser systematiquement le pager
+
+Tout outil CLI qui invoque un pager interactif (less, more) par defaut
+peut killer le terminal sous Wayland (foot/alacritty/kitty) si la sortie
+est volumineuse, ou bloquer la progression d'un bloc shell en attente
+d'un 'q' utilisateur. Le terminal d'Aurelien sous River/Wayland n'est
+pas une cible jetable (cf. R18) ; sa perte = perte de la session de
+travail.
+
+**Outils concernes** : git, gh, systemctl, journalctl, less, more, et
+tout binaire qui detecte un TTY et active less/more automatiquement.
+
+**Anti-patterns interdits** dans tout bloc shell livre par Claude :
+
+```bash
+git log                              # pager actif par defaut
+git diff                             # idem
+git show <commit>                    # idem
+gh repo view <owner>/<repo>          # pager via PAGER env
+gh pr view <num>                     # idem
+gh issue view <num>                  # idem
+gh api repos/<owner>/<repo>/...      # idem
+systemctl status <unit>              # pager LESS=FRSXMK actif
+journalctl -u <unit>                 # idem
+```
+
+**Patterns corrects** (a utiliser systematiquement) :
+
+```bash
+# git : option --no-pager native
+git --no-pager log
+git --no-pager diff
+git --no-pager show <commit>
+
+# gh : pas d'option --no-pager native, utiliser PAGER=cat
+PAGER=cat gh repo view <owner>/<repo> --json name,visibility
+PAGER=cat gh pr view <num>
+PAGER=cat gh api repos/<owner>/<repo>/branches
+# alternative equivalente : pipe vers cat (force EOF sur stdout)
+gh repo view <owner>/<repo> | cat
+
+# systemctl/journalctl : option --no-pager native
+systemctl status <unit> --no-pager
+journalctl -u <unit> --no-pager
+```
+
+**Self-check obligatoire avant livraison de bloc shell** : Claude
+grepe mentalement le bloc pour `git log|git diff|git show|gh repo|gh
+pr|gh issue|gh api|systemctl|journalctl|less|more` et verifie que
+`--no-pager` ou `PAGER=cat` ou `| cat` est present dans la meme
+commande. Si non : ajouter avant livraison.
+
+**Conclusion** : Claude ne genere JAMAIS, sans exception, une commande
+qui invoque un pager interactif. La perte du terminal sous Wayland
+casse le flux de travail et fait perdre des etats non-persistes
+(scrollback, processus en cours, variables d'env de session).
+
+Violations observees session 2026-05-02 substep 10 : `git log` sans
+`--no-pager` (1x), `gh repo view` sans `PAGER=cat` (3x). Cette regle
+R30 est ajoutee suite a ces violations pour eviter la recurrence.
+
+---
+
+## R31 - R-rebuild-yocto-avant-bench : integration des changements lockstep dans les VM avant R19
+
+Tout commit qui touche un fichier kernel (`.c`/`.h`) en lockstep beamfs
+<-> yocto-beamfs doit etre suivi, AVANT tout `beamfs-bench full` et
+AVANT tout push, par une verification empirique que les changements
+sont bien integres dans le `beamfs.ko` charge par les VMs cluster.
+
+**Procedure obligatoire** :
+
+1. Lockstep sha256 beamfs <-> yocto-beamfs (R9) : deja obligatoire.
+
+2. Bitbake doit avoir vu le delta source. Yocto utilise le SRC_URI
+   pointant vers `recipes-kernel/beamfs/files/beamfs-0.1.0/`. Si les
+   fichiers de cette branche ont change depuis le dernier build,
+   bitbake refait do_compile au prochain `bitbake beamfs-module` ou
+   `bitbake hpc-arm64-research-beamfs`.
+
+3. L'image `.ext2` canonique doit avoir ete regeneree APRES le delta
+   source. Verifier le timestamp de
+   `tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2`
+   et s'assurer qu'il est posterieur au dernier `mv`/`write_text` sur
+   la copie yocto-beamfs des sources.
+
+4. Le redeploy `.ext2` -> VM doit etre complet. La VM demarree doit
+   charger le `beamfs.ko` dont le sha256 == sha256 du `.ko` extrait
+   par 7z/debugfs de l'`.ext2` canonique.
+
+5. Phase 0.7 du pipeline `beamfs-bench full` enforce cet invariant
+   automatiquement : identity FAIL bloque le bench. Cette protection
+   est intentionnelle et NE DOIT PAS etre contournee.
+
+**Si Phase 0.7 fail avec divergence in-VM != reference** :
+
+- verifier que le redeploy s'est bien fait (timestamp `.img` VM
+  posterieur au timestamp `.ext2` canonique)
+- verifier que la VM a redemarre sur la nouvelle `.img`
+- en dernier recours : `virsh destroy` + `cp -f` `.ext2` -> `.img` +
+  `virsh start` manuel pour forcer le redeploiement
+- relancer `beamfs-bench full`
+
+**Anti-pattern interdit** : modifier le code lockstep, lancer
+`beamfs-bench full` directement sans verifier que bitbake a bien
+detecte le delta. Si SRC_URI utilise file:// avec des sha256sums
+pinnes, bitbake peut ignorer les changements silencieusement et
+builder une image avec les anciennes sources.
+
+**Incident fondateur** (2026-05-03, session sub-1.A push) : apres
+commits `d02b1ec` (R17 cleanup) et `c44fc96` (sub-1.A V5 declaration)
+en lockstep beamfs <-> yocto-beamfs, l'invocation `beamfs-bench full`
+a fail en Phase 0.7 avec divergence in-VM (sha256 ancien) vs reference
+(sha256 nouveau, post-bitbake). Le redeploy `.ext2` -> VM a ete
+incomplet : la VM master a charge un `beamfs.ko` plus ancien que
+celui extrait de l'`.ext2` canonique. Cette regle R31 est ajoutee
+suite a cet incident pour eviter la recurrence.
+
+---
+
+## R32 - R-base64-markdown-content : encoder le contenu markdown sensible en base64
+
+Le frontend chat (claude.ai web/app) auto-linkifie certains tokens
+dans tout texte affiché dans un bloc shell : extensions de fichier
+courantes (.md, .h, .py, .sh, .bb, .rs, .json), mais aussi tout
+path qui ressemble vaguement à un chemin web. Cette transformation
+se produit CÔTÉ UI, AVANT que le shell ne reçoive le bloc.
+Conséquence : un heredoc bash `cat << 'EOF' ... EOF` contenant du
+markdown ou de la prose technique avec ces tokens devient un
+script invalide une fois colle dans le terminal -- le linkifier
+a injecte des `[xxx](http://xxx)` dans le contenu, ce qui casse
+la grammaire shell ou produit du contenu corrompu sur disque.
+
+Règle :
+
+- INTERDIT : `cat << 'EOF' ... EOF` ou `cat > file << 'EOF' ... EOF`
+  contenant du markdown, du C, du Rust, du Python, du Bitbake, ou
+  toute prose mentionnant des extensions courantes.
+- AUTORISE : Python heredoc `python3 << 'PYEOF' ... PYEOF` qui
+  ecrit le contenu via `Path.write_text()` ou `Path.write_bytes()`,
+  avec le contenu lui-meme construit ligne par ligne ou decode
+  depuis un base64 string opaque.
+- AUTORISE : `bytes([...]).decode()` pour reconstituer un nom de
+  fichier sensible cote runtime.
+
+Pattern recommande pour markdown long :
+
+```
+python3 << 'PYEOF'
+import base64
+from pathlib import Path
+B64 = (
+    "...base64 du markdown complet..."
+)
+Path('cible.md').write_text(base64.b64decode(B64).decode('utf-8'))
+PYEOF
+```
+
+Pour markdown court, construction ligne par ligne avec unicode
+escapes (`\u00e9` pour é, `\u00c9` pour É) evite aussi le risque
+de transcription accent decompose vs precompose.
+
+Decouverte 2026-05-03 apres incident terminal kill lors de la
+creation du tool handoff (heredoc bash avec markdown contenant
+`.md` -> linkifier corrompt -> shell invalide -> tty perdu).
+
+---
+
+## R33 - R-xdg-bin-install : binaires CLI personnels dans ~/.local/bin
+
+Sur le poste Gentoo de reference (`spartian-1`), `~/.local/bin`
+est dans le PATH par defaut alors que `~/bin` ne l'est pas. Cela
+suit la convention XDG Base Directory.
+
+Règle :
+
+- Tout symlink ou binaire CLI personnel -> `~/.local/bin/<nom>`.
+- Pas de modification de `~/.bash_profile` pour ajouter `~/bin`
+  au PATH : changer le PATH demande un reload shell, alors
+  qu'utiliser `~/.local/bin` est immediatement fonctionnel.
+
+Decouverte 2026-05-03 lors de l'install du tool handoff
+(symlink dans `~/bin` -> `command not found` dans le shell
+courant ; deplacement vers `~/.local/bin` -> fonctionnel
+immediatement).
+
+---
+
+## R34 - R-handoff-tool : utiliser le tool handoff en fin de session
+
+Le repo PRIVATE `roastercode/handoff` heberge un outil CLI
+(`handoff`) qui :
+
+- Genere un prompt de handoff template avec l'état reel des
+  repos trackes (tips git, dirty, unpushed) -> `handoff`
+- Lint un handoff existant et commit+push si OK ->
+  `handoff --analyse FILE`
+- Migre les anciens handoffs ad-hoc vers l'archive canonique
+  -> `handoff --migrate` (one-shot)
+
+Convention canonique : `~/git/handoff/handoffs/YYYY-MM-DD-<slug>.md`.
+
+Sections obligatoires (linted) :
+- `## Repos state`
+- `## Ce qui a été fait`
+- `## État pré-suite`
+- `## Action item suivant`
+
+Interdits dans la prose (linted) :
+- Adresser le prochain Claude comme une personne
+- Citer les regles methodologiques (R\d+)
+- Langage prescriptif (il faut, tu dois, n'oublie pas)
+- Paths absolus `/home/<user>/...` hors fenced code blocks
+- Fichier > 500 lignes
+
+Règle :
+
+- En fin de session, le handoff est ecrit, valide et pushe
+  via le tool `handoff`. Pas de fichier ad-hoc dans
+  `~/context/handoff/` ou autre emplacement legacy.
+- Le tool est self-tracked : `~/git/handoff` figure dans
+  TRACKED_REPOS du linter. Ses propres commits hashes peuvent
+  etre cites dans un handoff sans flag.
+
+Cree 2026-05-03 lors de cette session.
+
+---
+
+---
+
+## R35 - R-secrets-never-in-chat : aucun secret vivant ne transite par un chat IA
+
+Les chats IA (claude.ai, ChatGPT, Gemini, etc.) ne sont pas des
+canaux securises pour transporter des secrets vivants : cles API,
+mots de passe, tokens GitHub/GitLab, cles GPG privees, secrets
+OAuth, bearer tokens, etc.
+
+Risques :
+- Conservation dans l'historique de la conversation cote provider
+  (potentiellement utilisee pour audit, fine-tuning, support).
+- Persistance dans les transcripts copies/colles (handoffs,
+  emails, tickets de bug). Le secret fuit a chaque copie.
+- Acces administratifs des employes du provider en cas
+  d'incident ou d'investigation.
+- Exposition immediate a l'IA elle-meme, dont les usages
+  downstream ne sont pas controles par l'utilisateur.
+
+Regle :
+
+- Les secrets sont configures cote shell uniquement, par
+  l'humain, dans `~/.bash_profile` ou un gestionnaire de
+  secrets dedie (pass, GNOME Keyring, sops).
+- Les programmes generes par Claude lisent les secrets via
+  variables d'environnement uniquement (ex:
+  `std::env::var("ANTHROPIC_API_KEY")`), jamais en dur.
+- Si un secret est colle accidentellement dans un chat :
+  revocation immediate sur la console du provider, puis
+  generation d'un nouveau secret saisi cote shell uniquement.
+
+Decouverte 2026-05-03 : cle API Anthropic collee dans le chat
+lors de la preparation du tool handoff Rust. Cle revoquee,
+nouvelle generee cote shell, jamais entree dans la conversation.
+
+---
+
+**Fin R0-R35. Lecture obligatoire de R0-R35 en debut de session.**
 

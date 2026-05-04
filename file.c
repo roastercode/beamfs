@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - File operations
+ * beamfs - File operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 #include <linux/fs.h>

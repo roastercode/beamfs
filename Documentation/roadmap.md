@@ -24,7 +24,7 @@ all four cluster nodes) plus the stage-specific sanity tests.
 |-------|----------------------------------------------|-------------------------|---------------------------|
 | 1.5   | On-disk bitmap with RS FEC (v2 format)       | CLOSED 2026-04-17       | (pre-tagging)             |
 | 2     | Format extension points (v3 format)          | CLOSED 2026-04-26       | `v0.2.0-format-stable`    |
-| 3     | Metadata hardening                           | ACTIVE                  | (planned: `v0.3.0-*`)     |
+| 3     | Metadata hardening                           | CLOSED 2026-05-02       | (planned: `v0.3.0-metadata-hardening`) |
 | 4     | Universal data block protection              | PENDING                 | (planned: `v0.4.0-*`)     |
 | 5     | Offensive security analysis                  | PENDING                 | (planned: `v0.5.0-*`)     |
 
@@ -351,7 +351,7 @@ write + fsync (10x64B) Med 24.000 ms. This baseline is the
 reference against which item 4 (v4 bump) will be compared
 (regression criterion: delta < 10 % on M1+M2).
 
-### Item 4 - Shannon entropy in RS journal (PENDING)
+### Item 4 - Shannon entropy in RS journal (CLOSED 2026-05-02)
 
 **Threat model reference:** 6.4 (tamper-evident journal).
 Reclassified as Must-have by threat-model section 8 §1.
@@ -915,7 +915,7 @@ concrete deliverable, and an effort estimate in focused work hours.
 |-------------|-----------------------------------------------------|
 | Effort      | 3 hours                                             |
 | DoD         | Documents committed on `mainline-prep`              |
-| Deliverable | mainline-scope.md, format-v5-design.md, fsck.beamfs.md |
+| Deliverable | mainline-scope.md, format-v5.md, fsck.beamfs.md |
 | Risk        | Scope creep, mitigated by atomic commits            |
 | Precondition| None                                                |
 

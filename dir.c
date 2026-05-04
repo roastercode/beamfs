@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Directory operations
+ * beamfs - Directory operations
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 #include <linux/fs.h>

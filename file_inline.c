@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
+ * beamfs - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
  *
  * Per-block Reed-Solomon FEC on user data: each 4096-byte disk block
  * holds 16 RS(255,239) shortened subblocks (3824 user bytes + 256 parity
@@ -547,7 +547,7 @@ static int beamfs_inline_folio_coverage(struct inode *inode,
 /* read_folio (v2 INLINE) -- per-block RS(255,239) FEC, multi-block scope.   */
 /*                                                                           */
 /* Convention C (sliding window, VFS-conformant): folio at index N maps to   */
-/* user-byte range [N * PAGE_SIZE, (N+1) * PAGE_SIZE), and BEAMFS translates */
+/* user-byte range [N * PAGE_SIZE, (N+1) * PAGE_SIZE), and beamfs translates */
 /* this to one or two INLINE disk blocks at runtime via folio_coverage.      */
 /*                                                                           */
 /* Steps:                                                                    */
@@ -566,7 +566,7 @@ static int beamfs_inline_folio_coverage(struct inode *inode,
 /* gets the corresponding slice zeroed and the other slice decoded normally. */
 /* This is the sparse-file case (lseek + write past i_size).                 */
 /*                                                                           */
-/* MIL-STD-883 SEE coverage: validates BEAMFS resistance to RadFI            */
+/* MIL-STD-883 SEE coverage: validates beamfs resistance to RadFI            */
 /* single-bit and multi-byte payload corruption injected at submit_bio,      */
 /* across multi-block files (the v2.x WOW-factor target).                    */
 /* ------------------------------------------------------------------------- */

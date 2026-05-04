@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Superblock operations
+ * beamfs - Superblock operations
  * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
@@ -658,6 +658,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	sbi->s_scheme = le32_to_cpu(fsb->s_data_protection_scheme);
+	sbi->s_feat_incompat = le64_to_cpu(fsb->s_feat_incompat);
 
 	pr_info("beamfs: mounted v%u (blocks=%llu free=%lu inodes=%llu scheme=%u feat=0x%016llx/0x%016llx/0x%016llx)\n",
 		le32_to_cpu(fsb->s_version),
@@ -701,7 +702,7 @@ static int beamfs_get_tree(struct fs_context *fc)
  * beamfs_reconfigure - handle mount -o remount
  *
  * xfstests calls remount,ro after each test to verify filesystem
- * integrity. BEAMFS accepts the reconfigure request without
+ * integrity. beamfs accepts the reconfigure request without
  * taking any action - ro/rw transitions are handled by the VFS.
  */
 static int beamfs_reconfigure(struct fs_context *fc)

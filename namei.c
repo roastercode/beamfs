@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * BEAMFS - Filename / directory entry operations
+ * beamfs - Filename / directory entry operations
  * Author: Aurélien DESBRIERES <aurelien@hackers.camp>
  *
  * Implements: create, mkdir, unlink, rmdir, link, rename
@@ -520,7 +520,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 	int	      is_dir    = S_ISDIR(old_inode->i_mode);
 	int	      ret;
 
-	/* BEAMFS v1: no RENAME_EXCHANGE or RENAME_WHITEOUT */
+	/* beamfs v1: no RENAME_EXCHANGE or RENAME_WHITEOUT */
 	if (flags & ~RENAME_NOREPLACE)
 		return -EINVAL;
 

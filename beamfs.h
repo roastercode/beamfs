@@ -81,6 +81,26 @@
 #define BEAMFS_CANARY_HEADER_STR      "BEAMFS-CANARY-v4 RS(255,239)x16 SHA256-fixed\n"
 
 /*
+ * Reserved inode numbers.
+ *
+ * Inodes [0 .. BEAMFS_FIRST_USER_INO) are reserved for FS-internal
+ * fixtures (root directory, canary block alias). User-visible inode
+ * allocation starts at BEAMFS_FIRST_USER_INO.
+ *
+ * Operations that would mutate or free reserved inodes are rejected
+ * by defense-in-depth: VFS layer (S_IMMUTABLE) and allocator layer
+ * (range check in beamfs_free_block / beamfs_free_inode_num).
+ */
+#define BEAMFS_RESERVED_INO_ROOT      1
+#define BEAMFS_RESERVED_INO_CANARY    2
+#define BEAMFS_FIRST_USER_INO         3
+
+static inline bool beamfs_ino_is_reserved(u64 ino)
+{
+	return ino < BEAMFS_FIRST_USER_INO;
+}
+
+/*
  * Translation helpers for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
  *
  * The user-visible file_offset (in bytes) maps to a logical block index
@@ -234,7 +254,7 @@ struct beamfs_rs_event {
  *
  * BINS    -- number of histogram bins over the codeword position range.
  *            Power of 2 chosen so that bin_index = pos * BINS / code_len
- *            fits in u32 arithmetic without overflow for any BEAMFS
+ *            fits in u32 arithmetic without overflow for any beamfs
  *            codeword length (max 239 bytes).
  * Q       -- fractional bits in the Q-format LUT (Q16.16 = 16 frac bits).
  *
@@ -271,12 +291,19 @@ struct beamfs_rs_event {
  *         (8 -> 13 subblocks). See Documentation/format-v4.md.
  *
  * Mount policy: strict equality with BEAMFS_VERSION_CURRENT.
- * BEAMFS is a fresh format (v1); no legacy v2/v3 images exist to
- * migrate from. Volumes created with mkfs.ftrfs (different magic)
- * are NOT mountable as BEAMFS by design (distinct filesystem).
+ * As of Phase 1 sub-1.D, BEAMFS_VERSION_CURRENT = V5 (v5.0 minimal
+ * RFC-able, mainline target). v1 images created by mkfs.beamfs
+ * pre-Phase-1 are NOT mountable; they require offline reformat via
+ * `mkfs.beamfs --profile=embedded`. Dual-format in-kernel parsing
+ * is intentionally avoided (doubles audit surface for KASAN /
+ * syzkaller for no operational benefit on a niche FS).
+ *
+ * Volumes created with mkfs.ftrfs (different magic) are NOT
+ * mountable as beamfs by design (distinct filesystem).
  */
 #define BEAMFS_VERSION_V1        1
-#define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V1
+#define BEAMFS_VERSION_V5        5
+#define BEAMFS_VERSION_CURRENT   BEAMFS_VERSION_V5
 
 /*
  * Data protection scheme values for s_data_protection_scheme.
@@ -345,10 +372,15 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
 #define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
 
-/* All flags supported by this kernel module (none active in v5.0) */
+/* Flags supported by this kernel module.
+ * PER_INODE_RS: per-inode RS(255,239) parity protection. The kernel
+ * write path has always computed the parity on every inode write
+ * (namei.c::beamfs_write_inode_raw); enabling this bit in SUPP
+ * unlocks the read-side decoder under any s_data_protection_scheme.
+ */
 #define BEAMFS_FEAT_COMPAT_SUPP    0ULL
 #define BEAMFS_FEAT_RO_COMPAT_SUPP 0ULL
-#define BEAMFS_FEAT_INCOMPAT_SUPP  0ULL
+#define BEAMFS_FEAT_INCOMPAT_SUPP  BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS
 
 /*
  * On-disk superblock - block 0
@@ -454,6 +486,7 @@ struct beamfs_sb_info {
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
+	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 };
 
 /*
