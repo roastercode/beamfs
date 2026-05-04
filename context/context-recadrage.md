@@ -828,7 +828,7 @@ des lignes blanches réelles dans la sortie terminal d'Aurélien.
 
 ---
 
-<!-- Footer obsolete: this used to close the contract before R29-R36 were appended. The active closing footer is at end of file (Fin R0-R36). -->
+<!-- Footer obsolete: this used to close the contract before R29-R37 were appended. The active closing footer is at end of file (Fin R0-R37). -->
 
 
 ## R21 - R-isolation : architecture FS-test isolee, master orchestrateur seul
@@ -1429,7 +1429,80 @@ nouvelle generee cote shell, jamais entree dans la conversation.
 
 ---
 
-## R36 - R-build-target-yocto-only : beamfs ne se compile que sur la cible Yocto, jamais sur l'host
+## R36 - R-tarball-canonical : analyse projet via tarball cote Aurelien, jamais sandbox Claude
+
+L'analyse complete du projet beamfs (lecture des sources, du
+git log, des manifests, des artefacts de validation) ne se
+fait JAMAIS via une exploration directe de la sandbox Claude.
+Elle se fait TOUJOURS sur la base d'un tarball produit cote
+Aurelien, sur spartian-1, a un instant T donne, et passe a
+Claude comme upload.
+
+### Justification
+
+- La sandbox Claude est volatile et reinitialisee a chaque
+  session. Elle ne contient pas les fichiers vivants du projet
+  par defaut.
+- Toute exploration sandbox-side qui pretendrait lire l'etat
+  reel produit au mieux des donnees obsoletes, au pire un
+  faux positif fonde sur une copie partielle ou perimee.
+- La source-of-truth est sur spartian-1 (~/git/beamfs/,
+  ~/git/yocto-beamfs/, ~/git/beamfs-bench/, ~/git/radfi/,
+  ~/git/handoff/). La sandbox n'est qu'un cache de lecture,
+  pas une source.
+- Refresh = nouveau tarball. Pas de "je relis ce que j'avais
+  en memoire", pas de "je me souviens de la session
+  precedente".
+
+### Procedure
+
+Aurelien produit le tarball par bloc shell explicite, depose
+le fichier dans /tmp (depuis 2026-05-04) avec timestamp UTC
+et sha256, et l'upload dans la conversation. Claude verifie
+le sha256 a la reception, extrait le contenu cote sandbox
+comme cache, et travaille a partir de ce snapshot date.
+
+Toute citation factuelle ulterieure dans la session
+("d'apres le code", "d'apres le git log", "d'apres tel
+manifest") doit etre tracable au tarball charge, par
+sha256 + timestamp + chemin. Pas de citation flottante.
+
+### Implementation cote handoff tool
+
+Le tool `handoff` (R34) genere automatiquement un tarball
+session a la fin du pipeline `cmd_full` :
+
+  /tmp/beamfs-state-<TS>.tar.gz + MANIFEST.txt
+
+Le tarball contient les sources beamfs, beamfs-bench,
+yocto-beamfs, radfi, handoff, plus le git log de chaque
+repo, plus les metadonnees gh (PR, issues, releases CI).
+Le manifest cite sha256 du tarball et timestamp UTC pour
+tracabilite.
+
+### Faute possible (anti-pattern)
+
+- Claude lit ses propres souvenirs de la session precedente
+  pour repondre a une question d'etat actuel : interdit. Il
+  doit demander un nouveau tarball.
+- Claude utilise des resultats sandbox d'une session passee
+  comme source : interdit, la sandbox a ete reinitialisee.
+- Claude pretend extraire un fichier projet via web fetch ou
+  via une connexion arbitraire au repo : interdit, le source
+  est sur spartian-1, pas sur internet a portee de la
+  sandbox.
+
+Cree au commit `1647c68` du tool handoff (2026-05-03,
+laser-engrave R0-R36 en code) puis enrichi par le commit
+`ed88075` (auto-generation tarball de fin de pipeline).
+Rectifiee 2026-05-04 par integration ecrite dans le contrat
+de recadrage (jusqu'ici la regle existait dans le code
+handoff mais n'avait jamais ete couchee dans recadrage.md ;
+ghost rule resolue).
+
+---
+
+## R37 - R-build-target-yocto-only : beamfs ne se compile que sur la cible Yocto, jamais sur l'host
 
 beamfs est un module kernel out-of-tree dont la cible de build
 EST et SERA TOUJOURS l'environnement Yocto cluster (4-node aarch64
@@ -1488,7 +1561,7 @@ Restent autorises sur sandbox ou sur host spartian-1 :
 - generation de docs, scripts shell, scripts Rust beamfs-bench
   qui se compilent cote host car c'est userspace (cargo).
 
-### Faute commise 2026-05-04 (origine de R36)
+### Faute commise 2026-05-04 (origine de R37)
 
 Lors de la session Stage 4 livrable 3, Claude a lance `make`
 dans `~/git/beamfs/` cote spartian-1 host pour "valider" le
@@ -1499,7 +1572,7 @@ suggere un bug livrable 3 inexistant. R12 (hardware-analysis)
 violee, R23 (image canonique) ignoree, R24 (cwd ~/git/yocto-beamfs)
 ignoree.
 
-R36 grave la regle au niveau du contrat de recadrage pour
+R37 grave la regle au niveau du contrat de recadrage pour
 qu'aucune session future ne reproduise cette erreur, par
 quelque chemin que ce soit (smoke test, syntax check,
 validation rapide, etc.).
@@ -1508,5 +1581,5 @@ Decouverte 2026-05-04, session Stage 4 livrable 3.
 
 ---
 
-**Fin R0-R36. Lecture obligatoire de R0-R36 en debut de session.**
+**Fin R0-R37. Lecture obligatoire de R0-R37 en debut de session.**
 
