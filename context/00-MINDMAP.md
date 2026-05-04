@@ -81,7 +81,7 @@ R19 canonical pre-push : `beamfs-bench full --auto-confirm` exit 0.
 
 context/
 ├── 00-MINDMAP.md              -- this file (entry point)
-├── context-recadrage.md       -- R0-R28 operational contract
+├── context-recadrage.md       -- R0-R36 operational contract
 ├── STATUS.md                  -- current state (live updated)
 ├── TODO.md                    -- deferred work (append only)
 ├── INLINE-MULTIBLOCK-DESIGN.md-- design phase 3 (active)
@@ -125,7 +125,7 @@ yocto-beamfs/
 
 ---
 
-## 6. Key rules (R0-R28 in recadrage)
+## 6. Key rules (R0-R36 in recadrage)
 
 | R   | Subject                                                          |
 |-----|------------------------------------------------------------------|
@@ -170,7 +170,7 @@ Estimated total : 405h. beamfs-bench saved ~85h regression budget.
 
 ## 8. Quick navigation cheatsheet
 
-- New to project ? → read this file, then `context-recadrage.md` (R0-R28)
+- New to project ? -> read this file, then `context-recadrage.md` (R0-R36)
 - Current state ? → `context/STATUS.md`
 - Deferred work ? → `context/TODO.md`
 - Threat model ? → `Documentation/threat-model.md`

@@ -1,7 +1,7 @@
 # beamfs - Status flag
 
 > **CLAUDE - READ FIRST**: open `context/00-MINDMAP.md` for project
-> navigation, then `context/context-recadrage.md` (R0-R28) for the
+> navigation, then `context/context-recadrage.md` (R0-R36) for the
 > operational contract, then THIS file for current state.
 
 Etat reel au 2026-05-02 morning, sub-steps 6 + 7 closed,

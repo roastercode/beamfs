@@ -828,7 +828,7 @@ des lignes blanches réelles dans la sortie terminal d'Aurélien.
 
 ---
 
-**Fin du contrat de recadrage. Lecture obligatoire en début de session.**
+<!-- Footer obsolete: this used to close the contract before R29-R36 were appended. The active closing footer is at end of file (Fin R0-R36). -->
 
 
 ## R21 - R-isolation : architecture FS-test isolee, master orchestrateur seul
@@ -1429,5 +1429,84 @@ nouvelle generee cote shell, jamais entree dans la conversation.
 
 ---
 
-**Fin R0-R35. Lecture obligatoire de R0-R35 en debut de session.**
+## R36 - R-build-target-yocto-only : beamfs ne se compile que sur la cible Yocto, jamais sur l'host
+
+beamfs est un module kernel out-of-tree dont la cible de build
+EST et SERA TOUJOURS l'environnement Yocto cluster (4-node aarch64
+libvirt VMs, kernel 7.0+, recipe canonique
+hpc-arm64-research-beamfs.bb par R23, invocation depuis
+~/git/yocto-beamfs par R24).
+
+Le poste de travail spartian-1 (Gentoo OpenRC, kernel 6.18 host
+selon R22) N'EST PAS et NE DEVIENDRA JAMAIS une cible de build
+beamfs. Les sources kernel sous /usr/src/linux-* sur spartian-1
+servent au kernel host Aurelien, pas au kernel beamfs.
+
+### Regle absolue
+
+Aucune commande `make` directe dans `~/git/beamfs/` n'est jamais
+lancee. La seule chaine de build legitime est :
+
+  cd ~/git/yocto-beamfs && beamfs-bench full --auto-confirm
+
+Cette commande declenche en interne :
+
+1. bitbake recipes-kernel/beamfs sur le sysroot Yocto aarch64 ;
+2. integration du beamfs.ko dans l'image hpc-arm64-research-beamfs ;
+3. deploiement de l'image sur les 4 VMs cluster ;
+4. R31 verification d'identite (sha256 beamfs.ko in-VM == sha256
+   sysroot) ;
+5. R19 validation chain (multifs + cluster_attack + crash + fsck +
+   manifest GPG-signed).
+
+C'est la seule reference de "build beamfs". Toute autre tentative
+de compilation (host gcc, make direct, sandbox IA, autre cible)
+produit des resultats non-canoniques au mieux, des faux negatifs
+au pire (symboles kernel cible-specifiques absents du host, drift
+d'API entre versions kernel, etc.).
+
+### Pour Claude (tres explicite, repetition voulue)
+
+- Claude NE LANCE JAMAIS `make` dans `~/git/beamfs/`.
+- Claude NE LANCE JAMAIS `gcc` direct sur les .c de beamfs.
+- Claude NE COMPILE JAMAIS beamfs cote sandbox / cote host.
+- Claude N'AJOUTE JAMAIS d'etape `make` au pipeline R8.
+- Claude NE PROPOSE JAMAIS le build host comme "etape de
+  validation" ni comme "smoke test" ni comme "syntax check".
+- Si Claude lit beamfs.h ou un .c et veut verifier la syntaxe,
+  c'est par lecture statique uniquement (R28 : lecture disque,
+  pas execution).
+
+### Cas legitimes d'execution sandbox / host
+
+Restent autorises sur sandbox ou sur host spartian-1 :
+
+- lecture de fichiers (cat, sed, grep, view) ;
+- patches via Python anchor-exact (R27/M5) ;
+- verification syntaxique passive (count, grep, regex sur
+  contenu) ;
+- generation de docs, scripts shell, scripts Rust beamfs-bench
+  qui se compilent cote host car c'est userspace (cargo).
+
+### Faute commise 2026-05-04 (origine de R36)
+
+Lors de la session Stage 4 livrable 3, Claude a lance `make`
+dans `~/git/beamfs/` cote spartian-1 host pour "valider" le
+patch R27/M5 d'ajout du bit 11 SHADOW_PARITY. Le build a echoue
+sur `inode_state_read_once()` (symbole kernel 7.0+ absent du
+kernel host 6.18), produisant un faux negatif qui a brievement
+suggere un bug livrable 3 inexistant. R12 (hardware-analysis)
+violee, R23 (image canonique) ignoree, R24 (cwd ~/git/yocto-beamfs)
+ignoree.
+
+R36 grave la regle au niveau du contrat de recadrage pour
+qu'aucune session future ne reproduise cette erreur, par
+quelque chemin que ce soit (smoke test, syntax check,
+validation rapide, etc.).
+
+Decouverte 2026-05-04, session Stage 4 livrable 3.
+
+---
+
+**Fin R0-R36. Lecture obligatoire de R0-R36 en debut de session.**
 
