@@ -189,8 +189,8 @@ static ssize_t beamfs_writeback_range(struct iomap_writepage_ctx *wpc,
 				     struct folio *folio, u64 offset,
 				     unsigned int len, u64 end_pos)
 {
-	if (offset < wpc->iomap.offset ||
-	    offset >= wpc->iomap.offset + wpc->iomap.length) {
+	if ((loff_t)offset < wpc->iomap.offset ||
+	    (loff_t)offset >= wpc->iomap.offset + (loff_t)wpc->iomap.length) {
 		int ret;
 
 		memset(&wpc->iomap, 0, sizeof(wpc->iomap));
