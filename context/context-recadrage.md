@@ -1581,5 +1581,89 @@ Decouverte 2026-05-04, session Stage 4 livrable 3.
 
 ---
 
-**Fin R0-R37. Lecture obligatoire de R0-R37 en debut de session.**
+## R38 - R-sandbox-base-only : sandbox Claude limitee aux taches de base
+
+La sandbox d'execution Claude (filesystem ephemere, outils unix de base,
+Python, parsers texte) est cantonnee a des taches de **lecture et
+analyse passive** sur les tarballs produits cote spartian. Toute tache
+avancee est interdite en sandbox sauf ordre explicite contraire de
+l'utilisateur.
+
+### Taches autorisees en sandbox (par defaut)
+
+- Lecture de fichiers texte / source (cat, sed, grep, view, head/tail).
+- Inventaire d'un tarball (tar tzf, ls, find, du, sha256sum).
+- Verification d'unicite des ancres byte-for-byte (Python count==1) AVANT
+  livraison d'un patch a Aurelien (R27).
+- Calcul de differentiel statique (diff -u, comm, sort).
+- Lecture et resume de manifests, JSON, YAML, dmesg.log, ftrace.log.
+- Decodage de hex/binaire passif (xxd, hexdump-style en Python).
+- Construction de prose (commit messages, paragraphes de doc).
+
+### Taches interdites en sandbox sans ordre explicite
+
+- Execution de code en condition de production (compilation kernel,
+  bitbake, cargo build, make).
+- Diagnostic empirique necessitant un outil professionnel installe cote
+  spartian (bpftrace, perf, ftrace, blktrace, strace, gdb, valgrind,
+  rr, lttng).
+- Reproduction d'un bug runtime (le bug se reproduit cote spartian, pas
+  en sandbox).
+- Simulation d'environnement (libvirt VMs, RadFI fault injection, kernel
+  module load, mount).
+- Reverse-engineering de binaires (objdump, readelf, nm sur des binaires
+  produits par bitbake ou cargo).
+- Pretendre lire l'etat live d'une commande systeme (virsh, lsmod,
+  dmesg) sans tarball uploadepar l'utilisateur.
+
+### Justification
+
+La sandbox est ephemere (reset entre sessions), depourvue d'acces
+hardware (pas de devices, pas de VMs, pas de RadFI), et n'a pas la
+chaine d'outils du laboratoire spartian (R23 IMAGE_INSTALL contient
+strace, blktrace, bpftrace, perf, trace-cmd, fio, iperf3, sysstat).
+Tout diagnostic empirique doit etre execute cote spartian, capture
+dans un tarball forensic, puis lu en sandbox. Le contraire (essayer
+de reproduire en sandbox) est une perte de temps systematique : la
+sandbox ne peut pas voir l'etat reel, elle ne peut que halluciner.
+
+### Pour Claude
+
+Claude ne propose pas, sans ordre explicite contraire :
+
+- de strace cote sandbox ; le strace s'execute cote spartian.
+- de bpftrace cote sandbox ; bpftrace s'execute cote spartian.
+- de gdb cote sandbox ; gdb s'execute cote spartian.
+- de simulation d'attaque RadFI cote sandbox.
+- de mount d'un volume beamfs cote sandbox (impossible : pas de kernel
+  module, pas de root).
+- de strace, ltrace, gdb, valgrind sur des binaires bitbake'es.
+- toute reproduction d'un comportement runtime cote sandbox.
+
+Quand un diagnostic empirique est requis, Claude livre la commande a
+executer cote spartian, attend le tarball forensic, et lit le tarball
+en sandbox. Pas l'inverse.
+
+### Faute commise 2026-05-04 (origine de R38)
+
+Lors du diagnostic du bug de propagation `--per-inode-rs` (func-12
+sub-4), Claude a successivement propose : (a) `cargo check` cote
+sandbox alors que le binaire est cote spartian, (b) `strace -f -e
+execve` qui a casse `sudo` (capability NOSUID sous strace), (c)
+`bpftrace` cote spartian mais avec un script qui produit 0 lignes
+(la condition `comm == "ssh"` ne capture pas le execve de fork ;
+bpftrace voit le parent shell, pas le child ssh post-fork). Trois
+tentatives, trois resultats erratiques, alors que le diagnostic
+correct etait : passer par les outils du laboratoire **avec des
+arguments corrects**, pilotes par Aurelien, pas par Claude.
+
+R38 grave la regle : Claude livre des commandes verifiables, executees
+cote spartian, lues via tarball forensic. Pas de reproduction en
+sandbox sauf ordre explicite contraire.
+
+Decouverte 2026-05-04, session func-12 sub-4 demonstration.
+
+---
+
+**Fin R0-R38. Lecture obligatoire de R0-R38 en debut de session.**
 
