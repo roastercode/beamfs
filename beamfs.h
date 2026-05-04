@@ -371,6 +371,7 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      (1ULL << 8)
 #define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
 #define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
+#define BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY     (1ULL << 11)
 
 /* Flags supported by this kernel module.
  * PER_INODE_RS: per-inode RS(255,239) parity protection. The kernel

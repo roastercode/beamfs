@@ -284,6 +284,7 @@ type).
 #define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      (1ULL << 8)
 #define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
 #define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
+#define BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY     (1ULL << 11)
 ```
 
 | Bit | Flag                                    | Meaning                                          |
@@ -299,6 +300,7 @@ type).
 | 8   | `BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS`  | Per-inode RS scheme override                     |
 | 9   | `BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY`  | Parity computed per block group                  |
 | 10  | `BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK`   | Block size larger than `PAGE_SIZE`               |
+| 11  | `BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY` | Out-of-band RS parity, stride-placed (v5.x)      |
 
 **Note on `BTREE_ALLOC`.** Bit 4 is reserved in the on-disk
 inventory but its activation is **deferred to a future format
