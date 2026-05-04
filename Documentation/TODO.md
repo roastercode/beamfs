@@ -184,13 +184,13 @@ Public vs Private classification
 │   └── file_inline.c       ── INLINE multi-block path : write_begin/write_end (substep 4),
 │                              writepages (substep 5), truncate via setattr (substep 6),
 │                              mmap via generic_file_mmap (substep 8), tri-block folio
-│                              fix (substep 10) — Stage 3 metadata hardening
+│                              fix (substep 10)  -  Stage 3 metadata hardening
 │
 ├── tools/                  ── userspace
 │   ├── checkpatch-precommit.sh  (lint pre-commit, no baseline yet)
 │   ├── decode_raf_journal.py    (RS journal forensic parser)
 │   ├── gen_entropy_lut.py       (regenerate edac.c LUT)
-│   └── fsck.beamfs/             (PLACEHOLDER, empty — Phase 2 deliverable)
+│   └── fsck.beamfs/             (PLACEHOLDER, empty  -  Phase 2 deliverable)
 │
 ├── Documentation/          ── 13 .md files (see schema 1)
 │
@@ -241,7 +241,7 @@ Lockstep contract with yocto-beamfs
 │   └── beamfsd/                       ── EM Resilience Journal daemon
 │
 ├── recipes-hpc/                       ── slurm, munge, pmix (HPC stack ready,
-│                                         not activated — func-9)
+│                                         not activated  -  func-9)
 │   ├── slurm/                         ── slurm 25.11.4
 │   ├── munge/                         ── munge 0.5.18
 │   ├── pmix/                          ── pmix 5.0.3
@@ -550,7 +550,7 @@ Lockstep contract with yocto-beamfs
 
 
 ──────────────────────────────────────────────────────────────────────────────────
-              EMPIRICAL VALIDATION (closed runtime — Stage 3 results)
+              EMPIRICAL VALIDATION (closed runtime  -  Stage 3 results)
 ──────────────────────────────────────────────────────────────────────────────────
 
    4-VM aarch64 cluster (libvirt + QEMU TCG, kernel 7.0.3) :
@@ -569,7 +569,7 @@ Lockstep contract with yocto-beamfs
    └ dmesg     : 0 BUG, 0 Oops, 0 WARN ✅
 
    Empirical proof of RS-FEC functional correctness (Stage 3 metadata closed,
-   Stage 4 data block protection still pending — func-3).
+   Stage 4 data block protection still pending  -  func-3).
 ```
 
 ---
@@ -858,7 +858,7 @@ What's missing :
   `JOURNAL`, `DAX`, `BIGALLOC`, `BTREE_ALLOC`, etc. - none active
   in the RFC submission ; the embedded profile has 0 flags active
 - mkfs.beamfs `--profile=embedded` (default) explicitly emits v5 SB
-- Migration script v1 → v5 (`tune.beamfs --upgrade-format`) — for
+- Migration script v1 → v5 (`tune.beamfs --upgrade-format`)  -  for
   internal lab volumes, not deployment users
 
 **TODO ID** : `func-12` (PER_INODE_RS feature flag is one specific
@@ -918,7 +918,7 @@ What's already there :
 What's missing :
 - Stage 4 data block protection : choice between scheme 2
   (UNIVERSAL_INLINE), scheme 3 (UNIVERSAL_SHADOW), scheme 4
-  (UNIVERSAL_EXTENT) — design decision then implementation (2-4
+  (UNIVERSAL_EXTENT)  -  design decision then implementation (2-4
   weeks)
 - Paper v3 LaTeX tree (`papers/2026-04-beamfs-v3/`)
 - Empirical validation post-Stage-4 (paper v3 needs the post-Stage-4
@@ -1556,7 +1556,7 @@ upload + DOI minting)
 Paper v3 is a Phase 4 deliverable. Once published, the Zenodo DOI is
 cite-able in the RFC cover letter (upstream-5). Without a public paper
 backing the resilience claim, the RFC narrative loses its empirical
-anchor — same FTRFS pattern that led to NAK.
+anchor  -  same FTRFS pattern that led to NAK.
 
 Workflow : LuaLaTeX + gnuplot per userMemories. Stack already
 installed and validated on spartian-1.
