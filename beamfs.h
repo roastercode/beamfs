@@ -171,7 +171,7 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
 #define BEAMFS_SB_RS_PARITY_BYTES    208    /* 13 * BEAMFS_RS_PARITY        */
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888   /* end - parity bytes          */
 #define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2713)
-                                          /* index in s_pad[]: 1175     */
+					  /* index in s_pad[]: 1175     */
 #define BEAMFS_BITMAP_MAX_BLOCKS (BEAMFS_BITMAP_DATA_BYTES * 8) /* 30592 */
 
 /* Filesystem limits */
@@ -212,8 +212,7 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
 struct beamfs_rs_event {
 	__le64  re_block_no;          /*  0..7   corrected block number     */
 	__le64  re_timestamp;         /*  8..15  ktime_get_ns() at recovery */
-	__le32  re_symbol_count;      /* 16..19  symbols corrected (renamed
-	                                 *         from re_error_bits in v3) */
+	__le32  re_symbol_count;      /* 16..19  symbols corrected           */
 	__le32  re_entropy_q16_16;    /* 20..23  Shannon H, Q16.16, [0,3*65536) */
 	__le32  re_flags;             /* 24..27  see BEAMFS_RS_EVENT_FLAG_*  */
 	__le32  re_reserved;          /* 28..31  zero, structural sentinel   */
