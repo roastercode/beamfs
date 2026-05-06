@@ -591,6 +591,38 @@ as aurelien with explicit `-c user.email=... -c user.name=...`.
 go through `bitbake <module-name>` which uses the cross-toolchain
 provided by Yocto. Section 3.3.
 
+### 4.7 Injector default drift between radfi and emufi
+
+**Symptom** : R19 with `--injector emufi` reports CALL_DELTA=0 and
+FLIP_DELTA=0 on the beamfs target volume despite probability=1M ppm.
+Same configuration with `--injector radfi` produces 25+ flips.
+
+**Cause** : emufi v0.3.0 defaulted `inject_on_read = false` in
+`emufi_state_init`. radfi has historically defaulted to `true`.
+The harness `worker.sh` never pushed `inject_on_read` explicitly,
+relying on the injector default. Switching the default injector
+silently changed the harness contract.
+
+**Detection** : check
+`/sys/kernel/debug/<injector>/inject_on_read` in the forensics
+output (`forensics-beamfs-compute01/injector-counters.log`). It
+must read `Y` for read-driven attack workflows. If `N`, the
+attack is silently inert.
+
+**Fix (in lockstep)** :
+  - emufi v0.3.1 aligns default to `inject_on_read = true` to
+    match radfi.
+  - beamfs-bench v0.7.6 pushes `inject_on_read=1` to debugfs
+    unconditionally at every attack arming site
+    (`worker.sh` line ~244 multifs, line ~497 metadata cluster)
+    as defense-in-depth.
+
+**Lesson** : when two injectors share an interface, every entry
+that the harness relies on must either be explicitly pushed by the
+harness, or have a documented and identical default across all
+injectors. Implicit default contracts between products break
+silently when one product changes its default.
+
 ---
 
 ## 5. Quick reference commands
