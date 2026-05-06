@@ -160,6 +160,44 @@ If a working tree is dirty for non-scope reasons (e.g. an untracked
 PDF in `~/git/emufi/papers/`), document it and proceed; do NOT
 include it in scope.
 
+#### A.1 Verify what is actually deployed (vs what you think is)
+
+Before EVERY cycle, verify the BuildID of the kernel module
+currently inside the canonical .ext2 image. This is non-negotiable
+since the 2026-05-06 cycle, where two consecutive R19 runs were
+analyzed assuming emufi v0.3.1 was active when the disassembly
+revealed v0.2.1 (different work-dir alphabetical ordering picked
+by `find ... | head -1`).
+
+```bash
+IMG=~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2
+ls -la $IMG | head -1
+sudo sha256sum $IMG | head -1
+
+TMP=/tmp/check-image-$(date +%H%M%S)
+mkdir -p $TMP
+sudo mount -o loop,ro $IMG $TMP
+KO_INSIDE=$(find $TMP/lib/modules -name '<product>.ko' 2>/dev/null | head -1)
+strings "$KO_INSIDE" | grep -E "VERSION|^0\.[0-9]\.[0-9]" | head -3
+readelf -n "$KO_INSIDE" 2>/dev/null | grep -i "build id"
+sudo umount $TMP && rmdir $TMP
+```
+
+The BuildID + version inside the image must match what the cycle is
+about to bump to. If they don't match, you are running yesterday's
+code on today's bench -- all conclusions will be void.
+
+Also verify the deployed VM disk image :
+
+```bash
+sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+```
+
+If this hash differs from the canonical .ext2 hash, the VMs are NOT
+running the canonical image. Either the previous R31 redeploy was
+skipped, or someone manually edited the VM disk. Re-run R31 before
+the cycle.
+
 ### 3.2 Phase B : Source change in injector / FS
 
 **Goal** : modify the kernel C sources of beamfs / radfi / emufi.
@@ -489,6 +527,18 @@ counters incremented and which entries debugfs has populated.
 This is precisely what the `TARGET_STRUCT` + `TARGET_STRUCT_BLOCK_NO`
 mechanism (rv4-4 in emufi v0.3.0) was designed to fix.
 
+**If R19 succeeds but injector-counters show config defaults
+instead of pushed values** (e.g. `flip_locality=1` when you set
+`FLIP_LOCALITY=4`) : the worker's `[ -e ${INJECTOR_DBG}/X ]` check
+ran as non-root and silently returned false. Fixed in beamfs-bench
+v0.7.8. See section 4.8.
+
+**If a VM freezes during the run** (worker process visible in `ps`
+but the SSH from the host hangs and `ps` on the VM shows a process
+in D-state) : the kprobe pre-handler probably crashed. Do NOT
+`virsh destroy` immediately. See phase H below for the
+non-destructive forensic capture.
+
 #### G.4 5-case discrimination matrix (only available with emufi v0.3.0+ and bench v0.7.4+)
 
 For the paper's empirical corroboration, R19 is run **5 times**
@@ -505,6 +555,242 @@ with different env vars set in the bench invocation :
 This matrix is the empirical analogue of the paper section IV
 recovery surface theorem. It is the **minimum dataset** for the
 "Empirical corroboration" section.
+
+### 3.8 Phase H : Forensic capture of a frozen VM (non-destructive)
+
+**Goal** : when a VM freezes during R19, capture all the live state
+needed to root-cause the crash, **before** issuing `virsh destroy`.
+
+**Gate** : a tarball at `/tmp/freeze-deep-dive-<TS>.tar.gz`
+containing the VM's full dmesg, the kprobe state at freeze time,
+the host process tree, and the SSH stack. After this, AND ONLY
+after, `virsh destroy` can be issued safely.
+
+**Trigger signal** : the bench host shows the SSH process to the
+victim VM in poll_schedule_timeout for several minutes. The VM
+itself shows a worker.sh process in S-state spawning a `sudo sync`
+(or any FS-touching child) that is in D-state. The kthread
+mentioned in `ps` D-state output (typically `jbd2/vdd-N` for ext4
+or `ext4lazyinit/N`) is the victim of the kprobe crash.
+
+The procedure :
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+DUMP=/tmp/freeze-deep-dive-$TS
+mkdir -p $DUMP
+
+# 1. Host process tree -- which ssh, which qemu, which beamfs-bench.
+ps -eHo pid,ppid,stat,wchan:30,cmd | \
+    grep -E "beamfs-bench|virsh|ssh|qemu|libvirt" | grep -v grep \
+    > $DUMP/host-pstree.txt
+
+# 2. SSH process kernel stack -- where is the host-side ssh blocked.
+SSH_PID=$(pgrep -f "hpcadmin@192.168.56.11.*INJECTOR=")
+sudo cat /proc/$SSH_PID/stack > $DUMP/ssh-stack.txt 2>&1
+
+# 3. Live VM diagnostic -- the critical step.
+# We capture WITHOUT killing anything.
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o LogLevel=ERROR -o ConnectTimeout=5 -i ~/.ssh/hpclab_admin"
+ssh $SSH_OPTS hpcadmin@192.168.56.11 "
+    sudo dmesg
+" > $DUMP/compute01-full-dmesg.txt
+
+# 4. Live debugfs counter snapshot -- shows what the kprobe was
+#    doing at the moment it crashed.
+ssh $SSH_OPTS hpcadmin@192.168.56.11 "
+    for f in /sys/kernel/debug/<injector>/* ; do
+        printf '%-30s = ' \$(basename \$f)
+        sudo cat \$f 2>/dev/null
+        echo
+    done
+" > $DUMP/<injector>-counters-frozen.txt
+
+# 5. Crash trace extraction.
+grep -B2 -A100 "kernel NULL pointer dereference\|Internal error" \
+    $DUMP/compute01-full-dmesg.txt > $DUMP/crash-trace.txt
+
+# 6. Tarball.
+cd /tmp && tar czf freeze-deep-dive-$TS.tar.gz freeze-deep-dive-$TS/
+sha256sum freeze-deep-dive-$TS.tar.gz
+
+# 7. NOW it is safe to destroy.
+sudo virsh destroy beamfs-compute01
+```
+
+**Why every step matters** :
+- Step 1 : without the host pstree, you cannot tell whether the
+  freeze is in ssh, in qemu, or in beamfs-bench's own logic.
+- Step 2 : `ssh-stack.txt` typically shows `poll_schedule_timeout`,
+  confirming the ssh is just waiting for VM output that will
+  never come.
+- Step 3 : the VM dmesg is the gold seam. The Oops, the call trace,
+  the registers. This is what enables phase I (root-cause).
+- Step 4 : the debugfs snapshot tells you what was armed at crash
+  time -- often the difference between "the harness pushed X" and
+  "the kernel state shows Y" is the bug itself.
+- Step 5 : pre-extracted trace makes phase I faster.
+
+The reason this MUST be done before `virsh destroy` : destroying
+the VM clears the in-kernel ring buffers, the procfs entries, the
+debugfs state, all in one go. Once destroyed, you have only the
+tarball.
+
+After this phase you should also archive the tarball into the
+relevant repo's `Documentation/incidents/` directory permanently :
+
+```bash
+cp /tmp/freeze-deep-dive-$TS.tar.gz \
+   ~/git/<product>/Documentation/incidents/INCIDENT-<DATE>-<TAG>.tar.gz
+```
+
+### 3.9 Phase I : Root-cause a kernel crash inside a kprobe handler
+
+**Goal** : starting from a dmesg trace like `pc :
+emufi_kp_blk_pre+0x27c/0x300 [emufi]`, identify the EXACT line of
+C source that crashed.
+
+**Gate** : you can point to a specific line in the .c file and a
+specific instruction at the offset, with the registers at crash
+time confirming the dereference.
+
+**Pre-requisite** : the kernel module that crashed was built with
+debug info. Yocto does this by default for out-of-tree modules
+provided the recipe is not stripping. Check :
+
+```bash
+file ~/yocto/poky/build-qemu-arm64/tmp/work/qemuarm64-poky-linux/<product>-module/<X.Y.Z>/<product>-X.Y.Z/<product>.ko
+# Should say : with debug_info, not stripped
+```
+
+#### I.1 Locate the EXACT module that ran on the VM
+
+This is **critical** and was the source of an hour wasted in the
+2026-05-06 cycle. `find ... | head -1` returns alphabetically the
+FIRST work directory, which is NOT necessarily the version that's
+deployed. Use BuildID matching :
+
+```bash
+# Step 1 : extract the BuildID of the .ko inside the deployed image.
+IMG=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+TMP=/tmp/locate-$(date +%H%M%S)
+mkdir -p $TMP
+sudo mount -o loop,ro $IMG $TMP
+TARGET_BUILDID=$(readelf -n $(find $TMP/lib/modules -name '<product>.ko' | head -1) \
+                 2>/dev/null | grep "Build ID" | awk '{print $NF}')
+sudo umount $TMP && rmdir $TMP
+echo "Target BuildID : $TARGET_BUILDID"
+
+# Step 2 : find the work dir matching this BuildID.
+for KO in $(find ~/yocto/poky/build-qemu-arm64/tmp/work/qemuarm64-poky-linux/<product>-module \
+              -name '<product>.ko' 2>/dev/null) ; do
+    BID=$(readelf -n "$KO" 2>/dev/null | grep "Build ID" | awk '{print $NF}')
+    if [ "$BID" = "$TARGET_BUILDID" ]; then
+        echo "MATCH : $KO"
+        BUILT_KO=$KO
+        break
+    fi
+done
+```
+
+Without this BuildID match, you are guaranteed to disassemble the
+wrong .ko at some point.
+
+#### I.2 Compute the absolute crash address
+
+```bash
+# From dmesg : "pc : <symbol>+0xOFFSET/0xSIZE [<product>]"
+# Find the symbol's start in the .ko.
+NM=$(find ~/yocto/poky/build-qemu-arm64/tmp/work/x86_64-linux/binutils-cross-aarch64 \
+       -name 'aarch64-poky-linux-nm' | head -1)
+SYMBOL=<symbol_from_dmesg>            # e.g. emufi_kp_blk_pre
+OFFSET=0x<offset_from_dmesg>          # e.g. 0x27c
+START_HEX=$($NM -S $BUILT_KO | grep " T $SYMBOL$" | awk '{print $1}')
+START_DEC=$(printf "%d" 0x$START_HEX)
+CRASH_ABS=$(printf "%x" $((START_DEC + $OFFSET)))
+echo "crash absolute : 0x$CRASH_ABS"
+```
+
+#### I.3 Disassemble with source interleave
+
+```bash
+OBJDUMP=$(find ~/yocto/poky/build-qemu-arm64/tmp/work/x86_64-linux/binutils-cross-aarch64 \
+            -name 'aarch64-poky-linux-objdump' | head -1)
+
+# Disasm the function with C source interleave (-S) and line info (-l).
+$OBJDUMP -d -S -l $BUILT_KO | \
+    sed -n "/<$SYMBOL>:/,/^$/p" > /tmp/disasm-$SYMBOL.txt
+
+# Find the offset.
+grep -B5 -A5 -E "^[[:space:]]*$CRASH_ABS:" /tmp/disasm-$SYMBOL.txt
+```
+
+The output mixes asm with comments like
+`/usr/src/debug/<product>/<X.Y.Z>/<product>_hooks_blk.c:64
+(discriminator 3)`. **That C source line is the bug.**
+
+#### I.4 Decode the instruction
+
+The `Code: ... (XXXXXXXX) ...` line in dmesg shows the offending
+instruction in hex (the value in parentheses is what failed).
+Decode it manually for ARM64 :
+
+| Hex          | Mnemonic                  | Meaning                              |
+| ------------ | ------------------------- | ------------------------------------ |
+| `f86068ac`   | `ldr x12, [x5, x0]`       | load 64-bit, addr = x5+x0            |
+| `f9400xxx`   | `ldr xR, [xS, #imm]`      | load 64-bit at fixed offset          |
+| `f9000xxx`   | `str xR, [xS, #imm]`      | store 64-bit at fixed offset         |
+| `940000xx`   | `bl <addr>`               | branch + link (function call)        |
+
+Cross-reference the registers in the dmesg dump (x0..x30 listed
+right after `pstate:`). For NULL deref, look for the registers
+that combine into the source-of-load. If two registers are zero,
+it's a deref of a NULL pointer chain.
+
+#### I.5 Match the C source
+
+The C line from the .debug entry combined with the addresses
+involved in the failed instruction tells you :
+- which struct field is the failed load,
+- which pointer was NULL.
+
+For instance, `ldr x12, [x5, x0]` at line 64 of `inject_first_segment`
+where the source is `bio_for_each_segment(bv, bio, iter)` says : the
+macro expansion derefs `bio->bi_io_vec` (offset 32) which was loaded
+into x5 a few instructions earlier. If x5 = 0 at crash time,
+`bio->bi_io_vec == NULL` -- the bio carries no bvec.
+
+#### I.6 The fix
+
+Once you know the line, the fix is usually a guard. Examples :
+
+- `bio->bi_io_vec == NULL` for `REQ_OP_WRITE_ZEROES` /
+  `REQ_OP_DISCARD` -> filter these ops in the pre-handler.
+- `bv.bv_page == NULL` -> guard `bvec_kmap_local` callers.
+- `priv == NULL` -> early return on uninitialized state.
+
+The fix MUST be byte-localized via a `python3` patch (R27), MUST
+go through phase C bitbake validation, and MUST come with a comment
+in the source file referencing the incident :
+
+```c
+/*
+ * vX.Y.Z (incident <date>) : refuse <condition>.
+ * Crash signature this fixes :
+ *   pc : <symbol>+<offset> [<product>]
+ *   Code: <instruction>
+ *   trace : <up to 5 frames>
+ */
+if (<condition>) {
+    atomic64_inc(&st->skipped_<reason>);
+    return 0;
+}
+```
+
+This comment block makes the next operator (or the next AI session)
+understand what the guard is protecting against without re-reading
+the incident report.
 
 ---
 
@@ -623,6 +909,171 @@ harness, or have a documented and identical default across all
 injectors. Implicit default contracts between products break
 silently when one product changes its default.
 
+### 4.8 Silent `[ -e ]` non-root on locked debugfs parent
+
+**Symptom** : R19 with `--injector emufi` and env vars set
+(`FLIP_LOCALITY=4`, `BURST_SYMBOLS=9`, `TARGET_STRUCT=5`) runs to
+completion, but `forensics-beamfs-compute01/injector-counters.log`
+shows the debugfs entries at their **module compile-time defaults**
+instead of the values pushed by the harness :
+- `flip_locality = 1` (default ADJACENT) instead of 4
+- `target_struct = 0` (default NONE) instead of 5
+- `flip_count_mbu_w9_plus = 0` (no codeword burst ever fired)
+
+**Cause** : the worker.sh on the VM runs as `hpcadmin` (non-root).
+For its conditional pushes it uses :
+
+```bash
+if [ -n "${FLIP_LOCALITY:-}" ] && [ -e ${INJECTOR_DBG}/flip_locality ]; then
+    echo ${FLIP_LOCALITY} | sudo tee ${INJECTOR_DBG}/flip_locality >/dev/null
+fi
+```
+
+The write uses `sudo tee` (correct), but the existence check
+`[ -e ${INJECTOR_DBG}/flip_locality ]` does NOT use sudo. On
+modern kernels, `/sys/kernel/debug/` has mode `0700 root root` :
+
+```
+$ sudo ls -la /sys/kernel/debug/
+drwx------ root root ...
+```
+
+A non-root `[ -e <child-of-debugfs> ]` always returns false because
+the user cannot stat the parent. The push is silently skipped.
+The default values stay in place.
+
+**Detection** :
+
+```bash
+ssh hpcadmin@<vm> '
+    test -e /sys/kernel/debug/<injector>/flip_locality \
+        && echo "non-root: EXISTS" || echo "non-root: DOES NOT EXIST"
+    sudo test -e /sys/kernel/debug/<injector>/flip_locality \
+        && echo "sudo:     EXISTS" || echo "sudo:     DOES NOT EXIST"
+'
+```
+
+If you see `non-root: DOES NOT EXIST` and `sudo: EXISTS`, this bug
+is active.
+
+**Fix (beamfs-bench v0.7.8)** : replace every
+`[ -e ${INJECTOR_DBG}/X ]` by `sudo test -e ${INJECTOR_DBG}/X`.
+14 sites in the worker.sh as of v0.7.7 : 8 in `attack)` handler,
+6 in `cluster_attack)` handler.
+
+**Lesson** : the harness must NEVER assume non-root visibility into
+kernel-controlled paths like `/sys/kernel/debug/`, `/sys/fs/bpf/`,
+`/proc/sys/kernel/`. Every such check that conditions a critical
+push must use sudo.
+
+**Historical note** : this bug was DORMANT since beamfs-bench
+v0.7.4 (introduction of FLIP_LOCALITY etc. in worker.sh).
+Discovered 2026-05-06 only when sb-2 codeword burst was first
+attempted -- because the defaults of every newly-conditional
+entry happen to match the single-bit-SEU baseline behaviour. The
+bug was masked by perfectly-coincident defaults. Lesson within the
+lesson : test conditional pushes by setting NON-DEFAULT values
+and verifying readback, never just by setting expected-default
+values.
+
+### 4.9 NULL deref in kprobe pre-handler on bvec-less bio_op
+
+**Symptom** : VM freezes during R19. Host SSH hangs. dmesg on the
+VM shows :
+
+```
+Unable to handle kernel NULL pointer dereference at virtual address 0
+ESR = 0x96000004 (DABT, level 0 translation fault)
+pc : <injector>_kp_blk_pre+<offset> [<injector>]
+Call trace:
+    <injector>_kp_blk_pre+<offset>
+    kprobe_brk_handler
+    ...
+    submit_bio_noacct+0x0
+    submit_bio_wait+0x5c
+    blkdev_issue_zeroout+0x164
+    ext4_init_inode_table+0x18c
+    ext4_lazyinit_thread+0x38c
+```
+
+CPU contaminated, `jbd2/<dev>-N` thread blocked in D-state forever,
+`sync` userspace blocked, the volume becomes unmountable.
+
+**Cause** : `submit_bio_noacct` is called for ALL bio operations,
+including those that do not carry a bvec (no pages attached) :
+- `REQ_OP_WRITE_ZEROES` (`blkdev_issue_zeroout`, used by ext4
+  lazy init to zero inode tables in background)
+- `REQ_OP_DISCARD`
+- `REQ_OP_SECURE_ERASE`
+- `REQ_OP_FLUSH`
+
+The kprobe pre-handler sees these bios. If it dispatches to
+`bio_for_each_segment` (or any code that derefs `bio->bi_io_vec`),
+it crashes because `bi_io_vec == NULL` for these ops.
+
+The trigger pattern is reliable on ext4 : the worker mounts ext4
+fresh, ext4lazyinit kthread starts, kprobe is armed by the harness,
+the next zeroout call from lazyinit hits the kprobe with a
+bvec-less bio, NULL deref, freeze.
+
+**Fix (emufi v0.3.2)** : early return in `<injector>_kp_blk_pre`
+when `bio_op(bio)` is one of the bvec-less ops :
+
+```c
+op = bio_op(bio);
+if (!st->inject_on_read && op != REQ_OP_WRITE)
+    return 0;
+
+/* vX.Y.Z (incident <date>) : refuse bios that carry no bvec. */
+if (op == REQ_OP_WRITE_ZEROES ||
+    op == REQ_OP_DISCARD      ||
+    op == REQ_OP_SECURE_ERASE ||
+    op == REQ_OP_FLUSH) {
+    atomic64_inc(&st->skipped_filter);
+    return 0;
+}
+```
+
+The skip is counted under `skipped_filter` for forensics consistency.
+
+**Detection without trigger** : audit any new kprobe pre-handler
+that calls `bio_for_each_segment` against the list of bvec-less
+ops. If the handler does not filter them, it WILL crash the first
+time ext4lazyinit (or any kernel path doing zeroout/discard) calls
+into it while the kprobe is armed.
+
+**Lesson** : `submit_bio_noacct` is a wide gate. A kprobe on it
+sees bio types that the operator may have never anticipated. The
+operator's mental model of "bios = data" is wrong : bios can also
+be commands. Every kprobe pre-handler on the bio path must
+explicitly enumerate which bio_ops it expects to handle and skip
+the others.
+
+### 4.10 Wrong .ko version disassembled (find ordering trap)
+
+**Symptom** : you root-cause a crash via objdump (phase I), the C
+source line you point to does not seem related to the bug, the
+`#define VERSION` in the source matches the bumped version, but
+the disasm comments mention an OLD version path
+(`/usr/src/debug/<product>/0.X.Y/...`).
+
+**Cause** : `find ... -name '<product>.ko' | head -1` was used to
+locate the module to disassemble. `find` outputs in alphabetical
+order, so `0.2.1` comes before `0.3.0` and `0.3.1`. The first
+match is the OLDEST work dir, not the deployed one.
+
+**Fix** : use BuildID matching, never alphabetical first-match.
+See section 3.9 (Phase I.1).
+
+**Detection** : the disasm comments
+(`/usr/src/debug/<product>/X.Y.Z/...`) MUST match the version
+embedded as `VERSION` in `strings <ko> | grep VERSION`. If they
+mismatch, you disassembled the wrong .ko.
+
+**Lesson** : Yocto keeps OLD work directories around indefinitely
+(until `cleansstate` of the recipe). Never rely on directory
+ordering. Always pivot through BuildID, which is unique per build.
+
 ---
 
 ## 5. Quick reference commands
@@ -681,6 +1132,92 @@ beamfs-bench full --auto-confirm 2>&1 | \
 echo "exit : $?"
 ```
 
+### 5.6 Live debugfs permission probe (verify worker can see entries)
+
+```bash
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o LogLevel=ERROR -o ConnectTimeout=5 -i ~/.ssh/hpclab_admin"
+ssh $SSH_OPTS hpcadmin@192.168.56.11 "
+    echo '== /sys/kernel/debug/ permission =='
+    sudo ls -ld /sys/kernel/debug/
+
+    echo '== entries existence (sudo) =='
+    for e in flip_locality burst_symbols target_struct \
+             target_struct_block_no inject_on_read ; do
+        sudo test -e /sys/kernel/debug/<injector>/\$e \
+            && echo "sudo:     \$e EXISTS" \
+            || echo "sudo:     \$e DOES NOT EXIST"
+    done
+
+    echo '== entries existence (non-root) =='
+    for e in flip_locality burst_symbols target_struct ; do
+        test -e /sys/kernel/debug/<injector>/\$e \
+            && echo "non-root: \$e EXISTS" \
+            || echo "non-root: \$e DOES NOT EXIST"
+    done
+"
+```
+
+If the non-root checks all fail and the sudo checks all succeed,
+the worker.sh `[ -e ]` checks are silently skipping pushes.
+See section 4.8.
+
+### 5.7 Disasm a deployed module at given crash offset
+
+```bash
+PRODUCT=<emufi|beamfs|radfi>
+SYMBOL=<from-dmesg>     # e.g. emufi_kp_blk_pre
+OFFSET=<from-dmesg>     # e.g. 0x27c
+
+# Step 1 : BuildID of the .ko inside the deployed VM image.
+DEPLOYED=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+TMP=/tmp/locate-$(date +%H%M%S)
+mkdir -p $TMP
+sudo mount -o loop,ro $DEPLOYED $TMP
+DEPLOYED_KO=$(sudo find $TMP/lib/modules -name "$PRODUCT.ko" 2>/dev/null | head -1)
+TARGET_BUILDID=$(sudo readelf -n "$DEPLOYED_KO" | grep "Build ID" | awk '{print $NF}')
+sudo umount $TMP && rmdir $TMP
+
+# Step 2 : find the matching work dir.
+WORKDIR=~/yocto/poky/build-qemu-arm64/tmp/work/qemuarm64-poky-linux/$PRODUCT-module
+for KO in $(find $WORKDIR -name "$PRODUCT.ko" 2>/dev/null) ; do
+    BID=$(readelf -n "$KO" 2>/dev/null | grep "Build ID" | awk '{print $NF}')
+    [ "$BID" = "$TARGET_BUILDID" ] && BUILT_KO=$KO && break
+done
+echo "Disassembling : $BUILT_KO"
+
+# Step 3 : disasm with source interleave.
+NM=$(find ~/yocto/poky/build-qemu-arm64/tmp/work/x86_64-linux/binutils-cross-aarch64 \
+       -name 'aarch64-poky-linux-nm' | head -1)
+OBJDUMP=$(find ~/yocto/poky/build-qemu-arm64/tmp/work/x86_64-linux/binutils-cross-aarch64 \
+            -name 'aarch64-poky-linux-objdump' | head -1)
+START=$($NM -S $BUILT_KO | grep " T $SYMBOL\$" | awk '{print $1}')
+START_DEC=$(printf "%d" 0x$START)
+CRASH_ABS=$(printf "%x" $((START_DEC + $OFFSET)))
+echo "Crash absolute address : 0x$CRASH_ABS"
+
+$OBJDUMP -d -S -l $BUILT_KO | sed -n "/<$SYMBOL>:/,/^\$/p" \
+    | grep -B5 -A5 -E "^[[:space:]]*$CRASH_ABS:"
+```
+
+### 5.8 Forensic capture of a stuck VM (before virsh destroy)
+
+See section 3.8 Phase H for the full procedure. One-liner :
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+DUMP=/tmp/freeze-deep-dive-$TS && mkdir -p $DUMP
+ps -eHo pid,ppid,stat,wchan:30,cmd | grep -E 'beamfs-bench|qemu|ssh' \
+    > $DUMP/host-pstree.txt
+ssh -o ConnectTimeout=5 -i ~/.ssh/hpclab_admin hpcadmin@192.168.56.11 \
+    "sudo dmesg ; for f in /sys/kernel/debug/<injector>/* ; do
+       printf '%-30s = ' \$(basename \$f) ; sudo cat \$f ; echo ; done" \
+    > $DUMP/compute01-state.txt 2>&1
+cd /tmp && tar czf freeze-deep-dive-$TS.tar.gz freeze-deep-dive-$TS/
+sha256sum freeze-deep-dive-$TS.tar.gz
+# THEN : sudo virsh destroy beamfs-compute01
+```
+
 ---
 
 ## 6. When in doubt
@@ -715,10 +1252,24 @@ when the underlying cause is fixed in a later version of the
 tooling -- annotate them as `(fixed in X.Y.Z)`. The procedure
 must remain readable to operators using older toolchains.
 
-Last updated : 2026-05-06.
+Last updated : 2026-05-06 (evening session, sb-2 unblock).
+
 First written after : full rebuild cycle 2026-05-06 emufi v0.2.1
 -> v0.3.0 surgical attack suite + beamfs-bench v0.7.3 -> v0.7.4
 worker integration + Yocto image rebuild + R31 + R19 full, where
 ~60% of session time was lost to silent `git mv` failures,
 include-ordering bugs, and stale rootfs cache. This document
 exists to make those losses one-time costs.
+
+Extended after : full rebuild cycle 2026-05-06 evening emufi v0.3.0
+-> v0.3.1 -> v0.3.2 + beamfs-bench v0.7.4 -> v0.7.5 -> v0.7.6 ->
+v0.7.7 -> v0.7.8 to unblock the sb-2 codeword burst attack on the
+empirical corroboration matrix. The cycle revealed two failure
+modes (4.8 silent non-root debugfs check dormant since v0.7.4 ;
+4.9 NULL deref kprobe on bvec-less bio_op crashing the kernel on
+ext4 lazyinit) and validated two new positive procedures (phase H
+forensic capture pre-destroy ; phase I objdump-driven root cause).
+The sb-2 attack now arms (10 codeword bursts placed in the
+beamfs-bench v0.7.8 + emufi v0.3.2 stack) but Theorem IV.1
+saturation has not yet been observed -- TARGET_BLOCK auto-fill
+remains to be debugged in the next cycle.
