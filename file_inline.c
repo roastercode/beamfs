@@ -1246,4 +1246,5 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 const struct inode_operations beamfs_inline_inode_operations = {
 	.getattr        = simple_getattr,
 	.setattr        = beamfs_inline_setattr,
+	.fiemap         = beamfs_fiemap,  /* S2.2: shared with scheme=5, declared in file.c */
 };

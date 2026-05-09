@@ -581,6 +581,9 @@ extern const struct inode_operations beamfs_dir_inode_operations;
 
 /* file.c */
 extern const struct file_operations beamfs_file_operations;
+/* S2.2: fiemap support shared by both schemes (file.c). */
+int beamfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		  u64 start, u64 len);
 extern const struct inode_operations beamfs_file_inode_operations;
 extern const struct address_space_operations beamfs_aops;
 

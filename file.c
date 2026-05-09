@@ -8,6 +8,7 @@
 #include <linux/iomap.h>
 #include <linux/pagemap.h>
 #include <linux/buffer_head.h>
+#include <linux/fiemap.h>
 #include "beamfs.h"
 
 /* Forward declaration - defined after iomap_ops */
@@ -24,6 +25,7 @@ const struct file_operations beamfs_file_operations = {
 
 const struct inode_operations beamfs_file_inode_operations = {
 	.getattr        = simple_getattr,
+	.fiemap         = beamfs_fiemap,  /* S2.2: file-precise bench targeting */
 };
 
 /*
@@ -153,6 +155,38 @@ const struct iomap_ops beamfs_iomap_ops = {
 	.iomap_begin = beamfs_iomap_begin,
 	.iomap_end   = beamfs_iomap_end,
 };
+
+/*
+ * S2.2: fiemap support for file-precise bench targeting (TODO.md l.1979).
+ * Thin wrapper over iomap_fiemap() reusing beamfs_iomap_ops. Pattern
+ * follows fs/ext2/inode.c::ext2_fiemap() (kernel 7.0.x). Required by
+ * userspace filefrag(8) to expose the file -> physical block mapping
+ * for beamfs-bench file-level RS-FEC validation.
+ *
+ * Shared by both schemes (UNIVERSAL_INLINE and INODE_UNIVERSAL) since
+ * both use the same direct[12] + indirect[512] block layout, handled
+ * uniformly by beamfs_iomap_begin().
+ */
+int beamfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		  u64 start, u64 len)
+{
+	int ret;
+	loff_t i_size;
+
+	inode_lock(inode);
+	i_size = i_size_read(inode);
+	/*
+	 * iomap_fiemap() returns -EINVAL for len == 0. Trim the request to
+	 * the file size but never below 1 to keep the call valid for empty
+	 * files (where it will simply return zero extents).
+	 */
+	if (i_size == 0)
+		i_size = 1;
+	len = min_t(u64, len, i_size);
+	ret = iomap_fiemap(inode, fieinfo, start, len, &beamfs_iomap_ops);
+	inode_unlock(inode);
+	return ret;
+}
 
 /*
  * Write path - beamfs_iomap_write_ops
