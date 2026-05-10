@@ -41,9 +41,9 @@ extends FTRFS v1 with a formal recovery operator and a soundness theorem
 
 The reference target is the Yocto Scarthgap research image at
 `~/yocto/poky/build-qemu-arm64/`, which packages
-`recipes-kernel/beamfs/` from `~/git/yocto-hardened/`. The `~/git/beamfs/`
+`recipes-kernel/beamfs/` from `~/git/yocto-beamfs/`. The `~/git/beamfs/`
 tree is the canonical source; it is mirrored byte-exact under
-`yocto-hardened/recipes-kernel/beamfs/files/beamfs-0.1.0/` (lockstep).
+`yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.1/` (lockstep).
 
 For a host smoke-test against a Yocto-built kernel tree:
 
