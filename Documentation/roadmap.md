@@ -534,6 +534,48 @@ closure**, not separate Must-haves:
 Planned: `v0.4.0-universal-protection`. RFC v4 submission to
 linux-fsdevel happens immediately after this tag.
 
+### Empirical motivation N=100 (2026-05-10)
+
+The N=100 multifs experiment run on 2026-05-10 (raw data tarball
+sha256 `f9f01a585c2871cab063ffbf2bbfc015777537918339a5d742b2137846e8a615`)
+provided three empirical observations that factualize the priority
+of this stage :
+
+1. **Theorem v2.2 corroboration on scheme=2 (UNIVERSAL_INLINE)**.
+   At 1M ppm probability with `flip_locality=RANDOM`, scheme=2
+   produced 60 `BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE` journal entries
+   across 100 runs, with mean `RS_CORRECTED=5.07` and 89% hash
+   preservation. Theorem v2.1 (recovery within capacity) and
+   Theorem v2.2 (saturation detected and flagged) are both
+   empirically corroborated on the same dataset, without need
+   for a dedicated saturation cell.
+
+2. **Scheme=5 data block protection gap empirically measured**.
+   Across 600 cells (100 runs × 6 probabilities) of scheme=5
+   (INODE_UNIVERSAL), the cumulative `RS_CORRECTED` count is
+   exactly **zero**. Cumulative `BITS_DIFF` reaches 92,005 bits
+   over the same 600 cells. The decoder `beamfs_rs_decode_region`
+   is never invoked on the data block read path because
+   `file.c::generic_file_read_iter` (the path used for files
+   exceeding `BEAMFS_DATA_INLINE_BYTES = 3824 bytes`) does not
+   integrate the RS decode step. This is the gap stage 4
+   addresses.
+
+3. **Bench multifs calibration limitation observed**. The
+   N=100 calibration used `target_block_range` configured for
+   the beamfs file layout, producing FLIP_DELTA=0 across
+   ext4/btrfs/xfs/f2fs/exfat/vfat/squashfs. The commodity FS
+   results in that run are therefore **invalid for comparison**;
+   they reflect the absence of injection on those FS, not their
+   resilience. Equitable multifs comparison requires the
+   emufi v0.4 multifs-capable injector tracked in the
+   companion `~/git/emufi/Documentation/roadmap.md`.
+
+These observations confirm that stage 4 is the empirically
+critical next step. The N=100 dataset is preserved at
+`/tmp/N100-20260510-003122/N100-raw-data.tar.gz` on the
+research deployment and will be referenced in paper v3.
+
 ---
 
 ## Stage 5 - Offensive security analysis
@@ -893,6 +935,23 @@ Until these are available, the multi-FS bench is constrained to
 filesystems. This constraint is documented in test reports as a
 **v2 INLINE scope boundary**, not as a limitation of the bench
 methodology.
+
+### Bench injector capability prerequisite
+
+In addition to the mkfs.beamfs userspace evolution above, the
+multi-FS head-to-head bench requires a **multifs-capable fault
+injector**. The current emufi v0.3.5 implements file-precise
+targeting via `target_block_range` calibrated per-FS, which
+makes simultaneous N-FS comparison structurally impossible
+(only one FS can be the calibration target per run). The
+N=100 experiment of 2026-05-10 documented this limitation
+empirically.
+
+The required injector capability is tracked in
+`~/git/emufi/Documentation/roadmap.md` as **emufi v0.4 -
+Multi-FS capable injector** (estimated 95-115h focused work).
+The emufi v0.4 release is therefore a precondition for the
+publication-grade multifs bench described above.
 
 ## Other planned FS evolutions
 
