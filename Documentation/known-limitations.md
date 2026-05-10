@@ -284,7 +284,7 @@ a local `bug-bounty-rdma` tree) is pending.
 
 ### 6.4 `bin/hpc-benchmark.sh` robustness under sudo
 
-The HPC benchmark script in the yocto-hardened repository uses
+The HPC benchmark script in the yocto-beamfs repository uses
 `~/.ssh/hpclab_admin` for SSH key resolution. When invoked under
 `sudo`, `~` resolves to `/root` and the key path becomes invalid.
 The current workaround is to call `sudo -v` first and run the
@@ -294,7 +294,7 @@ home directory explicitly.
 
 ### 6.5 Yocto layer items
 
-The following are tracked in the yocto-hardened repository and
+The following are tracked in the yocto-beamfs repository and
 affect upstream readiness for `meta-openembedded` submission:
 
 - `yocto-check-layer` does not yet PASS cleanly on the
@@ -309,9 +309,9 @@ affect upstream readiness for `meta-openembedded` submission:
   external reviewers to reproduce results without a multi-page
   setup procedure.
 
-### 6.6 Build and test prerequisites (yocto-hardened layer)
+### 6.6 Build and test prerequisites (yocto-beamfs layer)
 
-Two artefacts are required by the yocto-hardened image recipes for
+Two artefacts are required by the yocto-beamfs image recipes for
 the HPC benchmark to start successfully but are NOT tracked by git:
 
   * `recipes-core/images/files/munge.key`     -- 1024-byte random
@@ -328,13 +328,13 @@ Both files have to be generated locally before the first build:
 
 ```sh
 # munge.key
-cd ~/git/yocto-hardened/recipes-core/images/files/
+cd ~/git/yocto-beamfs/recipes-core/images/files/
 dd if=/dev/urandom of=munge.key bs=1 count=1024 status=none
 chmod 0400 munge.key
 
 # hpclab_admin.pub (derived from existing private key)
 ssh-keygen -y -f ~/.ssh/hpclab_admin > \
-    ~/git/yocto-hardened/recipes-core/images/files/hpclab_admin.pub
+    ~/git/yocto-beamfs/recipes-core/images/files/hpclab_admin.pub
 ```
 
 If either file is missing, the corresponding `ROOTFS_POSTPROCESS_COMMAND`
@@ -344,7 +344,7 @@ key, and `bin/hpc-benchmark.sh` fails at step 5 with a password prompt
 (SSH) or at step 5/6 with a MUNGE key error (Slurm).
 
 This is documented for context but the long-term fix is upstream in
-the yocto-hardened layer: either a one-shot bootstrap script that
+the yocto-beamfs layer: either a one-shot bootstrap script that
 generates the missing artefacts (related to known-limitation 6.5),
 or a hard error in the recipe when the file is missing instead of
 silent skip.

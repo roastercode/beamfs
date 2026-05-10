@@ -5,7 +5,7 @@
 - **Kernel**: Linux 7.0.0 (final)
 - **Architecture**: arm64 (QEMU cortex-a57, KVM/TCG)
 - **Build system**: Yocto Styhead (5.1)
-- **Yocto layer**: https://github.com/roastercode/yocto-hardened/tree/arm64-beamfs
+- **Yocto layer**: https://github.com/roastercode/yocto-beamfs/tree/main
 - **Cluster**: Slurm 25.11.4, 1 master + 3 compute nodes
 - **beamfs partition**: loop image on /tmp (64 MiB) per node
 
@@ -58,8 +58,11 @@ mismatch between mkfs and the kernel - rebuild `mkfs-beamfs`.
 
 ## Slurm HPC Benchmark
 
-Run via `bin/hpc-benchmark.sh` in the yocto-hardened layer.
-See [Documentation/benchmark.md](https://github.com/roastercode/yocto-hardened/tree/arm64-beamfs/Documentation/benchmark.md)
+Run via `beamfs-bench full --auto-confirm` (the canonical pre-push
+harness, see Documentation/recadrage R19). The legacy
+`bin/hpc-benchmark.sh` from the yocto-beamfs layer is superseded.
+Throughput baseline lives at
+`~/git/yocto-beamfs/Documentation/benchmark.md`
 for the full procedure.
 
 ### Results (2026-04-17, kernel 7.0, arm64 KVM/QEMU)
@@ -119,7 +122,7 @@ A layered validation pipeline is enforced before each commit and push.
 
 ### Static invariants (`bin/beamfs-invariants.sh`)
 
-Located in the `yocto-hardened` layer. Runs in seconds, no VM required.
+Located in the `yocto-beamfs` layer. Runs in seconds, no VM required.
 Checks:
 
 1. No SB-related magic numbers (64, 68, 1685, 1688, 1689, 1621) remain
@@ -282,7 +285,7 @@ A new `BUILD_BUG_ON(sizeof(struct beamfs_dir_entry) != 268)` in
 
 ### Static invariant
 
-`bin/beamfs-invariants.sh` (in the yocto-hardened layer) ships a
+`bin/beamfs-invariants.sh` (in the yocto-beamfs layer) ships a
 regression guard: invariant 5 greps `dir.c` and `namei.c` for any
 `if (!.*d_rec_len) ... break;` pattern. A future change that
 re-introduces the bug fails the pre-commit gate.
@@ -320,4 +323,4 @@ In this configuration:
   invariant suite (1, 3, 4, 5) was clean before the build.
 
 Reference baseline numbers and architecture context are recorded
-in `yocto-hardened/Documentation/iobench-baseline-2026-04-26.md`.
+in `yocto-beamfs/Documentation/iobench-baseline-2026-04-26.md`.

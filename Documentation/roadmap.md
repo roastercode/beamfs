@@ -36,6 +36,22 @@ table.
 
 ---
 
+## Note on historical lockstep mirror references
+
+In the **Closed stages** below (1.5, 2, 3 and their items), each
+entry lists "Commits" as a pair of `beamfs <sha>` and
+`yocto-hardened <sha>` lines. These `yocto-hardened` references
+are **historical lockstep mirror commits** from the dual-layer
+period prior to 2026-04-29. The architectural decision of
+2026-04-29 (recorded in
+`yocto-hardened/recipes-kernel/beamfs/.scope-note.md`) moved all
+beamfs lockstep work to `roastercode/yocto-beamfs`. The current
+lockstep mirror lives in `~/git/yocto-beamfs/recipes-kernel/beamfs/files/`
+and all post-2026-04-29 references in this document point there.
+The historical entries are preserved as-is for traceability.
+
+---
+
 ## Stage 1.5 - On-disk bitmap with RS FEC (v2 format)
 
 **Status:** CLOSED 2026-04-17.
@@ -344,7 +360,7 @@ beamfs partition (no more loopback), kernel cmdline-driven hostname,
 `beamfs.ko` packaged in image (no manual injection). `hpc-benchmark.sh` (now superseded by `beamfs-bench full`)
 phases 2-7 refactored. Architecture is now OIV-grade. Pre-v4 I/O
 baseline captured on this architecture and recorded in
-`Documentation/iobench-baseline-2026-04-26.md` (yocto-hardened layer):
+`Documentation/iobench-baseline-2026-04-26.md` (yocto-beamfs layer):
 M1 write seq + fsync (4MB) Med 5.000 MB/s, M2 read seq cold (4MB)
 Med 20.000 MB/s, M4 stat bulk (100 files) Med 0.150 s, M5 small
 write + fsync (10x64B) Med 24.000 ms. This baseline is the
@@ -503,7 +519,7 @@ choice is constrained by the LOC budget of threat-model 6.5
 4. No data-block read bypasses RS verification (universal
    coverage, no flag-gated path).
 5. Throughput documented in
-   `~/git/yocto-hardened/Documentation/benchmark.md`. The
+   `~/git/yocto-beamfs/Documentation/benchmark.md`. The
    write-path overhead is expected, the read-path overhead is
    expected to be small except on correction events.
 
@@ -807,7 +823,7 @@ registers the filesystem type. What is missing:
 
 ### Yocto layer integration
 
-`meta-yocto-hardened-hpc` already ships `beamfs-module`,
+`meta-yocto-beamfs` already ships `beamfs-module`,
 `mkfs-beamfs`, and `beamfsd`. Adding:
 
 - A `wic` plugin or kickstart fragment so Yocto images can

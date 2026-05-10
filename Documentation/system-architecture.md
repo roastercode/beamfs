@@ -101,7 +101,7 @@ of beamfs within a complete hardened embedded Linux system:
 ```
 
 This layout is not theoretical. The beamfs Yocto layer
-(`github.com/roastercode/yocto-hardened`, branch `arm64-beamfs`) deploys
+(`github.com/roastercode/yocto-beamfs`, branch `main`) deploys
 beamfs as a dedicated data partition (`/dev/vdb`) in an arm64 Slurm HPC
 cluster, validated on kernel 7.0. The rootfs uses a separate ext4
 partition in the current Yocto build; migration to squashfs + dm-verity
