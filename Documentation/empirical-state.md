@@ -105,3 +105,130 @@ beamfs returns NOT_IMPLEMENTED (fsck.beamfs is Phase 2 mainline-prep).
 - Paper v3 working draft : `papers/2026-04-beamfs-v3-findings/`
 
 End of empirical state snapshot.
+
+
+## N=100 multifs (2026-05-10)
+
+**Run reference :** `/tmp/N100-20260510-003122/`
+**Raw data tarball :** `N100-raw-data.tar.gz`
+**SHA-256 :** `f9f01a585c2871cab063ffbf2bbfc015777537918339a5d742b2137846e8a615`
+**Total records :** 6000 (2 batches × 100 runs × 5 FS × 6 probs)
+**Runtime :** ~17h45m (start 2026-05-10 00:31, end 18:21)
+**FS_PANIC count :** 0
+**Stack versions :**
+  - kernel 7.0.3 (qemuarm64)
+  - beamfs.ko v0.1.1 (devel commit 364e445)
+  - emufi.ko v0.3.5 (main commit 9c2dbf4, dual-hook)
+  - beamfs-bench v0.10.0 (main commit f1e347b, post cluster.rs propagation fix)
+
+### Configuration
+
+The run executed two sequential batches sharing identical fault
+injection parameters but different `s_data_protection_scheme` values :
+
+  - **Batch A** : `BEAMFS_SCHEME=inline` (scheme=2 UNIVERSAL_INLINE).
+    FS list : beamfs / ext4 / btrfs / xfs / ext2.
+  - **Batch B** : `BEAMFS_SCHEME=inode-universal` (scheme=5 INODE_UNIVERSAL).
+    FS list : beamfs / f2fs / exfat / vfat / squashfs.
+
+Per-cell parameters :
+  - 6 probability levels : 100 / 1000 / 10000 / 100000 / 500000 / 1000000 ppm
+  - `flip_locality = 0` (RANDOM, default)
+  - `flip_width = 1` (default), `burst_symbols = 1` (default)
+  - `target_block_range` calibrated to the beamfs file layout
+    (sectors 2440..2960 typical, dynamic per-run via filefrag)
+
+### Batch A results (scheme=2 UNIVERSAL_INLINE)
+
+| FS | 100 ppm | 1k ppm | 10k ppm | 100k ppm | 500k ppm | 1M ppm |
+|---|---|---|---|---|---|---|
+| beamfs scheme=2 | 100% | 100% | 100% | 99% | 96% | **89%** + 60 UNC |
+| ext4 | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| btrfs | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| xfs | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| ext2 | 100% | 100% | 100% | 90% | 49% | **0%** (silent) |
+
+Per-cell flip activity (beamfs scheme=2 only) :
+
+| Prob | FLIP_mean | RS_CORRECTED_mean | UNC_total | BITS_DIFF |
+|---|---|---|---|---|
+| 100 | 0.01 | 0.01 | 0 | 0 |
+| 1k | 0.05 | 0.05 | 0 | 0 |
+| 10k | 0.66 | 0.69 | 0 | 0 |
+| 100k | 6.82 | 6.71 | 0 | 0 |
+| 500k | 57.03 | 9.11 | 0 | 0 |
+| 1M | 185.06 | 5.07 | **60** | 15431 |
+
+### Batch B results (scheme=5 INODE_UNIVERSAL)
+
+| FS | 100 ppm | 1k ppm | 10k ppm | 100k ppm | 500k ppm | 1M ppm |
+|---|---|---|---|---|---|---|
+| beamfs scheme=5 | 99% | 95% | 54% | **0%** | **0%** | **0%** |
+| f2fs | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| exfat | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| vfat | 100% | 100% | 100% | 100% | 100% | 100% (no flip) |
+| squashfs | 100% | 100% | 100% | 100% | 100% | 100% (RO) |
+
+Per-cell flip activity (beamfs scheme=5 only) :
+
+| Prob | FLIP_mean | RS_CORRECTED_mean | UNC_total | BITS_DIFF |
+|---|---|---|---|---|
+| 100 | 0.01 | **0.00** | 0 | 1 |
+| 1k | 0.05 | **0.00** | 0 | 5 |
+| 10k | 0.61 | **0.00** | 0 | 61 |
+| 100k | 6.48 | **0.00** | 0 | 637 |
+| 500k | 31.21 | **0.00** | 0 | 35901 |
+| 1M | 63.06 | **0.00** | 0 | 55310 |
+
+### Scientific observations
+
+1. **Theorem v2.1 corroboration (scheme=2)**. The dose-response
+   curve up to 500k ppm shows clean recovery : `RS_CORRECTED_mean`
+   tracks `FLIP_mean` until ~9 errors, the per-subblock RS(255,239)
+   capacity (`t = (n-k)/2 = 8`) is reached at 500k ppm, and 96%
+   hash preservation is maintained.
+
+2. **Theorem v2.2 corroboration (scheme=2)**. At 1M ppm with
+   `flip_locality=RANDOM`, 60 `BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE`
+   journal entries are emitted across 100 runs (60% of runs in
+   saturation). The system correctly signals the saturation
+   regime instead of producing silent corruption.
+
+3. **Scheme=5 data block protection gap (empirical)**. Across
+   600 cells of scheme=5, the cumulative `RS_CORRECTED` count is
+   exactly **zero**. Cumulative `BITS_DIFF` reaches 92,005 bits.
+   This is consistent with the source code analysis :
+   `file.c::generic_file_read_iter` (the path for files >
+   `BEAMFS_DATA_INLINE_BYTES = 3824 bytes`) does not invoke
+   `beamfs_rs_decode_region` on the data block read path. The
+   gap is documented in `Documentation/roadmap.md` Stage 4
+   (universal data block protection, PENDING).
+
+4. **ext2 silent corruption confirmed**. At 1M ppm, ext2
+   produces 0/100 hash preservation with 0 RS_CORRECTED (no FEC)
+   and BITS_DIFF=16375. This corroborates the paper v2 narrative
+   on commodity FS silent corruption under EM stress.
+
+### Limitations
+
+The Batch A and Batch B results for **commodity FS other than
+beamfs and ext2** are **invalid for resistance comparison**. The
+`target_block_range` filter was calibrated to the beamfs file
+layout (sectors corresponding to file blocks on the beamfs
+device). The same range applied to ext4 / btrfs / xfs / f2fs /
+exfat / vfat / squashfs targets device sectors that do not
+correspond to the file on those FS. Consequently, FLIP_mean is
+0.00 for all those FS, and their 100% hash preservation reflects
+**absence of injection**, not resilience.
+
+This limitation is structural to emufi v0.3.5 (one
+`target_block_range` per attack window). Equitable multifs
+comparison requires the emufi v0.4 multifs-capable injector
+described in `~/git/emufi/Documentation/roadmap.md`.
+
+### Reproducibility
+
+Raw data preserved at `/tmp/N100-20260510-003122/` on
+spartian (research deployment). The CSV `N100-records.csv`
+(6001 lines) is the canonical extraction. Re-extraction from
+the tarball is documented in `Documentation/HOW-TO-beamfs-globally.md`.
