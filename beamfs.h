@@ -645,6 +645,7 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode);
 /* dir.c */
 extern const struct file_operations beamfs_dir_operations;
 extern const struct inode_operations beamfs_dir_inode_operations;
+extern const struct inode_operations beamfs_symlink_inode_operations;
 
 /* file.c */
 extern const struct file_operations beamfs_file_operations;

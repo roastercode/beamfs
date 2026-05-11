@@ -190,6 +190,9 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			inode->i_fop = &beamfs_file_operations;
 			inode->i_mapping->a_ops = &beamfs_aops;
 		}
+	} else if (S_ISLNK(inode->i_mode)) {
+		/* Fast symlink: target stored inline in i_direct[] (<= 96 b). */
+		inode->i_op = &beamfs_symlink_inode_operations;
 	} else {
 		/* Special files: use generic */
 		init_special_inode(inode, inode->i_mode, 0);

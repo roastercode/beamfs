@@ -494,6 +494,89 @@ static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
 }
 
 /* ------------------------------------------------------------------ */
+/* symlink - create a symbolic link                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * beamfs_symlink -- create a symbolic link in directory @dir.
+ *
+ * Fast symlink only (v1): target path is stored inline in the inode
+ * by reusing the i_direct[] byte storage (96 bytes available). For
+ * targets longer than 96 bytes, returns -ENAMETOOLONG. The rootfs
+ * Linux deployment corpus has all symlinks < 96 bytes; slow symlink
+ * (data-block path) is deferred to a follow-up.
+ */
+static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
+			  struct dentry *dentry, const char *symname)
+{
+	struct inode             *inode;
+	struct beamfs_inode_info *fi;
+	size_t                    len;
+	int                       ret;
+
+	len = strlen(symname);
+	if (len == 0 || len >= sizeof(((struct beamfs_inode *)0)->i_direct))
+		return -ENAMETOOLONG;
+
+	inode = beamfs_new_inode(dir, S_IFLNK | 0777);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	fi = BEAMFS_I(inode);
+	/*
+	 * Reuse i_direct[] as a 96-byte inline payload. The fast-symlink
+	 * convention is mirrored on-disk via beamfs_write_inode_raw which
+	 * memcpys fi->i_direct verbatim into the on-disk inode.
+	 */
+	memset(fi->i_direct, 0, sizeof(fi->i_direct));
+	memcpy(fi->i_direct, symname, len);
+	inode->i_size = len;
+	inode->i_op = &beamfs_symlink_inode_operations;
+
+	ret = beamfs_write_inode_raw(inode);
+	if (ret)
+		goto out_iput;
+
+	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino, DT_LNK);
+	if (ret)
+		goto out_iput;
+
+	ret = beamfs_write_inode_raw(dir);
+	if (ret)
+		goto out_iput;
+
+	d_instantiate(dentry, inode);
+	unlock_new_inode(inode);
+	return 0;
+
+out_iput:
+	unlock_new_inode(inode);
+	iput(inode);
+	return ret;
+}
+
+/*
+ * beamfs_get_link -- VFS i_op->get_link callback.
+ *
+ * Returns a pointer to the inline target stored in i_direct[]. The
+ * buffer lifetime is tied to the in-memory inode; no allocation is
+ * performed and no DELAYED_CALL needs to be set up.
+ */
+static const char *beamfs_get_link(struct dentry *dentry,
+				   struct inode *inode,
+				   struct delayed_call *done)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+
+	return (const char *)fi->i_direct;
+}
+
+const struct inode_operations beamfs_symlink_inode_operations = {
+	.getattr  = simple_getattr,
+	.get_link = beamfs_get_link,
+};
+
+/* ------------------------------------------------------------------ */
 /* write_inode - VFS super_op: persist inode to disk                  */
 /* ------------------------------------------------------------------ */
 
@@ -625,5 +708,6 @@ const struct inode_operations beamfs_dir_inode_operations = {
 	.unlink  = beamfs_unlink,
 	.rmdir   = beamfs_rmdir,
 	.link    = beamfs_link,
+	.symlink = beamfs_symlink,
 	.rename  = beamfs_rename,
 };
