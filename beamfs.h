@@ -191,6 +191,41 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
 #define BEAMFS_INDIRECT_PTRS (BEAMFS_BLOCK_SIZE / sizeof(__le64))
 
 /*
+ * Multi-level indirect capacity (v5.x extension, post-RFC v5.0 baseline).
+ *
+ * BEAMFS_DINDIRECT_PTRS: total user blocks reachable via the double
+ *   indirect pointer = 512 single-indirect blocks x 512 ptrs each.
+ * BEAMFS_TINDIRECT_PTRS: total user blocks reachable via the triple
+ *   indirect pointer = 512 dindirect blocks x 512 single-indirect each
+ *                      x 512 ptrs each.
+ *
+ * The i_dindirect and i_tindirect on-disk fields are already declared
+ * in struct beamfs_inode and reserved in mkfs since v5.0; the kernel
+ * implementation that walks these levels is introduced in v0.1.x
+ * without a format bump.
+ *
+ * Maximum mapped iblock per indirection level:
+ *   direct      :                                  BEAMFS_DIRECT_BLOCKS (12)
+ *   + indirect  :                              524 (12 + 512)
+ *   + dindirect :                          262 668 (524 + 512^2)
+ *   + tindirect :                      134 480 396 (262 668 + 512^3)
+ *
+ * Logical user capacity per file (user bytes per block = 3824 under
+ * scheme=2 UNIVERSAL_INLINE with 16 x RS(255,239) sub-blocks):
+ *   direct      :    45 888 B  (~45 KiB)
+ *   + indirect  : 2 003 776 B  (~1.91 MiB) -- current ceiling (v0.1.x)
+ *   + dindirect : ~ 956 MiB    (~1 GiB)
+ *   + tindirect : ~ 478 GiB    (~512 GiB)
+ */
+#define BEAMFS_DINDIRECT_PTRS  (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS)
+#define BEAMFS_TINDIRECT_PTRS  (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS)
+
+#define BEAMFS_MAX_IBLOCK_DIRECT     ((u64)BEAMFS_DIRECT_BLOCKS)
+#define BEAMFS_MAX_IBLOCK_INDIRECT   (BEAMFS_MAX_IBLOCK_DIRECT   + (u64)BEAMFS_INDIRECT_PTRS)
+#define BEAMFS_MAX_IBLOCK_DINDIRECT  (BEAMFS_MAX_IBLOCK_INDIRECT + (u64)BEAMFS_DINDIRECT_PTRS)
+#define BEAMFS_MAX_IBLOCK_TINDIRECT  (BEAMFS_MAX_IBLOCK_DINDIRECT + (u64)BEAMFS_TINDIRECT_PTRS)
+
+/*
  * Electromagnetic Resilience Journal entry -- 40 bytes (v4 format).
  *
  * Records each RS FEC correction event persistently in the superblock.
