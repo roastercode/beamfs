@@ -81,85 +81,114 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	if (!sbi->s_block_bitmap)
 		return -ENOMEM;
 
-	/* Read the on-disk bitmap block */
-	bh = sb_bread(sb, bitmap_blk);
-	if (!bh) {
-		pr_err("beamfs: cannot read bitmap block %llu\n", bitmap_blk);
+	/*
+	 * Multi-block bitmap layout: K = bitmap_blocks_count contiguous
+	 * blocks starting at bitmap_blk. Each block protects 30592 data
+	 * block bits via RS over BEAMFS_BITMAP_SUBBLOCKS (16) sub-blocks.
+	 * K is decoded from s_flags bits 0..15; 0 means legacy 1.
+	 */
+	sbi->s_bitmap_blocks_count =
+		beamfs_bitmap_blocks_count_from_flags(sbi->s_beamfs_sb->s_flags);
+
+	sbi->s_bitmap_blkhs = kcalloc(sbi->s_bitmap_blocks_count,
+				      sizeof(*sbi->s_bitmap_blkhs), GFP_KERNEL);
+	if (!sbi->s_bitmap_blkhs) {
 		bitmap_free(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
-		return -EIO;
-	}
-	sbi->s_bitmap_blkh = bh;
-	bdata = (u8 *)bh->b_data;
-
-	/*
-	 * Decode each RS(255,239) subblock via the region helper. The
-	 * results[] array holds the per-subblock decode outcome for
-	 * the RS journal: < 0 uncorrectable, = 0 no errors,
-	 * > 0 number of corrected symbols.
-	 */
-	{
-		int rs_results[BEAMFS_BITMAP_SUBBLOCKS];
-		int rs_positions[BEAMFS_BITMAP_SUBBLOCKS *
-				 (BEAMFS_RS_PARITY / 2)];
-
-		beamfs_rs_decode_region(
-			bdata, BEAMFS_SUBBLOCK_TOTAL,
-			bdata + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-			BEAMFS_SUBBLOCK_DATA, BEAMFS_BITMAP_SUBBLOCKS,
-			rs_results,
-			rs_positions,
-			BEAMFS_RS_PARITY / 2);
-
-		for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++) {
-			int rc = rs_results[i];
-
-			if (rc < 0) {
-				pr_err("beamfs: bitmap subblock %lu uncorrectable\n", i);
-			} else if (rc > 0) {
-				unsigned int np = (unsigned int)rc;
-				int *pos = rs_positions +
-					   i * (BEAMFS_RS_PARITY / 2);
-
-				if (np > BEAMFS_RS_PARITY / 2)
-					np = BEAMFS_RS_PARITY / 2;
-				pr_warn("beamfs: bitmap subblock %lu: %d symbol(s) corrected\n",
-					i, rc);
-				beamfs_log_rs_event(sb,
-					(u64)bitmap_blk * BEAMFS_BITMAP_SUBBLOCKS + i,
-					pos, np,
-					BEAMFS_SUBBLOCK_DATA);
-				corrected = true;
-			}
-		}
+		return -ENOMEM;
 	}
 
-	/*
-	 * Copy bitmap data bytes into the in-memory bitmap.
-	 * Skip parity bytes between subblocks.
-	 */
 	{
-		unsigned long bit = 0;
+		u32 k;
+		unsigned long bit_global = 0;
 		unsigned long max_bit = sbi->s_nblocks;
 
-		for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS && bit < max_bit; i++) {
-			u8 *subdata = bdata + i * BEAMFS_SUBBLOCK_TOTAL;
-			unsigned long b;
+		for (k = 0;
+		     k < sbi->s_bitmap_blocks_count && bit_global < max_bit;
+		     k++) {
+			u64 disk_blk = bitmap_blk + (u64)k;
+			int rs_results[BEAMFS_BITMAP_SUBBLOCKS];
+			int rs_positions[BEAMFS_BITMAP_SUBBLOCKS *
+					 (BEAMFS_RS_PARITY / 2)];
+			unsigned long bit_local;
 
-			for (b = 0; b < BEAMFS_SUBBLOCK_DATA * 8 && bit < max_bit;
-			     b++, bit++) {
-				if (subdata[b / 8] & (1u << (b % 8)))
-					set_bit(bit, sbi->s_block_bitmap);
-				else
-					clear_bit(bit, sbi->s_block_bitmap);
+			bh = sb_bread(sb, disk_blk);
+			if (!bh) {
+				pr_err("beamfs: cannot read bitmap blk %llu (k=%u)\n",
+				       disk_blk, k);
+				while (k > 0) {
+					k--;
+					brelse(sbi->s_bitmap_blkhs[k]);
+					sbi->s_bitmap_blkhs[k] = NULL;
+				}
+				kfree(sbi->s_bitmap_blkhs);
+				sbi->s_bitmap_blkhs = NULL;
+				bitmap_free(sbi->s_block_bitmap);
+				sbi->s_block_bitmap = NULL;
+				return -EIO;
+			}
+			sbi->s_bitmap_blkhs[k] = bh;
+			bdata = (u8 *)bh->b_data;
+
+			beamfs_rs_decode_region(
+				bdata, BEAMFS_SUBBLOCK_TOTAL,
+				bdata + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_BITMAP_SUBBLOCKS,
+				rs_results, rs_positions,
+				BEAMFS_RS_PARITY / 2);
+
+			for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++) {
+				int rc = rs_results[i];
+
+				if (rc < 0) {
+					pr_err("beamfs: bmap blk %u sub %lu uncor\n",
+					       k, i);
+				} else if (rc > 0) {
+					unsigned int np = (unsigned int)rc;
+					int *pos = rs_positions +
+						i * (BEAMFS_RS_PARITY / 2);
+
+					if (np > BEAMFS_RS_PARITY / 2)
+						np = BEAMFS_RS_PARITY / 2;
+					pr_warn("beamfs: bmap blk %u sub %lu: %d corrected\n",
+						k, i, rc);
+					beamfs_log_rs_event(sb,
+						disk_blk * BEAMFS_BITMAP_SUBBLOCKS + i,
+						pos, np,
+						BEAMFS_SUBBLOCK_DATA);
+					corrected = true;
+				}
+			}
+
+			bit_local = 0;
+			for (i = 0;
+			     i < BEAMFS_BITMAP_SUBBLOCKS &&
+			     bit_local < BEAMFS_BITS_PER_BITMAP_BLOCK &&
+			     bit_global < max_bit; i++) {
+				u8 *subdata = bdata + i * BEAMFS_SUBBLOCK_TOTAL;
+				unsigned long b;
+
+				for (b = 0;
+				     b < BEAMFS_SUBBLOCK_DATA * 8 &&
+				     bit_global < max_bit;
+				     b++, bit_local++, bit_global++) {
+					if (subdata[b / 8] & (1u << (b % 8)))
+						set_bit(bit_global,
+							sbi->s_block_bitmap);
+					else
+						clear_bit(bit_global,
+							  sbi->s_block_bitmap);
+				}
+			}
+
+			if (corrected) {
+				mark_buffer_dirty(bh);
+				sync_dirty_buffer(bh);
+				corrected = false;
 			}
 		}
-	}
-
-	/* Write back corrected bitmap immediately */
-	if (corrected) {
-		mark_buffer_dirty(bh);
-		sync_dirty_buffer(bh);
 	}
 
 	/* --- Inode bitmap --- */
@@ -171,8 +200,14 @@ int beamfs_setup_bitmap(struct super_block *sb)
 
 	sbi->s_inode_bitmap = bitmap_zalloc(total_inodes + 1, GFP_KERNEL);
 	if (!sbi->s_inode_bitmap) {
-		brelse(sbi->s_bitmap_blkh);
-		sbi->s_bitmap_blkh = NULL;
+		u32 k;
+
+		for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+			if (sbi->s_bitmap_blkhs[k])
+				brelse(sbi->s_bitmap_blkhs[k]);
+		}
+		kfree(sbi->s_bitmap_blkhs);
+		sbi->s_bitmap_blkhs = NULL;
 		bitmap_free(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
 		return -ENOMEM;
@@ -218,35 +253,50 @@ int beamfs_setup_bitmap(struct super_block *sb)
 int beamfs_write_bitmap(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-	u8 *bdata;
-	unsigned long bit = 0;
-	unsigned long max_bit = sbi->s_nblocks;
-	unsigned long i, b;
+	unsigned long bit_global = 0;
+	unsigned long max_bit;
+	u32 k;
 
-	if (!sbi->s_bitmap_blkh || !sbi->s_block_bitmap)
+	if (!sbi->s_bitmap_blkhs || !sbi->s_block_bitmap)
 		return -EINVAL;
 
-	bdata = (u8 *)sbi->s_bitmap_blkh->b_data;
-	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
+	max_bit = sbi->s_nblocks;
 
-	/* Pack in-memory bitmap bits into subblock data areas */
-	for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS && bit < max_bit; i++) {
-		u8 *subdata = bdata + i * BEAMFS_SUBBLOCK_TOTAL;
+	for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+		struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
+		u8 *bdata;
+		unsigned long bit_local = 0;
+		unsigned long i, b;
 
-		for (b = 0; b < BEAMFS_SUBBLOCK_DATA * 8 && bit < max_bit;
-		     b++, bit++) {
-			if (test_bit(bit, sbi->s_block_bitmap))
-				subdata[b / 8] |= (1u << (b % 8));
+		if (!bh)
+			continue;
+		bdata = (u8 *)bh->b_data;
+		memset(bdata, 0, BEAMFS_BLOCK_SIZE);
+
+		for (i = 0;
+		     i < BEAMFS_BITMAP_SUBBLOCKS &&
+		     bit_local < BEAMFS_BITS_PER_BITMAP_BLOCK &&
+		     bit_global < max_bit; i++) {
+			u8 *subdata = bdata + i * BEAMFS_SUBBLOCK_TOTAL;
+
+			for (b = 0;
+			     b < BEAMFS_SUBBLOCK_DATA * 8 &&
+			     bit_global < max_bit;
+			     b++, bit_local++, bit_global++) {
+				if (test_bit(bit_global, sbi->s_block_bitmap))
+					subdata[b / 8] |= (1u << (b % 8));
+			}
 		}
+
+		beamfs_rs_encode_region(
+			bdata, BEAMFS_SUBBLOCK_TOTAL,
+			bdata + BEAMFS_SUBBLOCK_DATA,
+			BEAMFS_SUBBLOCK_TOTAL,
+			BEAMFS_SUBBLOCK_DATA,
+			BEAMFS_BITMAP_SUBBLOCKS);
+
+		mark_buffer_dirty(bh);
 	}
-
-	/* Re-encode RS parity for each subblock via the region helper */
-	beamfs_rs_encode_region(
-		bdata, BEAMFS_SUBBLOCK_TOTAL,
-		bdata + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-		BEAMFS_SUBBLOCK_DATA, BEAMFS_BITMAP_SUBBLOCKS);
-
-	mark_buffer_dirty(sbi->s_bitmap_blkh);
 	return 0;
 }
 
@@ -257,9 +307,17 @@ void beamfs_destroy_bitmap(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
-	if (sbi->s_bitmap_blkh) {
-		brelse(sbi->s_bitmap_blkh);
-		sbi->s_bitmap_blkh = NULL;
+	if (sbi->s_bitmap_blkhs) {
+		u32 k;
+
+		for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+			if (sbi->s_bitmap_blkhs[k]) {
+				brelse(sbi->s_bitmap_blkhs[k]);
+				sbi->s_bitmap_blkhs[k] = NULL;
+			}
+		}
+		kfree(sbi->s_bitmap_blkhs);
+		sbi->s_bitmap_blkhs = NULL;
 	}
 	if (sbi->s_block_bitmap) {
 		bitmap_free(sbi->s_block_bitmap);

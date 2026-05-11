@@ -35,6 +35,20 @@
 /* On-disk bitmap block layout (RS FEC protected) */
 #define BEAMFS_BITMAP_SUBBLOCKS  16   /* subblocks per bitmap block */
 #define BEAMFS_BITMAP_DATA_BYTES (BEAMFS_BITMAP_SUBBLOCKS * BEAMFS_SUBBLOCK_DATA) /* 3824 */
+/* Bits of free-data-block bitmap held by a single on-disk bitmap block. */
+#define BEAMFS_BITS_PER_BITMAP_BLOCK (BEAMFS_BITMAP_DATA_BYTES * 8) /* 30592 */
+
+/*
+ * Encoding of s_flags (on-disk).
+ *
+ * Bits 0..15 = bitmap_blocks_count (zero -> legacy 1, max 65535).
+ * Bits 16..31 = reserved (must be zero).
+ *
+ * s_flags is __le32, inside the CRC32 coverage (region A 0..63).
+ * Volumes formatted by pre-multi-bitmap mkfs have s_flags=0, which
+ * matches the legacy single-block layout via the fallback below.
+ */
+#define BEAMFS_SB_FLAGS_BITMAP_BLOCKS_MASK  0x0000FFFFu
 
 /*
  * On-disk data block layout under BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.
@@ -421,6 +435,22 @@ struct beamfs_rs_event {
  * On-disk superblock - block 0
  * Total size: fits in one 4096-byte block
  */
+struct beamfs_super_block;
+
+/*
+ * beamfs_bitmap_blocks_count_from_flags -- number of on-disk bitmap blocks.
+ *
+ * Decoded from s_flags bits 0..15. 0 in the field means the volume was
+ * formatted before multi-block bitmap support; treat as legacy single
+ * bitmap block.
+ */
+static inline u32 beamfs_bitmap_blocks_count_from_flags(__le32 s_flags_le)
+{
+	u32 v = le32_to_cpu(s_flags_le) & BEAMFS_SB_FLAGS_BITMAP_BLOCKS_MASK;
+
+	return v ? v : 1;
+}
+
 struct beamfs_super_block {
 	__le32  s_magic;            /* BEAMFS_MAGIC */
 	__le32  s_block_size;       /* Block size in bytes */
@@ -516,7 +546,9 @@ struct beamfs_sb_info {
 	/* Superblock */
 	struct beamfs_super_block *s_beamfs_sb; /* On-disk superblock copy */
 	struct buffer_head       *s_sbh;      /* Buffer head for superblock */
-	struct buffer_head       *s_bitmap_blkh; /* Buffer head for on-disk bitmap */
+	/* Array of K bhs; K = s_bitmap_blocks_count (multi-block bitmap). */
+	struct buffer_head      **s_bitmap_blkhs;
+	u32                       s_bitmap_blocks_count;
 	spinlock_t                s_lock;     /* Superblock lock */
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
