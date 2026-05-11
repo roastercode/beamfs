@@ -88,25 +88,66 @@ static void beamfs_put_super(struct super_block *sb)
  * Frees the inode number back to the bitmap.
  */
 /*
+ * seen_block -- linear search for a block id in the seen[] array.
+ * Used by beamfs_free_data_blocks to deduplicate block frees in
+ * evict path under inode corruption (RadFI flipping a pointer so
+ * that two slots end up pointing at the same physical block).
+ */
+static bool seen_block(const u64 *seen, unsigned int n, u64 blk)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++) {
+		if (seen[i] == blk)
+			return true;
+	}
+	return false;
+}
+
+/*
  * beamfs_free_data_blocks -- release all data blocks of a deleted inode.
  *
  * Frees direct blocks and the single indirect block (and all blocks
  * it points to). Called from evict_inode when nlink drops to 0.
+ *
+ * EM-resilience: under inode pointer corruption (e.g. RadFI bit-flip
+ * landing on i_direct[i] or an entry of the indirect block), two
+ * inode slots can end up pointing at the same physical block. The
+ * naive free path would then call beamfs_free_block twice on that
+ * block, triggering the 'double free of block N' pr_warn + stack
+ * dump in alloc.c. Deduplicate explicitly: collect distinct block
+ * IDs first, then free each once.
+ *
+ * Allocation budget: max BEAMFS_DIRECT_BLOCKS (12) + nptrs (512) +
+ * 1 (indirect itself) = 525 u64 = 4200 bytes. kmalloc with GFP_NOFS
+ * to avoid recursion into the filesystem from this path. On OOM
+ * fall back to the un-deduplicated path: the bitmap stays correct
+ * (beamfs_free_block silently rejects a 2nd free) at the cost of a
+ * pr_warn per duplicate.
  */
 static void beamfs_free_data_blocks(struct inode *inode)
 {
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	struct super_block      *sb = inode->i_sb;
-	int i;
+	u64                     *seen;
+	unsigned int             n_seen = 0;
+	unsigned int             cap;
+	u64                      nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
+	int                      i;
+
+	cap = BEAMFS_DIRECT_BLOCKS + (unsigned int)nptrs + 1;
+	seen = kmalloc_array(cap, sizeof(*seen), GFP_NOFS);
 
 	/* Free direct blocks */
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
 		u64 blk = le64_to_cpu(fi->i_direct[i]);
 
-		if (blk) {
+		if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
 			beamfs_free_block(sb, blk);
-			fi->i_direct[i] = 0;
+			if (seen)
+				seen[n_seen++] = blk;
 		}
+		fi->i_direct[i] = 0;
 	}
 
 	/* Free single indirect block and all blocks it points to */
@@ -116,20 +157,25 @@ static void beamfs_free_data_blocks(struct inode *inode)
 
 		if (ibh) {
 			__le64 *ptrs = (__le64 *)ibh->b_data;
-			u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
 			u64 j;
 
 			for (j = 0; j < nptrs; j++) {
 				u64 blk = le64_to_cpu(ptrs[j]);
 
-				if (blk)
+				if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
 					beamfs_free_block(sb, blk);
+					if (seen)
+						seen[n_seen++] = blk;
+				}
 			}
 			brelse(ibh);
 		}
-		beamfs_free_block(sb, indirect_blk);
+		if (!seen || !seen_block(seen, n_seen, indirect_blk))
+			beamfs_free_block(sb, indirect_blk);
 		fi->i_indirect = 0;
 	}
+
+	kfree(seen);
 }
 
 static void beamfs_evict_inode(struct inode *inode)
