@@ -148,6 +148,66 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		return 0;
 	}
 
+	if (iblock_logical < BEAMFS_MAX_IBLOCK_DINDIRECT) {
+		/*
+		 * Double-indirect lookup. Map iblock to (level-1 slot,
+		 * level-2 slot) where level-1 is an indirect block of
+		 * pointers to indirect blocks, and level-2 is the leaf
+		 * indirect block whose entries point to user data blocks.
+		 * Coverage: 12 + 512 + 512*512 = 262668 iblocks ~= 1 GiB.
+		 */
+		u64 didx, l1_slot, l2_slot, dindirect_blk, l1_blk;
+		struct buffer_head *l1bh;
+
+		didx = iblock_logical - BEAMFS_MAX_IBLOCK_INDIRECT;
+		l1_slot = didx / BEAMFS_INDIRECT_PTRS;
+		l2_slot = didx % BEAMFS_INDIRECT_PTRS;
+
+		dindirect_blk = le64_to_cpu(fi->i_dindirect);
+		if (!dindirect_blk)
+			return 0; /* HOLE: dindirect block not yet allocated */
+
+		ibh = sb_bread(sb, dindirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: failed to read dindirect block %llu\n",
+					   (unsigned long long)dindirect_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		brelse(ibh);
+
+		if (!l1_blk)
+			return 0; /* HOLE: level-1 indirect not allocated */
+
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read dindirect L1 block %llu\n",
+					   (unsigned long long)l1_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l1bh->b_data;
+		phys = le64_to_cpu(ptrs[l2_slot]);
+		brelse(l1bh);
+
+		if (phys != 0) {
+			struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+			if (phys < sbi->s_data_start ||
+			    phys >= sbi->s_data_start + sbi->s_nblocks) {
+				pr_err_ratelimited("beamfs/inline: corrupted dindirect pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys,
+						   sbi->s_data_start,
+						   sbi->s_data_start + sbi->s_nblocks);
+				return -EUCLEAN;
+			}
+		}
+		*phys_out = phys;
+		return 0;
+	}
+
 	pr_err_ratelimited("beamfs/inline: iblock %llu beyond v1 indirect capacity\n",
 			   (unsigned long long)iblock_logical);
 	return -EOPNOTSUPP;
@@ -296,6 +356,121 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		mark_buffer_dirty(ibh);
 		brelse(ibh);
+
+		*phys_out = new_block;
+		return 0;
+	}
+
+	if (iblock_logical < BEAMFS_MAX_IBLOCK_DINDIRECT) {
+		/*
+		 * Double-indirect write path: allocate dindirect block,
+		 * level-1 indirect block, and data block in a cascade,
+		 * each zero-initialized. The allocation order minimizes
+		 * orphaned blocks on crash: data block last, so a crash
+		 * between dindirect alloc and data alloc leaves a zero
+		 * level-1 pointer (treated as HOLE on read).
+		 */
+		u64 didx, l1_slot, l2_slot;
+		u64 dindirect_blk, l1_blk;
+		struct buffer_head *l1bh;
+
+		didx = iblock_logical - BEAMFS_MAX_IBLOCK_INDIRECT;
+		l1_slot = didx / BEAMFS_INDIRECT_PTRS;
+		l2_slot = didx % BEAMFS_INDIRECT_PTRS;
+
+		/* --- Stage 1: dindirect block --- */
+		dindirect_blk = le64_to_cpu(fi->i_dindirect);
+		if (!dindirect_blk) {
+			dindirect_blk = beamfs_alloc_block(sb);
+			if (!dindirect_blk) {
+				pr_err_ratelimited("beamfs/inline: no free blocks (dindirect)\n");
+				return -ENOSPC;
+			}
+			ibh = sb_getblk(sb, dindirect_blk);
+			if (!ibh) {
+				beamfs_free_block(sb, dindirect_blk);
+				return -EIO;
+			}
+			lock_buffer(ibh);
+			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(ibh);
+			unlock_buffer(ibh);
+			mark_buffer_dirty(ibh);
+			brelse(ibh);
+			fi->i_dindirect = cpu_to_le64(dindirect_blk);
+			mark_inode_dirty(inode);
+		}
+
+		/* --- Stage 2: level-1 indirect block --- */
+		ibh = sb_bread(sb, dindirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: failed to read dindirect block %llu\n",
+					   (unsigned long long)dindirect_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		if (!l1_blk) {
+			l1_blk = beamfs_alloc_block(sb);
+			if (!l1_blk) {
+				brelse(ibh);
+				pr_err_ratelimited("beamfs/inline: no free blocks (L1 indirect)\n");
+				return -ENOSPC;
+			}
+			l1bh = sb_getblk(sb, l1_blk);
+			if (!l1bh) {
+				beamfs_free_block(sb, l1_blk);
+				brelse(ibh);
+				return -EIO;
+			}
+			lock_buffer(l1bh);
+			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l1bh);
+			unlock_buffer(l1bh);
+			mark_buffer_dirty(l1bh);
+			brelse(l1bh);
+			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			mark_buffer_dirty(ibh);
+		}
+		brelse(ibh);
+
+		/* --- Stage 3: data block --- */
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read L1 indirect block %llu\n",
+					   (unsigned long long)l1_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l1bh->b_data;
+		phys = le64_to_cpu(ptrs[l2_slot]);
+		if (phys) {
+			brelse(l1bh);
+			*phys_out = phys;
+			return 0;
+		}
+
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			brelse(l1bh);
+			pr_err_ratelimited("beamfs/inline: no free blocks (dindirect data)\n");
+			return -ENOSPC;
+		}
+		dbh = sb_getblk(sb, new_block);
+		if (!dbh) {
+			beamfs_free_block(sb, new_block);
+			brelse(l1bh);
+			return -EIO;
+		}
+		lock_buffer(dbh);
+		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(dbh);
+		unlock_buffer(dbh);
+		mark_buffer_dirty(dbh);
+		brelse(dbh);
+
+		ptrs[l2_slot] = cpu_to_le64(new_block);
+		mark_buffer_dirty(l1bh);
+		brelse(l1bh);
 
 		*phys_out = new_block;
 		return 0;
