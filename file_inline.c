@@ -92,7 +92,24 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 	*phys_out = 0;
 
 	if (iblock_logical < BEAMFS_DIRECT_BLOCKS) {
-		*phys_out = le64_to_cpu(fi->i_direct[iblock_logical]);
+		u64 dphys = le64_to_cpu(fi->i_direct[iblock_logical]);
+
+		if (dphys != 0) {
+			struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+			if (dphys < sbi->s_data_start ||
+			    dphys >= sbi->s_data_start + sbi->s_nblocks) {
+				pr_err_ratelimited("beamfs/inline: corrupted direct pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)dphys,
+						   sbi->s_data_start,
+						   sbi->s_data_start + sbi->s_nblocks);
+				beamfs_log_rs_event(sb, dphys, NULL, 0, 0);
+				return -EUCLEAN;
+			}
+		}
+		*phys_out = dphys;
 		return 0;
 	}
 
@@ -113,6 +130,22 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		phys = le64_to_cpu(ptrs[indirect_slot]);
 		brelse(ibh);
 
+		if (phys != 0) {
+			struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+			if (phys < sbi->s_data_start ||
+			    phys >= sbi->s_data_start + sbi->s_nblocks) {
+				pr_err_ratelimited("beamfs/inline: corrupted indirect pointer ino=%lu iblock=%llu slot=%llu phys=%llu (out of [%lu, %lu))\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)indirect_slot,
+						   (unsigned long long)phys,
+						   sbi->s_data_start,
+						   sbi->s_data_start + sbi->s_nblocks);
+				beamfs_log_rs_event(sb, phys, NULL, 0, 0);
+				return -EUCLEAN;
+			}
+		}
 		*phys_out = phys;
 		return 0;
 	}
