@@ -18,10 +18,10 @@ MANDIR     ?= $(PREFIX)/share/man
 INSTALL    ?= install
 
 BIN     := fsck.beamfs
-SRCS    := fsck.beamfs.c crc32.c
+SRCS    := fsck.beamfs.c crc32.c rs_decode.c
 OBJS    := $(SRCS:.c=.o)
 
-.PHONY: all clean install
+.PHONY: all clean install test
 
 all: $(BIN)
 
@@ -32,8 +32,24 @@ $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(BIN) $(OBJS)
+	rm -f $(BIN) $(OBJS) tests/test_rs_vectors tests/test_rs_vectors.o
 
 install: $(BIN)
 	$(INSTALL) -d $(DESTDIR)$(SBINDIR)
 	$(INSTALL) -m 0755 $(BIN) $(DESTDIR)$(SBINDIR)/$(BIN)
+
+# Unit tests. 'make test' builds and runs tests/test_rs_vectors.
+# Exit 77 is the autotools 'skipped' convention; honoured here while
+# the rs_decode body is a skeleton (sub-2.partial-2).
+tests/test_rs_vectors: tests/test_rs_vectors.o rs_decode.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+tests/test_rs_vectors.o: tests/test_rs_vectors.c rs_decode.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+
+.PHONY: test
+test: tests/test_rs_vectors
+	@./tests/test_rs_vectors; rc=$$?; \
+	if [ $$rc -eq 0 ]; then echo "OK"; \
+	elif [ $$rc -eq 77 ]; then echo "SKIPPED (decoder skeleton)"; \
+	else echo "FAIL rc=$$rc"; exit $$rc; fi
