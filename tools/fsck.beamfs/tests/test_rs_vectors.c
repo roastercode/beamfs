@@ -47,7 +47,10 @@ static void encode_rs_userspace(const uint8_t *data, size_t data_len,
 	if (!rs_table_init) {
 		unsigned int sr = 1, j;
 
-		for (j = 0; j < 256; j++) {
+		/* GF(2^8) tables: kernel-canonical convention. */
+		index_of[0] = 255;
+		alpha_to[255] = 0;
+		for (j = 0; j < 255; j++) {
 			alpha_to[j] = sr;
 			index_of[sr] = j;
 			sr <<= 1;
@@ -55,7 +58,6 @@ static void encode_rs_userspace(const uint8_t *data, size_t data_len,
 				sr ^= 0x187;
 			sr &= 0xff;
 		}
-		index_of[0] = 255;
 
 		genpoly[0] = 1;
 		for (j = 0; j < 16; j++) {
