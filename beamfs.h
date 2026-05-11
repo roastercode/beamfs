@@ -647,6 +647,10 @@ extern const struct file_operations beamfs_dir_operations;
 extern const struct inode_operations beamfs_dir_inode_operations;
 extern const struct inode_operations beamfs_symlink_inode_operations;
 
+/* Directory block resolver (defined in namei.c). */
+int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
+			 bool alloc, u64 *out_block);
+
 /* file.c */
 extern const struct file_operations beamfs_file_operations;
 /* S2.2: fiemap support shared by both schemes (file.c). */

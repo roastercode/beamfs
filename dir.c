@@ -28,7 +28,6 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct inode            *inode = file_inode(file);
 	struct super_block      *sb    = inode->i_sb;
-	struct beamfs_inode_info *fi    = BEAMFS_I(inode);
 	struct buffer_head      *bh;
 	struct beamfs_dir_entry  *de;
 	unsigned long  block_no;
@@ -59,8 +58,15 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		start_slot  = (int)(ctx->pos & 0xFFFF);
 	}
 
-	for (block_idx = start_block; block_idx < BEAMFS_DIRECT_BLOCKS; block_idx++) {
-		block_no = le64_to_cpu(fi->i_direct[block_idx]);
+	for (block_idx = start_block;
+	     block_idx < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS;
+	     block_idx++) {
+		u64 _bno;
+		int _ret = beamfs_dir_get_block(inode, block_idx, false, &_bno);
+
+		if (_ret)
+			return _ret;
+		block_no = (unsigned long)_bno;
 		if (!block_no)
 			break;
 
@@ -146,7 +152,6 @@ struct dentry *beamfs_lookup(struct inode *dir,
 			    unsigned int flags)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_inode_info *fi = BEAMFS_I(dir);
 	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
 	unsigned int  offset;
@@ -156,8 +161,13 @@ struct dentry *beamfs_lookup(struct inode *dir,
 	if (dentry->d_name.len > BEAMFS_MAX_FILENAME)
 		return ERR_PTR(-ENAMETOOLONG);
 
-	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
-		block_no = le64_to_cpu(fi->i_direct[i]);
+	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
+		u64 _bno;
+		int _ret = beamfs_dir_get_block(dir, i, false, &_bno);
+
+		if (_ret)
+			return ERR_PTR(_ret);
+		block_no = (unsigned long)_bno;
 		if (!block_no)
 			break;
 

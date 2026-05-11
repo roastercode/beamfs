@@ -83,6 +83,155 @@ int beamfs_write_inode_raw(struct inode *inode)
 }
 
 /* ------------------------------------------------------------------ */
+/* Helper: directory block resolver (direct + indirect)                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * beamfs_dir_get_block -- look up or allocate a directory data block.
+ *
+ * @dir:        directory inode
+ * @block_idx:  0-based logical block index. Range 0..(12 + 512 - 1)
+ *              = 0..523 = direct (12) + single indirect (512).
+ * @alloc:      if true, allocate on demand. If false, lookup only.
+ * @out_block:  resolved physical block number on success. Set to 0 if
+ *              the block is a HOLE and @alloc is false.
+ *
+ * Returns:
+ *   0    success (*out_block set)
+ *   -ENOSPC  no free blocks (when @alloc=true)
+ *   -EIO     indirect block read failure
+ *   -EINVAL  block_idx >= 524 (caller bug)
+ *
+ * Direct vs indirect mapping:
+ *   block_idx < 12  -> fi->i_direct[block_idx]
+ *   block_idx < 524 -> via fi->i_indirect, slot=(block_idx - 12)
+ *
+ * Newly allocated blocks (both data and indirect) are zero-initialized
+ * before being installed. This is required for directory blocks (entry
+ * scanners assume d_ino == 0 marks a free slot).
+ */
+int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
+			 bool alloc, u64 *out_block)
+{
+	struct super_block       *sb = dir->i_sb;
+	struct beamfs_inode_info *fi = BEAMFS_I(dir);
+	struct buffer_head       *ibh;
+	struct buffer_head       *dbh;
+	__le64                   *ptrs;
+	u64                       block_no;
+	u64                       indirect_blk;
+	u64                       indirect_slot;
+
+	if (!out_block)
+		return -EINVAL;
+	*out_block = 0;
+
+	if (block_idx >= BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS)
+		return -EINVAL;
+
+	/* --- Direct --- */
+	if (block_idx < BEAMFS_DIRECT_BLOCKS) {
+		block_no = le64_to_cpu(fi->i_direct[block_idx]);
+		if (block_no) {
+			*out_block = block_no;
+			return 0;
+		}
+		if (!alloc)
+			return 0;
+
+		block_no = beamfs_alloc_block(sb);
+		if (!block_no)
+			return -ENOSPC;
+		dbh = sb_getblk(sb, block_no);
+		if (!dbh) {
+			beamfs_free_block(sb, block_no);
+			return -EIO;
+		}
+		lock_buffer(dbh);
+		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(dbh);
+		unlock_buffer(dbh);
+		mark_buffer_dirty(dbh);
+		brelse(dbh);
+
+		fi->i_direct[block_idx] = cpu_to_le64(block_no);
+		dir->i_size += BEAMFS_BLOCK_SIZE;
+		mark_inode_dirty(dir);
+		*out_block = block_no;
+		return 0;
+	}
+
+	/* --- Indirect --- */
+	indirect_slot = block_idx - BEAMFS_DIRECT_BLOCKS;
+	indirect_blk  = le64_to_cpu(fi->i_indirect);
+
+	/* Allocate indirect block on demand if missing. */
+	if (!indirect_blk) {
+		if (!alloc)
+			return 0;
+		indirect_blk = beamfs_alloc_block(sb);
+		if (!indirect_blk)
+			return -ENOSPC;
+		ibh = sb_getblk(sb, indirect_blk);
+		if (!ibh) {
+			beamfs_free_block(sb, indirect_blk);
+			return -EIO;
+		}
+		lock_buffer(ibh);
+		memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(ibh);
+		unlock_buffer(ibh);
+		mark_buffer_dirty(ibh);
+		brelse(ibh);
+		fi->i_indirect = cpu_to_le64(indirect_blk);
+		mark_inode_dirty(dir);
+	}
+
+	ibh = sb_bread(sb, indirect_blk);
+	if (!ibh)
+		return -EIO;
+	ptrs = (__le64 *)ibh->b_data;
+	block_no = le64_to_cpu(ptrs[indirect_slot]);
+
+	if (block_no) {
+		brelse(ibh);
+		*out_block = block_no;
+		return 0;
+	}
+
+	if (!alloc) {
+		brelse(ibh);
+		return 0;
+	}
+
+	block_no = beamfs_alloc_block(sb);
+	if (!block_no) {
+		brelse(ibh);
+		return -ENOSPC;
+	}
+	dbh = sb_getblk(sb, block_no);
+	if (!dbh) {
+		beamfs_free_block(sb, block_no);
+		brelse(ibh);
+		return -EIO;
+	}
+	lock_buffer(dbh);
+	memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+	set_buffer_uptodate(dbh);
+	unlock_buffer(dbh);
+	mark_buffer_dirty(dbh);
+	brelse(dbh);
+
+	ptrs[indirect_slot] = cpu_to_le64(block_no);
+	mark_buffer_dirty(ibh);
+	brelse(ibh);
+	dir->i_size += BEAMFS_BLOCK_SIZE;
+	mark_inode_dirty(dir);
+	*out_block = block_no;
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Helper: add a directory entry to a directory inode                  */
 /* ------------------------------------------------------------------ */
 
@@ -90,16 +239,23 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 			    u64 ino, unsigned int file_type)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_inode_info *fi = BEAMFS_I(dir);
 	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
 	unsigned int             offset;
 	u64                      block_no;
 	int                      i;
 
-	/* Look for space in existing direct blocks */
-	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
-		block_no = le64_to_cpu(fi->i_direct[i]);
+	/*
+	 * Scan all allocated dir blocks (direct + indirect) for a free
+	 * slot. beamfs_dir_get_block(alloc=false) returns 0/HOLE when
+	 * no more allocated blocks; we fall through to alloc one.
+	 */
+	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
+		int ret;
+
+		ret = beamfs_dir_get_block(dir, i, false, &block_no);
+		if (ret)
+			return ret;
 		if (!block_no)
 			break;
 
@@ -112,11 +268,8 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
 
 			/*
-			 * Free slot: d_ino == 0. Includes never-used trailing
-			 * slots and slots freed by beamfs_del_dirent. We must
-			 * scan the whole block to find a free slot, even past
-			 * deleted entries; otherwise blocks fill up wastefully
-			 * and ENOSPC strikes early.
+			 * Free slot: d_ino == 0. Scan whole block past holes
+			 * to avoid early ENOSPC due to deleted-entry gaps.
 			 */
 			if (!de->d_ino) {
 				de->d_ino       = cpu_to_le64(ino);
@@ -138,21 +291,22 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 		brelse(bh);
 	}
 
-	/* Need a new block */
-	if (i >= BEAMFS_DIRECT_BLOCKS)
+	/* All allocated blocks full -- allocate a new one. */
+	if (i >= BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS)
 		return -ENOSPC;
 
-	block_no = beamfs_alloc_block(sb);
-	if (!block_no)
-		return -ENOSPC;
+	{
+		int ret = beamfs_dir_get_block(dir, i, true, &block_no);
 
-	bh = sb_bread(sb, block_no);
-	if (!bh) {
-		beamfs_free_block(sb, block_no);
-		return -EIO;
+		if (ret)
+			return ret;
+		if (!block_no)
+			return -ENOSPC;
 	}
 
-	memset(bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+	bh = sb_bread(sb, block_no);
+	if (!bh)
+		return -EIO;
 
 	de = (struct beamfs_dir_entry *)bh->b_data;
 	de->d_ino       = cpu_to_le64(ino);
@@ -165,8 +319,6 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 	mark_buffer_dirty(bh);
 	brelse(bh);
 
-	fi->i_direct[i] = cpu_to_le64(block_no);
-	dir->i_size += BEAMFS_BLOCK_SIZE;
 	inode_set_mtime_to_ts(dir, current_time(dir));
 	mark_inode_dirty(dir);
 
@@ -180,15 +332,17 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_inode_info *fi = BEAMFS_I(dir);
 	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
 	unsigned int             offset;
 	u64                      block_no;
 	int                      i;
 
-	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
-		block_no = le64_to_cpu(fi->i_direct[i]);
+	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
+		int ret = beamfs_dir_get_block(dir, i, false, &block_no);
+
+		if (ret)
+			return ret;
 		if (!block_no)
 			break;
 
@@ -411,11 +565,10 @@ static int beamfs_unlink(struct inode *dir, struct dentry *dentry)
 static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	struct inode            *inode = d_inode(dentry);
-	struct beamfs_inode_info *fi    = BEAMFS_I(inode);
 	struct super_block      *sb    = inode->i_sb;
 	struct buffer_head      *bh;
 	struct beamfs_dir_entry  *de;
-	unsigned long            block_no;
+	u64                      block_no;
 	unsigned int             offset;
 	int                      i, ret;
 
@@ -426,8 +579,11 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 	 * so a directory with only files can have nlink == 2 but still be
 	 * non-empty.
 	 */
-	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
-		block_no = le64_to_cpu(fi->i_direct[i]);
+	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
+		int ret = beamfs_dir_get_block(dir, i, false, &block_no);
+
+		if (ret)
+			return ret;
 		if (!block_no)
 			break;
 
