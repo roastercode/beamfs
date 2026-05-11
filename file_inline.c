@@ -105,7 +105,6 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)dphys,
 						   sbi->s_data_start,
 						   sbi->s_data_start + sbi->s_nblocks);
-				beamfs_log_rs_event(sb, dphys, NULL, 0, 0);
 				return -EUCLEAN;
 			}
 		}
@@ -142,7 +141,6 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
 						   sbi->s_data_start + sbi->s_nblocks);
-				beamfs_log_rs_event(sb, phys, NULL, 0, 0);
 				return -EUCLEAN;
 			}
 		}
