@@ -243,7 +243,7 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 	struct buffer_head      *bh;
 	unsigned int             offset;
 	u64                      block_no;
-	int                      i;
+	unsigned int             i;
 
 	/*
 	 * Scan all allocated dir blocks (direct + indirect) for a free
@@ -336,7 +336,7 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 	struct buffer_head      *bh;
 	unsigned int             offset;
 	u64                      block_no;
-	int                      i;
+	unsigned int             i;
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
 		int ret = beamfs_dir_get_block(dir, i, false, &block_no);
@@ -570,7 +570,8 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 	struct beamfs_dir_entry  *de;
 	u64                      block_no;
 	unsigned int             offset;
-	int                      i, ret;
+	unsigned int             i;
+	int                      ret;
 
 	/*
 	 * Verify the directory is empty: scan all direct blocks and check
@@ -580,7 +581,7 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 	 * non-empty.
 	 */
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		int ret = beamfs_dir_get_block(dir, i, false, &block_no);
+		ret = beamfs_dir_get_block(dir, i, false, &block_no);
 
 		if (ret)
 			return ret;

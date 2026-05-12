@@ -59,7 +59,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 	for (block_idx = start_block;
-	     block_idx < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS;
+	     block_idx < (int)(BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS);
 	     block_idx++) {
 		u64 _bno;
 		int _ret = beamfs_dir_get_block(inode, block_idx, false, &_bno);
@@ -156,7 +156,7 @@ struct dentry *beamfs_lookup(struct inode *dir,
 	struct buffer_head      *bh;
 	unsigned int  offset;
 	unsigned long block_no;
-	int i;
+	unsigned int i;
 
 	if (dentry->d_name.len > BEAMFS_MAX_FILENAME)
 		return ERR_PTR(-ENAMETOOLONG);
