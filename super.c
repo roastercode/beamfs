@@ -335,26 +335,43 @@ void beamfs_dirty_super(struct beamfs_sb_info *sbi)
 }
 
 /*
- * beamfs_log_rs_event -- record an RS correction event in the superblock
- *                       persistent journal (v4 format, 40-byte entry).
+ * beamfs_log_rs_event_flagged -- record an RS correction event in the
+ *                       superblock persistent journal (v4 format,
+ *                       40-byte entry), with caller-supplied extra
+ *                       flags OR-ed into re_flags.
  *
  * See beamfs.h for full parameter contract. Forensic policy summary:
  *   n_positions >= 2 -> Shannon entropy computed, ENTROPY_VALID set
  *   n_positions == 1 -> entropy zeroed, ENTROPY_VALID cleared
+ *   n_positions == 0 -> UNCORRECTABLE set; extra_flags MAY still
+ *                       carry RMW_NEUTRALISED if the uncorrectable
+ *                       event was detected during an RMW transit
+ *                       (in which case the encode that follows
+ *                       cannot recover the data either; the flip
+ *                       persists in RAM and on disk after this
+ *                       cycle, but the RMW context is preserved
+ *                       for forensic analysis).
+ *
+ * extra_flags MUST NOT set BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID or
+ * BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE; those bits are policy-owned
+ * and reserved for the implementation.
  *
  * Safe to call from any context; spinlock-protected internally.
  */
-void beamfs_log_rs_event(struct super_block *sb,
+void beamfs_log_rs_event_flagged(struct super_block *sb,
 			u64 block_no,
 			const int *positions,
 			unsigned int n_positions,
-			size_t code_len_bytes)
+			size_t code_len_bytes,
+			u32 extra_flags)
 {
 	struct beamfs_sb_info  *sbi = BEAMFS_SB(sb);
 	struct beamfs_rs_event *ev;
 	u8 head;
 	u32 entropy_q16 = 0;
 	u32 flags = 0;
+	const u32 reserved_mask = BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID |
+				  BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
 
 	if (!sbi || !sbi->s_sbh)
 		return;
@@ -373,6 +390,8 @@ void beamfs_log_rs_event(struct super_block *sb,
 	if (WARN_ON_ONCE(code_len_bytes == 0 ||
 			 code_len_bytes > BEAMFS_SUBBLOCK_DATA))
 		return;
+	if (WARN_ON_ONCE(extra_flags & reserved_mask))
+		extra_flags &= ~reserved_mask;
 
 	/* Forensic policy: see Documentation/format-v4.md sections 6.4-6.6.
 	 *   n_positions >= 2  -> entropy computed, ENTROPY_VALID set
@@ -390,6 +409,8 @@ void beamfs_log_rs_event(struct super_block *sb,
 							      code_len_bytes);
 		flags = BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID;
 	}
+
+	flags |= extra_flags;
 
 	spin_lock(&sbi->s_lock);
 
@@ -416,10 +437,30 @@ void beamfs_log_rs_event(struct super_block *sb,
 
 	spin_unlock(&sbi->s_lock);
 
-	pr_debug("beamfs: RS correction block=%llu symbols=%u entropy_valid=%u entropy_q16=%u\n",
+	pr_debug("beamfs: RS event block=%llu symbols=%u entropy_valid=%u entropy_q16=%u rmw_neutralised=%u uncorrectable=%u\n",
 		 block_no, n_positions,
 		 (flags & BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID) ? 1 : 0,
-		 entropy_q16);
+		 entropy_q16,
+		 (flags & BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED) ? 1 : 0,
+		 (flags & BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE) ? 1 : 0);
+}
+
+/*
+ * beamfs_log_rs_event -- legacy entry point. Thin wrapper that records
+ *                       an RS event with no extra context flag. Equivalent
+ *                       to beamfs_log_rs_event_flagged(..., 0). Kept as
+ *                       the idiomatic call from sites that do not need
+ *                       to discriminate caller context (alloc.c bitmap,
+ *                       inode.c, super.c SB load path).
+ */
+void beamfs_log_rs_event(struct super_block *sb,
+			u64 block_no,
+			const int *positions,
+			unsigned int n_positions,
+			size_t code_len_bytes)
+{
+	beamfs_log_rs_event_flagged(sb, block_no, positions, n_positions,
+				    code_len_bytes, 0);
 }
 
 /*

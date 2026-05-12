@@ -503,6 +503,18 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 /*                            (0..BEAMFS_DATA_INLINE_BYTES-1)                */
 /*   slice_length             number of user bytes to copy into dst_buf      */
 /*                            (1..BEAMFS_DATA_INLINE_BYTES)                  */
+/*   rmw_path                 caller context flag: true when invoked from a  */
+/*                            read-modify-write transit (writeback_folio or  */
+/*                            zero_tail), false when invoked from a user-    */
+/*                            initiated read (read_folio). Propagated into   */
+/*                            the journal entry as                           */
+/*                            BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED so that   */
+/*                            silent neutralisation events become            */
+/*                            empirically distinguishable from user-visible  */
+/*                            corrections in post-run forensic analysis.     */
+/*                            Also discriminates the pr_warn / pr_err log    */
+/*                            line wording between "neutralised" and        */
+/*                            "corrected" / "uncorrectable".                */
 /*                                                                           */
 /* Slice contract: slice_offset + slice_length <= BEAMFS_DATA_INLINE_BYTES   */
 /* (3824). HOLE (phys == 0) is NOT handled here -- caller must check.        */
@@ -522,7 +534,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					       u64 iblock_logical_for_log,
 					       u8 *dst_buf,
 					       u32 slice_offset,
-					       u32 slice_length)
+					       u32 slice_length,
+					       bool rmw_path)
 {
 	struct buffer_head *bh = NULL;
 	int                 rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
@@ -568,35 +581,50 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		int rc = rs_results[i];
 
 		if (rc < 0) {
+			u32 xflags = rmw_path ?
+				BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0;
 			/*
 			 * Journal the uncorrectable event before raising the
 			 * error: forensic record takes priority over the alert.
 			 * See Documentation/format-v4.md section 6.5.
+			 *
+			 * rmw_path=true here means the uncorrectable was
+			 * detected during a write transit; the imminent encode
+			 * will rewrite the codeword from the in-RAM scratch
+			 * buffer, so the on-disk damage is overwritten next
+			 * cycle. The journal entry preserves the forensic
+			 * record of the event regardless.
 			 */
-			beamfs_log_rs_event(sb,
+			beamfs_log_rs_event_flagged(sb,
 				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
 				NULL, 0,
-				BEAMFS_SUBBLOCK_DATA);
-			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u uncorrectable\n",
+				BEAMFS_SUBBLOCK_DATA,
+				xflags);
+			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u uncorrectable%s\n",
 					   inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
-					   i);
+					   i,
+					   rmw_path ? " (rmw)" : "");
 			uncorrectable = true;
 		} else if (rc > 0) {
 			unsigned int np = (unsigned int)rc;
 			int *pos = rs_positions +
 				   (size_t)i * (BEAMFS_RS_PARITY / 2);
+			u32 xflags = rmw_path ?
+				BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0;
 
 			if (np > BEAMFS_RS_PARITY / 2)
 				np = BEAMFS_RS_PARITY / 2;
-			pr_warn_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u: %d symbol(s) corrected\n",
+			pr_warn_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u: %d symbol(s) %s\n",
 					    inode->i_ino,
 					    (unsigned long long)iblock_logical_for_log,
-					    i, rc);
-			beamfs_log_rs_event(sb,
+					    i, rc,
+					    rmw_path ? "neutralised" : "corrected");
+			beamfs_log_rs_event_flagged(sb,
 				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
 				pos, np,
-				BEAMFS_SUBBLOCK_DATA);
+				BEAMFS_SUBBLOCK_DATA,
+				xflags);
 			corrected = true;
 		}
 	}
@@ -842,7 +870,8 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 			ret = beamfs_inline_decode_block_into_buf(
 				sb, phys, inode, b,
 				dst + folio_offset,
-				slice_offset_in_block, slice_length);
+				slice_offset_in_block, slice_length,
+				false);
 			if (ret < 0) {
 				kunmap_local(dst);
 				goto out_unlock;
@@ -1067,10 +1096,16 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		/* RMW: decode existing block contents into scratch. A freshly
 		 * allocated block is zero-init'd by lookup_or_alloc_phys, which
 		 * decodes as 16 zero subblocks (RS-trivial valid codeword).
+		 *
+		 * rmw_path=true here so any flip detected on disk during this
+		 * decode is journalled with RMW_NEUTRALISED: the encode below
+		 * will overwrite the on-disk damage from the in-RAM scratch
+		 * buffer before any consumer can read it.
 		 */
 		ret = beamfs_inline_decode_block_into_buf(sb, phys, inode, b,
 							  scratch, 0,
-							  BEAMFS_DATA_INLINE_BYTES);
+							  BEAMFS_DATA_INLINE_BYTES,
+							  true);
 		if (ret < 0) {
 			brelse(bh);
 			goto fail_kunmap;
@@ -1335,9 +1370,14 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (!scratch)
 		return -ENOMEM;
 
+	/* zero_tail is part of the RMW write path (truncate-induced tail
+	 * clear). rmw_path=true so any flip detected on disk is journalled
+	 * with RMW_NEUTRALISED, consistent with the writeback_folio path.
+	 */
 	ret = beamfs_inline_decode_block_into_buf(sb, phys, inode, b,
 						  scratch, 0,
-						  BEAMFS_DATA_INLINE_BYTES);
+						  BEAMFS_DATA_INLINE_BYTES,
+						  true);
 	if (ret < 0) {
 		kfree(scratch);
 		return ret;

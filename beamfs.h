@@ -292,10 +292,29 @@ struct beamfs_rs_event {
  *                  post-process by clustering analysis on re_block_no
  *                  and re_timestamp, not in-kernel.
  *
- * Bits (1U << 2) and higher are reserved and MUST be zero on write.
+ * RMW_NEUTRALISED -- the correction was performed during a
+ *                  read-modify-write transit (write path) rather
+ *                  than on a user-initiated read. The decoded
+ *                  data is about to be overwritten by the encode
+ *                  step that follows in the same RMW cycle, so
+ *                  the flip is *silently neutralised* before any
+ *                  consumer observes it. This event would have
+ *                  caused a read-side correction (or worse, an
+ *                  uncorrectable) had the same disk-block been
+ *                  read in isolation. Discriminating this flag
+ *                  from the bare correctable event is what makes
+ *                  the v3 paper's neutralisation-vs-correction
+ *                  distinction empirically measurable from the
+ *                  RS journal alone. Orthogonal to ENTROPY_VALID:
+ *                  an RMW_NEUTRALISED event with >= 2 corrected
+ *                  symbols still carries a valid Shannon entropy
+ *                  estimate over the position list.
+ *
+ * Bits (1U << 3) and higher are reserved and MUST be zero on write.
  */
 #define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  (1U << 0)
 #define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  (1U << 1)
+#define BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED (1U << 2)
 
 /*
  * Shannon entropy parameters for the RS journal forensic estimator.
@@ -627,6 +646,29 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc);
  * (no entropy logged) but never panic. Safe to call from any context
  * (spinlock-protected internally).
  */
+/*
+ * beamfs_log_rs_event_flagged -- variant of beamfs_log_rs_event that
+ * accepts an OR-mask of extra_flags to set on the journal entry in
+ * addition to the policy-derived flags (ENTROPY_VALID, UNCORRECTABLE).
+ *
+ * Used by call sites that can distinguish caller context (e.g.
+ * read path vs RMW-neutralised write path in file_inline.c) and
+ * want that distinction recorded in re_flags. Pass extra_flags = 0
+ * for the legacy behaviour (then beamfs_log_rs_event is the
+ * idiomatic alias).
+ *
+ * extra_flags MUST only contain bits documented in the
+ * BEAMFS_RS_EVENT_FLAG_* enumeration above. ENTROPY_VALID and
+ * UNCORRECTABLE are reserved for the policy and MUST NOT appear
+ * in extra_flags (WARN_ON_ONCE enforces).
+ */
+void beamfs_log_rs_event_flagged(struct super_block *sb,
+			u64 block_no,
+			const int *positions,
+			unsigned int n_positions,
+			size_t code_len_bytes,
+			u32 extra_flags);
+
 void beamfs_log_rs_event(struct super_block *sb,
 			u64 block_no,
 			const int *positions,
