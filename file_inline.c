@@ -762,6 +762,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					       bool rmw_path)
 {
 	struct buffer_head *bh = NULL;
+	u8                 *tmp = NULL;
 	int                 rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
 	int                 rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
 				      (BEAMFS_RS_PARITY / 2)];
@@ -789,13 +790,29 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	}
 
 	/*
-	 * Decode 16 RS(255,239) shortened subblocks in place. Same layout
-	 * as the bitmap path in alloc.c: data and parity are interleaved
-	 * with stride BEAMFS_SUBBLOCK_TOTAL (255), parity offset 239.
+	 * Decode RS(255,239) subblocks into a private scratch buffer
+	 * (tmp), never into bh->b_data. decode_rs8 mutates both data
+	 * and parity bytes in its input. bh->b_data is shared via the
+	 * block-device page cache, so mutating it would race against
+	 * other concurrent readers and corrupt their decode.
+	 *
+	 * Note: this fix alone is NOT sufficient under heavy parallel
+	 * read load. decode_rs8 in the upstream kernel
+	 * (lib/reed_solomon/decode_rs.c) uses shared scratch buffers
+	 * in rs_control->buffers[], which races between callers of
+	 * the same rs_control instance. See edac.c for the per-CPU
+	 * rs_control allocation that resolves the upstream race.
 	 */
+	tmp = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	if (!tmp) {
+		brelse(bh);
+		return -ENOMEM;
+	}
+	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
+
 	beamfs_rs_decode_region(
-		(u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-		(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
+		tmp, BEAMFS_SUBBLOCK_TOTAL,
+		tmp + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
 		BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS,
 		rs_results,
 		rs_positions,
@@ -882,7 +899,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			u32 copy_len      = to_in_sb - from_in_sb;
 
 			memcpy(dst_buf + dst_off,
-			       (u8 *)bh->b_data
+			       tmp
 				+ (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL
 				+ from_in_sb,
 			       copy_len);
@@ -891,20 +908,28 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	}
 
 	/*
-	 * Durable autonomic repair: if RS corrected any subblock, write
-	 * the repaired disk block back synchronously so the on-disk image
-	 * is healed before the next read. Same pattern as the bitmap
-	 * recovery path in alloc.c.
+	 * Durable autonomic repair: TEMPORARILY DISABLED.
+	 *
+	 * Previously this path wrote corrected bytes back to disk via
+	 * mark_buffer_dirty + sync_dirty_buffer. With the decode-into-
+	 * tmp fix above, bh->b_data is no longer the decoded buffer
+	 * (tmp is). Re-enabling repair requires either:
+	 *  (a) an exclusive lock on phys around the read-modify-write
+	 *      window, OR
+	 *  (b) a CoW write path that allocates a fresh phys and
+	 *      updates the indirect pointer.
+	 * Deferred to follow-up. RS correction is still detected and
+	 * journalled (see corrected=true path above), only the on-disk
+	 * repair is skipped.
 	 */
-	if (corrected) {
-		mark_buffer_dirty(bh);
-		sync_dirty_buffer(bh);
-	}
+	(void)corrected;
 
+	kfree(tmp);
 	brelse(bh);
 	return 0;
 
 out_brelse:
+	kfree(tmp);
 	brelse(bh);
 	return ret;
 }

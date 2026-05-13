@@ -24,8 +24,24 @@
 #include <linux/rslib.h>
 #include "beamfs.h"
 
-/* RS codec handle - allocated once at module init */
-static struct rs_control *beamfs_rs_ctrl;
+/*
+ * RS codec handles -- ONE PER POSSIBLE CPU.
+ *
+ * lib/reed_solomon/decode_rs.c uses scratch buffers (lambda, syn, b,
+ * t, omega, root, reg, loc) stored inside rs_control->buffers[]. A
+ * shared rs_control across concurrent callers races on those buffers,
+ * producing spurious 'uncorrectable' results under parallel decode
+ * load (reproduced May 2026: 8 parallel sha256sum on a beamfs RO
+ * mount -> 160+ uncorrectable per batch).
+ *
+ * Upstream rslib.h documents rs_control as 'per instance' but does
+ * NOT state non-thread-safety. Bug latent in mainline lib since 2002.
+ *
+ * Per-CPU allocation gives each CPU its own rs_control + buffers[].
+ * Combined with preempt-disable via get_cpu_ptr/put_cpu_ptr, this
+ * eliminates the race without locks.
+ */
+static struct rs_control * __percpu *beamfs_rs_ctrl_pcpu;
 
 /*
  * beamfs_rs_init_tables - initialize the RS codec
@@ -33,20 +49,37 @@ static struct rs_control *beamfs_rs_ctrl;
  */
 void beamfs_rs_init_tables(void)
 {
+	unsigned int cpu;
+	struct rs_control *ctrl;
+
 	/*
-	 * init_rs(symsize, gfpoly, fcr, prim, nroots)
-	 * symsize = 8      -> GF(2^8)
-	 * gfpoly  = 0x187  -> primitive polynomial x^8+x^7+x^2+x+1
-	 * fcr     = 0      -> first consecutive root
-	 * prim    = 1      -> primitive element alpha
-	 * nroots  = 16     -> 16 parity symbols, corrects up to 8 errors
+	 * init_rs(symsize=8, gfpoly=0x187, fcr=0, prim=1, nroots=16)
+	 *   -> GF(2^8), primitive poly x^8+x^7+x^2+x+1, 16 parity symbols
+	 *      (corrects up to 8 errors per shortened RS(255,239) subblock).
+	 *
+	 * Per-CPU: alloc the per-CPU pointer slot, then init_rs once per
+	 * possible CPU. Each rs_control carries its own scratch buffers[].
 	 */
-	beamfs_rs_ctrl = init_rs(8, 0x187, 0, 1, BEAMFS_RS_PARITY);
-	if (!beamfs_rs_ctrl)
-		pr_err("beamfs: failed to initialize RS codec\n");
-	else
-		pr_debug("beamfs: RS codec initialized (RS(%d,%d))\n",
-			 BEAMFS_SUBBLOCK_TOTAL, BEAMFS_SUBBLOCK_DATA);
+	beamfs_rs_ctrl_pcpu = alloc_percpu(struct rs_control *);
+	if (!beamfs_rs_ctrl_pcpu) {
+		pr_err("beamfs: failed to alloc per-CPU RS ctrl array\n");
+		return;
+	}
+
+	for_each_possible_cpu(cpu) {
+		ctrl = init_rs(8, 0x187, 0, 1, BEAMFS_RS_PARITY);
+		if (!ctrl) {
+			pr_err("beamfs: failed to init RS codec for CPU %u\n",
+			       cpu);
+			beamfs_rs_exit_tables();
+			return;
+		}
+		*per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu) = ctrl;
+	}
+
+	pr_debug("beamfs: RS codec initialized per-CPU (RS(%d,%d), %u CPUs)\n",
+		 BEAMFS_SUBBLOCK_TOTAL, BEAMFS_SUBBLOCK_DATA,
+		 num_possible_cpus());
 }
 
 /*
@@ -54,10 +87,22 @@ void beamfs_rs_init_tables(void)
  */
 void beamfs_rs_exit_tables(void)
 {
-	if (beamfs_rs_ctrl) {
-		free_rs(beamfs_rs_ctrl);
-		beamfs_rs_ctrl = NULL;
+	unsigned int cpu;
+	struct rs_control *ctrl;
+
+	if (!beamfs_rs_ctrl_pcpu)
+		return;
+
+	for_each_possible_cpu(cpu) {
+		ctrl = *per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu);
+		if (ctrl) {
+			free_rs(ctrl);
+			*per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu) = NULL;
+		}
 	}
+
+	free_percpu(beamfs_rs_ctrl_pcpu);
+	beamfs_rs_ctrl_pcpu = NULL;
 }
 
 /*
@@ -168,15 +213,24 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
 int beamfs_rs_encode(uint8_t *data, size_t len, uint8_t *parity)
 {
 	uint16_t par[BEAMFS_RS_PARITY];
+	struct rs_control **ctrl_p;
+	struct rs_control *ctrl;
 	int i;
 
-	if (!beamfs_rs_ctrl)
+	if (!beamfs_rs_ctrl_pcpu)
 		return -EINVAL;
 	if (len > BEAMFS_SUBBLOCK_DATA)
 		return -EINVAL;
 
 	memset(par, 0, sizeof(par));
-	encode_rs8(beamfs_rs_ctrl, data, len, par, 0);
+	ctrl_p = get_cpu_ptr(beamfs_rs_ctrl_pcpu);
+	ctrl = *ctrl_p;
+	if (!ctrl) {
+		put_cpu_ptr(beamfs_rs_ctrl_pcpu);
+		return -EINVAL;
+	}
+	encode_rs8(ctrl, data, len, par, 0);
+	put_cpu_ptr(beamfs_rs_ctrl_pcpu);
 
 	for (i = 0; i < BEAMFS_RS_PARITY; i++)
 		parity[i] = (uint8_t)par[i];
@@ -222,7 +276,7 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	int i, nerr;
 	unsigned int n_data_corrected = 0;
 
-	if (!beamfs_rs_ctrl)
+	if (!beamfs_rs_ctrl_pcpu)
 		return -EINVAL;
 	if (len > BEAMFS_SUBBLOCK_DATA)
 		return -EINVAL;
@@ -237,9 +291,23 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 		memcpy(data_orig, data, len);
 
 	/* Mode "apply": corrects data and parity in place. eras_pos = NULL
-	 * forces the kernel into the apply branch (decode_rs.c line 315). */
-	nerr = decode_rs8(beamfs_rs_ctrl, data, par, len,
-			  NULL, 0, NULL, 0, NULL);
+	 * forces the kernel into the apply branch (decode_rs.c line 315).
+	 *
+	 * Per-CPU: get_cpu_ptr disables preemption while decode runs in
+	 * the CPU-local rs_control. decode_rs8 is pure computation, no
+	 * allocs, no sleeps -- preempt-disable is safe.
+	 */
+	{
+		struct rs_control **ctrl_p = get_cpu_ptr(beamfs_rs_ctrl_pcpu);
+		struct rs_control *ctrl = *ctrl_p;
+		if (!ctrl) {
+			put_cpu_ptr(beamfs_rs_ctrl_pcpu);
+			return -EINVAL;
+		}
+		nerr = decode_rs8(ctrl, data, par, len,
+				  NULL, 0, NULL, 0, NULL);
+		put_cpu_ptr(beamfs_rs_ctrl_pcpu);
+	}
 
 	if (nerr < 0) {
 		pr_err_ratelimited("beamfs: RS block uncorrectable (len=%zu)\n",
