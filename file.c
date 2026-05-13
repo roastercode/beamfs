@@ -139,8 +139,250 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		return 0;
 	}
 
-	/* Beyond single indirect: not supported in v1 */
-	pr_err_ratelimited("beamfs: iomap: offset beyond indirect blocks\n");
+	if (iblock < BEAMFS_MAX_IBLOCK_DINDIRECT) {
+		/* --- Double indirect block (scheme=5 iomap path) --- */
+		u64 didx = iblock - BEAMFS_MAX_IBLOCK_INDIRECT;
+		u64 l1_slot = didx / BEAMFS_INDIRECT_PTRS;
+		u64 l2_slot = didx % BEAMFS_INDIRECT_PTRS;
+		u64 dindirect_blk, l1_blk;
+		struct buffer_head *ibh, *l1bh;
+		__le64 *ptrs;
+
+		dindirect_blk = le64_to_cpu(fi->i_dindirect);
+		if (!dindirect_blk) {
+			if (!(flags & IOMAP_WRITE)) {
+				iomap->type = IOMAP_HOLE;
+				iomap->addr = IOMAP_NULL_ADDR;
+				return 0;
+			}
+			dindirect_blk = beamfs_alloc_block(sb);
+			if (!dindirect_blk) {
+				pr_err("beamfs: iomap: no free blocks for dindirect\n");
+				return -ENOSPC;
+			}
+			ibh = sb_getblk(sb, dindirect_blk);
+			if (!ibh) {
+				beamfs_free_block(sb, dindirect_blk);
+				return -EIO;
+			}
+			lock_buffer(ibh);
+			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(ibh);
+			unlock_buffer(ibh);
+			mark_buffer_dirty(ibh);
+			brelse(ibh);
+			fi->i_dindirect = cpu_to_le64(dindirect_blk);
+			mark_inode_dirty(inode);
+		}
+
+		ibh = sb_bread(sb, dindirect_blk);
+		if (!ibh)
+			return -EIO;
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		if (!l1_blk) {
+			if (!(flags & IOMAP_WRITE)) {
+				brelse(ibh);
+				iomap->type = IOMAP_HOLE;
+				iomap->addr = IOMAP_NULL_ADDR;
+				return 0;
+			}
+			l1_blk = beamfs_alloc_block(sb);
+			if (!l1_blk) {
+				brelse(ibh);
+				pr_err("beamfs: iomap: no free blocks for dindirect L1\n");
+				return -ENOSPC;
+			}
+			l1bh = sb_getblk(sb, l1_blk);
+			if (!l1bh) {
+				beamfs_free_block(sb, l1_blk);
+				brelse(ibh);
+				return -EIO;
+			}
+			lock_buffer(l1bh);
+			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l1bh);
+			unlock_buffer(l1bh);
+			mark_buffer_dirty(l1bh);
+			brelse(l1bh);
+			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			mark_buffer_dirty(ibh);
+		}
+		brelse(ibh);
+
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh)
+			return -EIO;
+		ptrs = (__le64 *)l1bh->b_data;
+		phys = le64_to_cpu(ptrs[l2_slot]);
+
+		if (phys) {
+			brelse(l1bh);
+			iomap->type = IOMAP_MAPPED;
+			iomap->addr = phys << BEAMFS_BLOCK_SHIFT;
+			return 0;
+		}
+		if (!(flags & IOMAP_WRITE)) {
+			brelse(l1bh);
+			iomap->type = IOMAP_HOLE;
+			iomap->addr = IOMAP_NULL_ADDR;
+			return 0;
+		}
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			brelse(l1bh);
+			pr_err("beamfs: iomap: no free blocks (dindirect data)\n");
+			return -ENOSPC;
+		}
+		ptrs[l2_slot] = cpu_to_le64(new_block);
+		mark_buffer_dirty(l1bh);
+		brelse(l1bh);
+		iomap->type = IOMAP_MAPPED;
+		iomap->addr = new_block << BEAMFS_BLOCK_SHIFT;
+		return 0;
+	}
+
+	if (iblock < BEAMFS_MAX_IBLOCK_TINDIRECT) {
+		/* --- Triple indirect block (scheme=5 iomap path) --- */
+		u64 tidx = iblock - BEAMFS_MAX_IBLOCK_DINDIRECT;
+		u64 l1_slot = tidx / (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS);
+		u64 l2_slot = (tidx / BEAMFS_INDIRECT_PTRS) % BEAMFS_INDIRECT_PTRS;
+		u64 l3_slot = tidx % BEAMFS_INDIRECT_PTRS;
+		u64 tindirect_blk, l1_blk, l2_blk;
+		struct buffer_head *ibh, *l1bh, *l2bh;
+		__le64 *ptrs;
+
+		tindirect_blk = le64_to_cpu(fi->i_tindirect);
+		if (!tindirect_blk) {
+			if (!(flags & IOMAP_WRITE)) {
+				iomap->type = IOMAP_HOLE;
+				iomap->addr = IOMAP_NULL_ADDR;
+				return 0;
+			}
+			tindirect_blk = beamfs_alloc_block(sb);
+			if (!tindirect_blk) {
+				pr_err("beamfs: iomap: no free blocks for tindirect\n");
+				return -ENOSPC;
+			}
+			ibh = sb_getblk(sb, tindirect_blk);
+			if (!ibh) {
+				beamfs_free_block(sb, tindirect_blk);
+				return -EIO;
+			}
+			lock_buffer(ibh);
+			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(ibh);
+			unlock_buffer(ibh);
+			mark_buffer_dirty(ibh);
+			brelse(ibh);
+			fi->i_tindirect = cpu_to_le64(tindirect_blk);
+			mark_inode_dirty(inode);
+		}
+
+		ibh = sb_bread(sb, tindirect_blk);
+		if (!ibh)
+			return -EIO;
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		if (!l1_blk) {
+			if (!(flags & IOMAP_WRITE)) {
+				brelse(ibh);
+				iomap->type = IOMAP_HOLE;
+				iomap->addr = IOMAP_NULL_ADDR;
+				return 0;
+			}
+			l1_blk = beamfs_alloc_block(sb);
+			if (!l1_blk) {
+				brelse(ibh);
+				pr_err("beamfs: iomap: no free blocks for tindirect L1\n");
+				return -ENOSPC;
+			}
+			l1bh = sb_getblk(sb, l1_blk);
+			if (!l1bh) {
+				beamfs_free_block(sb, l1_blk);
+				brelse(ibh);
+				return -EIO;
+			}
+			lock_buffer(l1bh);
+			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l1bh);
+			unlock_buffer(l1bh);
+			mark_buffer_dirty(l1bh);
+			brelse(l1bh);
+			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			mark_buffer_dirty(ibh);
+		}
+		brelse(ibh);
+
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh)
+			return -EIO;
+		ptrs = (__le64 *)l1bh->b_data;
+		l2_blk = le64_to_cpu(ptrs[l2_slot]);
+		if (!l2_blk) {
+			if (!(flags & IOMAP_WRITE)) {
+				brelse(l1bh);
+				iomap->type = IOMAP_HOLE;
+				iomap->addr = IOMAP_NULL_ADDR;
+				return 0;
+			}
+			l2_blk = beamfs_alloc_block(sb);
+			if (!l2_blk) {
+				brelse(l1bh);
+				pr_err("beamfs: iomap: no free blocks for tindirect L2\n");
+				return -ENOSPC;
+			}
+			l2bh = sb_getblk(sb, l2_blk);
+			if (!l2bh) {
+				beamfs_free_block(sb, l2_blk);
+				brelse(l1bh);
+				return -EIO;
+			}
+			lock_buffer(l2bh);
+			memset(l2bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l2bh);
+			unlock_buffer(l2bh);
+			mark_buffer_dirty(l2bh);
+			brelse(l2bh);
+			ptrs[l2_slot] = cpu_to_le64(l2_blk);
+			mark_buffer_dirty(l1bh);
+		}
+		brelse(l1bh);
+
+		l2bh = sb_bread(sb, l2_blk);
+		if (!l2bh)
+			return -EIO;
+		ptrs = (__le64 *)l2bh->b_data;
+		phys = le64_to_cpu(ptrs[l3_slot]);
+
+		if (phys) {
+			brelse(l2bh);
+			iomap->type = IOMAP_MAPPED;
+			iomap->addr = phys << BEAMFS_BLOCK_SHIFT;
+			return 0;
+		}
+		if (!(flags & IOMAP_WRITE)) {
+			brelse(l2bh);
+			iomap->type = IOMAP_HOLE;
+			iomap->addr = IOMAP_NULL_ADDR;
+			return 0;
+		}
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			brelse(l2bh);
+			pr_err("beamfs: iomap: no free blocks (tindirect data)\n");
+			return -ENOSPC;
+		}
+		ptrs[l3_slot] = cpu_to_le64(new_block);
+		mark_buffer_dirty(l2bh);
+		brelse(l2bh);
+		iomap->type = IOMAP_MAPPED;
+		iomap->addr = new_block << BEAMFS_BLOCK_SHIFT;
+		return 0;
+	}
+
+	/* Beyond triple indirect: not supported */
+	pr_err_ratelimited("beamfs: iomap: offset beyond tindirect blocks\n");
 	return -EOPNOTSUPP;
 }
 

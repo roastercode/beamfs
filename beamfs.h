@@ -227,9 +227,9 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
  * Logical user capacity per file (user bytes per block = 3824 under
  * scheme=2 UNIVERSAL_INLINE with 16 x RS(255,239) sub-blocks):
  *   direct      :    45 888 B  (~45 KiB)
- *   + indirect  : 2 003 776 B  (~1.91 MiB) -- current ceiling (v0.1.x)
+ *   + indirect  : 2 003 776 B  (~1.91 MiB)
  *   + dindirect : ~ 956 MiB    (~1 GiB)
- *   + tindirect : ~ 478 GiB    (~512 GiB)
+ *   + tindirect : ~ 478 GiB    (~512 GiB) -- current ceiling
  */
 #define BEAMFS_DINDIRECT_PTRS  (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS)
 #define BEAMFS_TINDIRECT_PTRS  (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS)

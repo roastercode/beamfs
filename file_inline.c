@@ -208,7 +208,84 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		return 0;
 	}
 
-	pr_err_ratelimited("beamfs/inline: iblock %llu beyond v1 indirect capacity\n",
+	if (iblock_logical < BEAMFS_MAX_IBLOCK_TINDIRECT) {
+		/*
+		 * Triple-indirect lookup. Map iblock to (level-1, level-2,
+		 * level-3) where level-1 is an indirect block of pointers to
+		 * dindirect blocks, level-2 is an indirect block of pointers
+		 * to indirect blocks, and level-3 is the leaf indirect block
+		 * whose entries point to user data blocks.
+		 * Coverage: 12 + 512 + 512^2 + 512^3 = 134480396 iblocks
+		 * ~= 478 GiB at 3824 user bytes/block.
+		 */
+		u64 tidx, l1_slot, l2_slot, l3_slot;
+		u64 tindirect_blk, l1_blk, l2_blk;
+		struct buffer_head *l1bh, *l2bh;
+
+		tidx = iblock_logical - BEAMFS_MAX_IBLOCK_DINDIRECT;
+		l1_slot = tidx / (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS);
+		l2_slot = (tidx / BEAMFS_INDIRECT_PTRS) % BEAMFS_INDIRECT_PTRS;
+		l3_slot = tidx % BEAMFS_INDIRECT_PTRS;
+
+		tindirect_blk = le64_to_cpu(fi->i_tindirect);
+		if (!tindirect_blk)
+			return 0; /* HOLE: tindirect block not yet allocated */
+
+		ibh = sb_bread(sb, tindirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect block %llu\n",
+					   (unsigned long long)tindirect_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		brelse(ibh);
+
+		if (!l1_blk)
+			return 0; /* HOLE: level-1 not allocated */
+
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
+					   (unsigned long long)l1_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l1bh->b_data;
+		l2_blk = le64_to_cpu(ptrs[l2_slot]);
+		brelse(l1bh);
+
+		if (!l2_blk)
+			return 0; /* HOLE: level-2 not allocated */
+
+		l2bh = sb_bread(sb, l2_blk);
+		if (!l2bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
+					   (unsigned long long)l2_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l2bh->b_data;
+		phys = le64_to_cpu(ptrs[l3_slot]);
+		brelse(l2bh);
+
+		if (phys != 0) {
+			struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+			if (phys < sbi->s_data_start ||
+			    phys >= sbi->s_data_start + sbi->s_nblocks) {
+				pr_err_ratelimited("beamfs/inline: corrupted tindirect pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys,
+						   sbi->s_data_start,
+						   sbi->s_data_start + sbi->s_nblocks);
+				return -EUCLEAN;
+			}
+		}
+		*phys_out = phys;
+		return 0;
+	}
+
+	pr_err_ratelimited("beamfs/inline: iblock %llu beyond tindirect capacity\n",
 			   (unsigned long long)iblock_logical);
 	return -EOPNOTSUPP;
 }
@@ -476,8 +553,155 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		return 0;
 	}
 
-	pr_err_ratelimited("beamfs/inline: iblock %llu beyond v1 indirect capacity (write)\n",
-			  (unsigned long long)iblock_logical);
+	if (iblock_logical < BEAMFS_MAX_IBLOCK_TINDIRECT) {
+		/*
+		 * Triple-indirect write path: allocate tindirect block,
+		 * level-1 indirect block, level-2 indirect block, and data
+		 * block in a cascade, each zero-initialized. Allocation order
+		 * minimizes orphaned blocks on crash: data block last.
+		 */
+		u64 tidx, l1_slot, l2_slot, l3_slot;
+		u64 tindirect_blk, l1_blk, l2_blk;
+		struct buffer_head *l1bh, *l2bh;
+
+		tidx = iblock_logical - BEAMFS_MAX_IBLOCK_DINDIRECT;
+		l1_slot = tidx / (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS);
+		l2_slot = (tidx / BEAMFS_INDIRECT_PTRS) % BEAMFS_INDIRECT_PTRS;
+		l3_slot = tidx % BEAMFS_INDIRECT_PTRS;
+
+		/* --- Stage 1: tindirect block --- */
+		tindirect_blk = le64_to_cpu(fi->i_tindirect);
+		if (!tindirect_blk) {
+			tindirect_blk = beamfs_alloc_block(sb);
+			if (!tindirect_blk) {
+				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect)\n");
+				return -ENOSPC;
+			}
+			ibh = sb_getblk(sb, tindirect_blk);
+			if (!ibh) {
+				beamfs_free_block(sb, tindirect_blk);
+				return -EIO;
+			}
+			lock_buffer(ibh);
+			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(ibh);
+			unlock_buffer(ibh);
+			mark_buffer_dirty(ibh);
+			brelse(ibh);
+			fi->i_tindirect = cpu_to_le64(tindirect_blk);
+			mark_inode_dirty(inode);
+		}
+
+		/* --- Stage 2: level-1 indirect block --- */
+		ibh = sb_bread(sb, tindirect_blk);
+		if (!ibh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect block %llu\n",
+					   (unsigned long long)tindirect_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)ibh->b_data;
+		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		if (!l1_blk) {
+			l1_blk = beamfs_alloc_block(sb);
+			if (!l1_blk) {
+				brelse(ibh);
+				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L1)\n");
+				return -ENOSPC;
+			}
+			l1bh = sb_getblk(sb, l1_blk);
+			if (!l1bh) {
+				beamfs_free_block(sb, l1_blk);
+				brelse(ibh);
+				return -EIO;
+			}
+			lock_buffer(l1bh);
+			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l1bh);
+			unlock_buffer(l1bh);
+			mark_buffer_dirty(l1bh);
+			brelse(l1bh);
+			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			mark_buffer_dirty(ibh);
+		}
+		brelse(ibh);
+
+		/* --- Stage 3: level-2 indirect block --- */
+		l1bh = sb_bread(sb, l1_blk);
+		if (!l1bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
+					   (unsigned long long)l1_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l1bh->b_data;
+		l2_blk = le64_to_cpu(ptrs[l2_slot]);
+		if (!l2_blk) {
+			l2_blk = beamfs_alloc_block(sb);
+			if (!l2_blk) {
+				brelse(l1bh);
+				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L2)\n");
+				return -ENOSPC;
+			}
+			l2bh = sb_getblk(sb, l2_blk);
+			if (!l2bh) {
+				beamfs_free_block(sb, l2_blk);
+				brelse(l1bh);
+				return -EIO;
+			}
+			lock_buffer(l2bh);
+			memset(l2bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+			set_buffer_uptodate(l2bh);
+			unlock_buffer(l2bh);
+			mark_buffer_dirty(l2bh);
+			brelse(l2bh);
+			ptrs[l2_slot] = cpu_to_le64(l2_blk);
+			mark_buffer_dirty(l1bh);
+		}
+		brelse(l1bh);
+
+		/* --- Stage 4: data block --- */
+		l2bh = sb_bread(sb, l2_blk);
+		if (!l2bh) {
+			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
+					   (unsigned long long)l2_blk);
+			return -EIO;
+		}
+		ptrs = (__le64 *)l2bh->b_data;
+		phys = le64_to_cpu(ptrs[l3_slot]);
+		if (phys) {
+			brelse(l2bh);
+			*phys_out = phys;
+			return 0;
+		}
+
+		new_block = beamfs_alloc_block(sb);
+		if (!new_block) {
+			brelse(l2bh);
+			pr_err_ratelimited("beamfs/inline: no free blocks (tindirect data)\n");
+			return -ENOSPC;
+		}
+		dbh = sb_getblk(sb, new_block);
+		if (!dbh) {
+			beamfs_free_block(sb, new_block);
+			brelse(l2bh);
+			return -EIO;
+		}
+		lock_buffer(dbh);
+		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		set_buffer_uptodate(dbh);
+		unlock_buffer(dbh);
+		mark_buffer_dirty(dbh);
+		brelse(dbh);
+
+		ptrs[l3_slot] = cpu_to_le64(new_block);
+		mark_buffer_dirty(l2bh);
+		brelse(l2bh);
+
+		*phys_out = new_block;
+		return 0;
+	}
+
+	pr_err_ratelimited("beamfs/inline: iblock %llu beyond tindirect capacity (write)\n",
+			   (unsigned long long)iblock_logical);
 	return -EOPNOTSUPP;
 }
 
