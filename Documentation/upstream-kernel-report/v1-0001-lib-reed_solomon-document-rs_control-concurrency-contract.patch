@@ -1,0 +1,72 @@
+From 10d4000e212db297ee7b7658bb7125cc8ca56997 Mon Sep 17 00:00:00 2001
+Message-ID: <10d4000e212db297ee7b7658bb7125cc8ca56997.1778710307.git.aurelien@hackers.camp>
+In-Reply-To: <cover.1778710307.git.aurelien@hackers.camp>
+References: <cover.1778710307.git.aurelien@hackers.camp>
+From: Aurelien DESBRIERES <aurelien@hackers.camp>
+Date: Thu, 14 May 2026 00:11:47 +0200
+Subject: [PATCH 1/1] lib/reed_solomon: document rs_control concurrency
+ contract
+
+struct rs_control carries internal scratch buffers (lambda, syn, b, t,
+omega, root, reg, loc) in its flexible @buffers array. The scratch is
+used by decode_rs.c and encode_rs.c during each call, so two concurrent
+callers operating on the same rs_control corrupt each other's
+intermediate state and may report spurious uncorrectable errors on
+otherwise valid codewords.
+
+This is consistent with the original Phil Karn KA9Q implementation from
+2002 that the library is derived from. No existing in-tree user appears
+to decode concurrently against a shared rs_control, which is why the
+contract has stayed implicit. A recent out-of-tree user (a Reed-Solomon
+protected filesystem) hit the issue under parallel read load: 8 parallel
+sha256sum runs across a read-only mount produced 150-240 wrong hashes
+per run and ~160 RS uncorrectable entries per batch, while sequential
+reads of the same image returned correct bytes byte-for-byte across
+hundreds of iterations. Allocating one rs_control per CPU (alloc_percpu
++ for_each_possible_cpu init_rs, with get_cpu_ptr / put_cpu_ptr around
+encode_rs8 / decode_rs8) eliminated the failures and yielded better
+wallclock than sequential thanks to real parallelism.
+
+Extend the kdoc of struct rs_control to state explicitly that an
+instance is not safe to share across concurrent encode_rs*() /
+decode_rs*() calls, and that callers needing concurrent codec use must
+allocate one rs_control per concurrent caller. Document the bounded
+extra cost so the trade-off is obvious.
+
+No code change, no ABI change. Purely makes the existing contract
+discoverable without reading decode_rs.c to notice the rsc->buffers
+indexing.
+
+Signed-off-by: Aurelien DESBRIERES <aurelien@hackers.camp>
+---
+ include/linux/rslib.h | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/include/linux/rslib.h b/include/linux/rslib.h
+index a2848f6907e3..94cfee6d7bdc 100644
+--- a/include/linux/rslib.h
++++ b/include/linux/rslib.h
+@@ -50,6 +50,20 @@ struct rs_codec {
+  * struct rs_control - rs control structure per instance
+  * @codec:	The codec used for this instance
+  * @buffers:	Internal scratch buffers used in calls to decode_rs()
++ *
++ * Locking and concurrency: a single struct rs_control instance is NOT
++ * safe to share across concurrent calls to encode_rs*() or decode_rs*().
++ * The codec routines use @buffers as scratch space during encoding and
++ * decoding (see lib/reed_solomon/decode_rs.c and encode_rs.c), so two
++ * threads operating on the same rs_control will corrupt each other's
++ * intermediate state and may report spurious uncorrectable errors on
++ * otherwise valid codewords. Callers that need concurrent encode/decode
++ * must allocate one rs_control per concurrent caller (for example one
++ * per CPU, or one per worker thread). The underlying rs_codec returned
++ * by codec_init() is reference-counted and reused across rs_control
++ * instances allocated with matching parameters, so the additional cost
++ * is bounded to sizeof(struct rs_control) + nroots*8*sizeof(uint16_t)
++ * per extra instance.
+  */
+ struct rs_control {
+ 	struct rs_codec	*codec;
+-- 
+2.53.0
+

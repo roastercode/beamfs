@@ -1,0 +1,121 @@
+From 10d4000e212db297ee7b7658bb7125cc8ca56997 Mon Sep 17 00:00:00 2001
+Message-ID: <cover.1778710307.git.aurelien@hackers.camp>
+From: Aurelien DESBRIERES <aurelien@hackers.camp>
+Date: Thu, 14 May 2026 00:11:47 +0200
+Subject: [PATCH 0/1] lib/reed_solomon: document rs_control concurrency contract
+
+Hi Thomas,
+
+While building a Reed-Solomon-protected filesystem on top of
+lib/reed_solomon, I ran into a subtle latent issue in the library that
+took some time to pin down. The library itself is correct -- this
+series proposes nothing more than a documentation patch to spare
+future users that diagnostic time.
+
+Problem in short
+================
+
+struct rs_control carries internal scratch buffers (lambda, syn, b, t,
+omega, root, reg, loc) in its flexible @buffers array, used by
+decode_rs.c and encode_rs.c during each call. Two concurrent calls to
+decode_rs8() / decode_rs16() (or the encode counterparts) on the same
+rs_control instance race on those scratch buffers and corrupt each
+other's intermediate state, producing spurious uncorrectable returns
+on otherwise valid codewords.
+
+This is consistent with the in-tree code -- nothing in the library
+disclaims thread safety, but the buffers are clearly per-instance, not
+per-call -- and consistent with the original Phil Karn KA9Q
+implementation from 2002 that the library is derived from. No existing
+in-tree user appears to decode concurrently on a shared rs_control
+(most callers in drivers/{mtd,dvb,...} use the library from a single
+producer context), which is why the contract has stayed implicit.
+
+Empirical reproducer (kernel 7.0.3, cluster of qemu-aarch64 VMs):
+
+  - filesystem stores 16x RS(255,239) shortened subblocks per 4 KiB
+    disk block, decoded on read via a single shared rs_control
+    initialised in module_init() with init_rs(8, 0x187, 0, 1, 16)
+  - 8 parallel sha256sum invocations across a read-only mount of a
+    pristine image: 150-240 of 758 files report wrong hashes per run,
+    ~160 RS uncorrectable entries in dmesg per batch
+  - same image, sequential single-process reads: 0 errors, hashes
+    stable byte-for-byte across hundreds of iterations
+  - same image, parallel reads after switching to one rs_control per
+    possible CPU (alloc_percpu + for_each_possible_cpu init_rs, with
+    get_cpu_ptr / put_cpu_ptr around encode_rs8 / decode_rs8): 0
+    uncorrectable, 8 runs byte-identical to baseline, total wallclock
+    ~25% faster than sequential thanks to real parallelism
+
+The diagnostic chain that pointed at the library (and not at our
+filesystem code or the page cache) involved CRC32 probes around the
+buffer-head reads showing that bh->b_data was byte-stable before and
+after the memcpy into a private scratch, and only the decode_rs8()
+return value diverged across concurrent calls. The fix on our side is
+the per-CPU rs_control allocation described above; it lives in our
+out-of-tree code, so this patch series proposes nothing in lib/.
+
+What this patch does
+====================
+
+Just documentation. It extends the kdoc of struct rs_control in
+include/linux/rslib.h with a "Locking and concurrency" paragraph that
+states explicitly:
+
+  - one rs_control is NOT safe to share across concurrent
+    encode_rs*() / decode_rs*() calls
+  - callers needing concurrent codec use must allocate one rs_control
+    per concurrent caller (one per CPU, one per worker, etc.)
+  - the underlying rs_codec is refcounted across rs_control instances
+    initialised with the same parameters, so the per-instance overhead
+    is bounded to sizeof(struct rs_control) + scratch arrays
+
+No code change, no ABI change. The intent is purely to make the
+existing contract discoverable without having to read decode_rs.c to
+notice the rsc->buffers indexing.
+
+Open questions / follow-ups (not in this series)
+================================================
+
+If you think they are worth doing, two non-trivial follow-ups are
+possible but I did not want to bundle them with a doc patch:
+
+  1. Move the scratch arrays out of struct rs_control to caller stack
+     or onto a per-CPU helper inside the library, so a single
+     rs_control becomes safe to share. Neither the public API nor the
+     ABI (struct rs_control is opaque to callers) would change, but
+     this would touch the hot path of decode_rs.c and encode_rs.c and
+     is larger than a doc patch should be.
+
+  2. Add an rs_control_get_for_cpu() helper that wraps alloc_percpu +
+     for_each_possible_cpu init_rs / get_cpu_ptr for callers that want
+     concurrent decode without rolling their own. Additive change,
+     narrow, could ship after the doc patch.
+
+I am happy to follow up on either if you think they are worth it.
+
+I tested this patch on master at e1914add2799 ("Merge tag 'for-linus'
+of git://git.kernel.org/pub/scm/virt/kvm/kvm") with an x86_64 build and
+an arm64 cross-build. The kdoc renders correctly under
+scripts/kernel-doc -rst on include/linux/rslib.h and the "Locking and
+concurrency" paragraph appears in the rendered Description section of
+struct rs_control.
+
+Disclosure: this patch and its cover letter were drafted interactively
+with the help of an AI coding assistant (Anthropic Claude). I have
+reviewed every line, verified all technical claims empirically on the
+test cluster described above, and am the sole signatory of the DCO.
+
+Thanks for your time.
+
+Aurelien
+
+Aurelien DESBRIERES (1):
+  lib/reed_solomon: document rs_control concurrency contract
+
+ include/linux/rslib.h | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+-- 
+2.53.0
+
