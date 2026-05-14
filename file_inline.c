@@ -35,6 +35,10 @@ static int     beamfs_inline_read_folio(struct file *file,
 					struct folio *folio);
 static int     beamfs_inline_writepages(struct address_space *mapping,
 					struct writeback_control *wbc);
+static int     beamfs_inline_writeback_folio(struct inode *inode,
+					     struct super_block *sb,
+					     struct folio *folio,
+					     struct writeback_control *wbc);
 static void    beamfs_inline_readahead(struct readahead_control *rac);
 static int     beamfs_inline_write_begin(const struct kiocb *iocb,
 					 struct address_space *mapping,
@@ -1233,13 +1237,31 @@ static int beamfs_inline_write_end(const struct kiocb *iocb,
 
 	if (!folio_test_uptodate(folio))
 		folio_mark_uptodate(folio);
-	filemap_dirty_folio(mapping, folio);
+	folio_mark_dirty(folio);
 
 	new_i_size = pos + copied;
-	if (new_i_size > i_size_read(inode)) {
+	if (new_i_size > i_size_read(inode))
 		i_size_write(inode, new_i_size);
+
+	/*
+	 * Mark the inode dirty on every successful copy, not only when
+	 * i_size grows. folio_mark_dirty() (and equivalently the underlying
+	 * filemap_dirty_folio() that it invokes via aops->dirty_folio)
+	 * marks the inode I_DIRTY_PAGES only on the clean->dirty transition
+	 * (folio_test_set_dirty() returning false). When a folio is
+	 * re-dirtied after the bdi writeback flusher has already cleared
+	 * I_DIRTY_PAGES on the inode, that path does not re-assert the
+	 * inode's dirty state, the inode never returns to wb->b_dirty,
+	 * the flusher never reschedules writepages() for it, dirty pages
+	 * accumulate, and any writer crossing the dirty_ratelimit
+	 * deadlocks indefinitely in balance_dirty_pages(). The reproducer
+	 * was 'depmod -a' writing ~100 MB of modules.dep* on a beamfs
+	 * rootfs after the first writeback pass had drained the inode.
+	 * ext4 follows the same pattern in ext4_write_inline_data_end():
+	 * unconditional mark_inode_dirty() after a successful copy.
+	 */
+	if (likely(copied))
 		mark_inode_dirty(inode);
-	}
 
 	folio_unlock(folio);
 	folio_put(folio);
@@ -1259,7 +1281,8 @@ static int beamfs_inline_write_end(const struct kiocb *iocb,
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_writeback_folio(struct inode *inode,
 					 struct super_block *sb,
-					 struct folio *folio)
+					 struct folio *folio,
+					 struct writeback_control *wbc)
 {
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	u64           b_first, b_last, b;
@@ -1388,10 +1411,37 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		       BEAMFS_DATA_INLINE_PAD);
 
 		mark_buffer_dirty(bh);
-		ret = sync_dirty_buffer(bh);
-		brelse(bh);
-		if (ret < 0)
-			goto fail_kunmap;
+
+		/*
+		 * Synchronous flush only when the writeback path explicitly
+		 * requests data integrity (fsync/sync/umount -> WB_SYNC_ALL).
+		 * In the common WB_SYNC_NONE case (periodic bdi flusher),
+		 * mark_buffer_dirty() is sufficient: the buffer carries the
+		 * RS-encoded payload, stays pinned via the page-cache reference,
+		 * and the kernel writeback machinery will submit it
+		 * asynchronously, parallelising the disk I/O across multiple
+		 * buffers in flight. The previous unconditional
+		 * sync_dirty_buffer() serialised every per-block writeback
+		 * into a wait-on-I/O round trip and capped the per-bdi
+		 * writeback bandwidth at the disk single-shot latency
+		 * (~28 KB/s on the qemu-arm64 + VirtIO test rig), which made
+		 * any writer crossing the dirty_ratelimit
+		 * (e.g. 'depmod -a' writing 100 MB of modules.dep on a
+		 * beamfs rootfs) deadlock in balance_dirty_pages() waiting
+		 * for a flusher that was effectively single-block-synchronous.
+		 * EM-resilience is preserved across the asynchronous path:
+		 * the RS encode happens above this point, so whatever data
+		 * the writeback eventually flushes is already a valid
+		 * Reed-Solomon codeword.
+		 */
+		if (wbc && wbc->sync_mode == WB_SYNC_ALL) {
+			ret = sync_dirty_buffer(bh);
+			brelse(bh);
+			if (ret < 0)
+				goto fail_kunmap;
+		} else {
+			brelse(bh);
+		}
 
 		folio_offset += slice_length;
 	}
@@ -1441,7 +1491,7 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 		for (i = 0; i < nr_folios; i++) {
 			struct folio *folio = fbatch.folios[i];
 
-			ret = beamfs_inline_writeback_folio(inode, sb, folio);
+			ret = beamfs_inline_writeback_folio(inode, sb, folio, wbc);
 			if (ret < 0)
 				goto out_release;
 		}
