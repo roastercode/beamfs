@@ -135,6 +135,18 @@ static void beamfs_free_data_blocks(struct inode *inode)
 	u64                      nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
 	int                      i;
 
+	/*
+	 * Fast symlinks store their target inline in i_direct[] as raw
+	 * bytes (up to BEAMFS_DIRECT_BLOCKS * sizeof(__le64) = 96 bytes).
+	 * These bytes are NOT block pointers, so iterating over them and
+	 * feeding them to beamfs_free_block() produces out-of-range bogus
+	 * block numbers (the ASCII bytes of the target path interpreted as
+	 * little-endian u64). Fast symlinks own no on-disk data blocks, so
+	 * there is nothing to free here.
+	 */
+	if (S_ISLNK(inode->i_mode))
+		return;
+
 	cap = BEAMFS_DIRECT_BLOCKS + (unsigned int)nptrs + 1;
 	seen = kmalloc_array(cap, sizeof(*seen), GFP_NOFS);
 
