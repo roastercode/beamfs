@@ -22,10 +22,10 @@ prior session handoffs.
 
 | Repo                                    | Branch                  | Visibility | Latest commit |
 |-----------------------------------------|-------------------------|------------|---------------|
-| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `2709857` |
+| `roastercode/beamfs-devel`              | `diag/double-free-block`| PRIVATE    | `8902b1d` |
 | `roastercode/beamfs` (vitrine, frozen)  | `main`                  | PUBLIC     | (frozen)      |
-| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `95893d8` |
-| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `9f90dbe` |
+| `roastercode/yocto-beamfs`              | `diag/double-free-block`| PRIVATE    | `8372ae5` |
+| `roastercode/beamfs-bench`              | `main`                  | PRIVATE    | `8902b1d` |
 | `roastercode/radfi`                     | `main`                  | PRIVATE    | `37bb13d` |
 
 All 4 PRIVATE repos pushed and clean as of 2026-05-03 R19 validation
