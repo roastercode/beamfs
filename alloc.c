@@ -245,58 +245,80 @@ int beamfs_setup_bitmap(struct super_block *sb)
 }
 
 /*
- * beamfs_write_bitmap - flush in-memory block bitmap to disk with RS FEC
+ * beamfs_write_bitmap_block - flush a SINGLE on-disk bitmap block to disk
+ *                             with RS FEC, for the bitmap block that
+ *                             contains @bit_global.
  *
- * Encodes each 239-byte data subblock with 16 bytes of RS parity and
- * marks the bitmap buffer dirty. Called under s_lock.
+ * Re-encoding all on-disk bitmap blocks on every allocator state change
+ * was historically the source of fsync latency proportional to the
+ * volume size (each beamfs_alloc_block under s_lock used to redo
+ * memset+RS-encode+mark_buffer_dirty on every bitmap block, ~52 blocks
+ * for a 1 GiB volume). Since each bitmap block is RS-protected
+ * independently, only the block that contains the modified bit needs
+ * to be re-encoded and re-marked dirty.
+ *
+ * Called under s_lock. @bit_global is the global bit index (0-based)
+ * just modified in sbi->s_block_bitmap by the caller.
  */
-int beamfs_write_bitmap(struct super_block *sb)
+int beamfs_write_bitmap_block(struct super_block *sb,
+			      unsigned long bit_global)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-	unsigned long bit_global = 0;
+	struct buffer_head *bh;
+	u8 *bdata;
 	unsigned long max_bit;
+	unsigned long block_first_bit;
+	unsigned long block_last_bit;
+	unsigned long bit, scan;
 	u32 k;
+	u32 i, b;
 
 	if (!sbi->s_bitmap_blkhs || !sbi->s_block_bitmap)
 		return -EINVAL;
 
 	max_bit = sbi->s_nblocks;
+	if (bit_global >= max_bit)
+		return -EINVAL;
 
-	for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
-		struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
-		u8 *bdata;
-		unsigned long bit_local = 0;
-		unsigned long i, b;
+	k = (u32)(bit_global / BEAMFS_BITS_PER_BITMAP_BLOCK);
+	if (k >= sbi->s_bitmap_blocks_count)
+		return -EINVAL;
 
-		if (!bh)
-			continue;
-		bdata = (u8 *)bh->b_data;
-		memset(bdata, 0, BEAMFS_BLOCK_SIZE);
+	bh = sbi->s_bitmap_blkhs[k];
+	if (!bh)
+		return -EINVAL;
 
-		for (i = 0;
-		     i < BEAMFS_BITMAP_SUBBLOCKS &&
-		     bit_local < BEAMFS_BITS_PER_BITMAP_BLOCK &&
-		     bit_global < max_bit; i++) {
-			u8 *subdata = bdata + i * BEAMFS_SUBBLOCK_TOTAL;
+	bdata = (u8 *)bh->b_data;
+	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
 
-			for (b = 0;
-			     b < BEAMFS_SUBBLOCK_DATA * 8 &&
-			     bit_global < max_bit;
-			     b++, bit_local++, bit_global++) {
-				if (test_bit(bit_global, sbi->s_block_bitmap))
-					subdata[b / 8] |= (1u << (b % 8));
-			}
+	block_first_bit = (unsigned long)k * BEAMFS_BITS_PER_BITMAP_BLOCK;
+	block_last_bit  = block_first_bit + BEAMFS_BITS_PER_BITMAP_BLOCK;
+	if (block_last_bit > max_bit)
+		block_last_bit = max_bit;
+
+	bit = 0;
+	scan = block_first_bit;
+	for (i = 0;
+	     i < BEAMFS_BITMAP_SUBBLOCKS && scan < block_last_bit;
+	     i++) {
+		u8 *subdata = bdata + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+
+		for (b = 0;
+		     b < BEAMFS_SUBBLOCK_DATA * 8 && scan < block_last_bit;
+		     b++, bit++, scan++) {
+			if (test_bit(scan, sbi->s_block_bitmap))
+				subdata[b / 8] |= (1u << (b % 8));
 		}
-
-		beamfs_rs_encode_region(
-			bdata, BEAMFS_SUBBLOCK_TOTAL,
-			bdata + BEAMFS_SUBBLOCK_DATA,
-			BEAMFS_SUBBLOCK_TOTAL,
-			BEAMFS_SUBBLOCK_DATA,
-			BEAMFS_BITMAP_SUBBLOCKS);
-
-		mark_buffer_dirty(bh);
 	}
+
+	beamfs_rs_encode_region(
+		bdata, BEAMFS_SUBBLOCK_TOTAL,
+		bdata + BEAMFS_SUBBLOCK_DATA,
+		BEAMFS_SUBBLOCK_TOTAL,
+		BEAMFS_SUBBLOCK_DATA,
+		BEAMFS_BITMAP_SUBBLOCKS);
+
+	mark_buffer_dirty(bh);
 	return 0;
 }
 
@@ -369,7 +391,7 @@ u64 beamfs_alloc_block(struct super_block *sb)
 	sbi->s_free_blocks--;
 	sbi->s_beamfs_sb->s_free_blocks = cpu_to_le64(sbi->s_free_blocks);
 	beamfs_dirty_super(sbi);
-	beamfs_write_bitmap(sb);
+	beamfs_write_bitmap_block(sb, bit);
 
 	spin_unlock(&sbi->s_lock);
 
@@ -413,7 +435,7 @@ void beamfs_free_block(struct super_block *sb, u64 block)
 	sbi->s_free_blocks++;
 	sbi->s_beamfs_sb->s_free_blocks = cpu_to_le64(sbi->s_free_blocks);
 	beamfs_dirty_super(sbi);
-	beamfs_write_bitmap(sb);
+	beamfs_write_bitmap_block(sb, bit);
 
 	spin_unlock(&sbi->s_lock);
 }
