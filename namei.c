@@ -637,7 +637,8 @@ static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
 	inode_set_ctime_to_ts(inode, current_time(inode));
 	inode_inc_link_count(inode);
 
-	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino, 1);
+	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino,
+				fs_umode_to_dtype(inode->i_mode));
 	if (ret) {
 		inode_dec_link_count(inode);
 		return ret;
