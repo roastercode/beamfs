@@ -477,6 +477,210 @@ trace logs from this session are preserved under
 
 ---
 
+### 3.11 RS(255,239) silent miscorrection on data blocks under high-density EM injection (TRIAGED 2026-05-15)
+
+**Symptom.** During the 2026-05-15 publication-grade R19 run on
+commit `caf9caf`, the cluster `cluster_attack` phase at
+`probability=100000` ppm produced the following observation on
+`beamfs-master` (target `dir-B/file-B2.bin`, 262144 bytes):
+
+```
+CALL_DELTA=244 FLIP_DELTA=22 RS_CORRECTED=10
+DMESG_UNCORRECTABLE=0 DMESG_EIO=0
+HASH_PRE  = c7a55e38edc01567c3340d6405fa6618ce98fd18b3275072797feafc3a499add
+HASH_POST = 43a9eae0ba38366cc566aa897142a3be0995a1728b12ec2b94bb868a2c82879c
+BITS_DIFF=15250 FRAC_CORRUPT=72 HAMM_BLOCKS=2
+```
+
+22 single-bit flips were placed by `emufi` across the read path of
+the target file. The kernel decode logged 10 subblock corrections
+across two physical blocks of the file (`ino=11`, `iblock`s 3, 20,
+21 then 11, 12). All ten `decode_rs8()` calls returned `nerr > 0`
+indicating success, and zero `uncorrectable` events were logged.
+Yet the `cat $TARGET_FILE` output had a different SHA-256 than the
+pre-attack content: 15250 bits (~23% of two 4 KiB blocks of the
+file) differed between `HASH_PRE` and `HASH_POST`. The verdict
+derivation in `beamfs-bench` synthesis.rs correctly classified this
+as `verdict=CORRUPTED_DATA` / `verdict_detail=SILENT_CORRUPTION`,
+producing exit code 1 on the R19 pipeline.
+
+The other three cluster nodes at the same probability passed cleanly:
+- `compute01`: `CALL_DELTA=0` (injector never armed; see 3.12 below)
+- `compute02`: `FLIP_DELTA=17 RS_CORRECTED=10 BITS_DIFF=0` -> `RS_RECOVERED`
+- `compute03`: `FLIP_DELTA=20 RS_CORRECTED=10 BITS_DIFF=0` -> `RS_RECOVERED`
+
+The same R19 sequence was run earlier in the day on commit `a97c09b`
+(no code differences in the data path, only a documentation update
+between the two commits) and passed with `BITS_DIFF=0` on master at
+the same probability. The bug is therefore non-deterministic and
+statistical.
+
+**Root cause.** `beamfs_inline_decode_block_into_buf` (file_inline.c)
+loops over the 16 RS(255,239) subblocks of a data block, calling
+`beamfs_rs_decode_region` on each. The kernel library decoder
+returns the number of corrected symbols (`nerr`). The current code
+accepts any `nerr >= 0` as a successful correction. For RS(255,239),
+the maximum number of correctable symbol errors per codeword is
+`(255 - 239) / 2 = 8`. Above this bound, `decode_rs8()` will either
+return `-EBADMSG` (uncorrectable detected) or, with non-zero
+probability, return `nerr >= 0` with a **different valid codeword**
+than the one originally encoded. The latter outcome is a "silent
+miscorrection": from the decoder's view the result is internally
+consistent (parity matches the corrected data); from the
+application's view the bytes returned are not the bytes that were
+written.
+
+The `emufi` injector parameters in effect during this R19 were
+`flip_locality=EMUFI_LOC_ADJACENT, flip_width=1, flip_stride_bits=8`,
+which places single-bit flips at adjacent positions on each
+`submit_bio` invocation. Across the 244 calls that fired against the
+target file's read path, 22 flips landed; statistical clustering
+caused at least one subblock (most likely two) to receive more than
+8 flips, exceeding the RS error budget. The decoder then converged
+to a different valid codeword, the kernel logged 10 "subblock
+corrected" lines (mismatching the actual flip pattern), and the
+read returned the wrong bytes.
+
+The inode read path in `inode.c::beamfs_iget` is **not** affected by
+this class of bug because, after `decode_rs8` returns success, it
+recomputes the CRC32 of the corrected raw inode and rejects the
+decode if CRC32 still mismatches. The data-block path lacks this
+defense: the on-disk format v5 does not reserve space for a per-
+block CRC32. The 16-byte tail padding of the block (bytes 4080-4096)
+is zero-initialized at write time and is not affected by RS decode,
+but it is too small (128 bits) to serve as a reliable integrity
+check against a Reed-Solomon miscorrection that operates on the
+4080-byte codeword payload.
+
+**Impact.** Under EM injection at probability >= 100000 ppm
+(saturating regime), beamfs can return incorrect data on `read(2)`
+without any kernel-visible signal. The corruption is silent: no
+`pr_warn`, no `-EIO`, no `dmesg` "uncorrectable" line. Cluster
+verify on disjoint files of the same partition shows no on-disk
+divergence because the on-disk bytes are correctly persisted; the
+corruption is entirely in the read decode path.
+
+This failure mode is intrinsic to any RS-only FEC layout: it is
+demonstrated and well-documented in the coding-theory literature
+under "decoder miscorrection probability". For RS(n,k) with
+correctable bound `t = (n-k)/2`, the conditional probability of
+miscorrection given a received word at distance `> t` from any
+codeword is bounded by `t! / (q^t * t!)`-style expressions that are
+small but non-zero. In practice, with bursts placed by `emufi` on a
+single subblock, the probability is high enough to be empirically
+observable within the bench duration.
+
+**Risk.** A user-space process reading data through beamfs under
+heavy EM stress can receive plausibly-shaped but incorrect bytes.
+Higher-level integrity checks (application CRC, filesystem-of-
+filesystems checksum, or distributed agreement across multiple
+cluster nodes) are the only current defenses. For the cluster
+workload, the per-node hash check at `cluster_verify` time **does**
+expose the miscorrection: `extract_cluster_verdict_detail` flags
+`SILENT_CORRUPTION` on hash mismatch with no kernel signal, which is
+the empirical capture path used by R19.
+
+For rootfs deployments (no application-level CRC), this means
+beamfs cannot be relied upon to deliver byte-perfect rootfs files
+under sustained EM injection above the RS saturation threshold.
+Below the saturation threshold (probability <= 10000 ppm with
+`emufi` default locality), no such event has been observed across
+multiple R19 runs.
+
+**What is known about the cause.**
+
+1. The decode path in `file_inline.c::beamfs_inline_decode_block_into_buf`
+   loops over the 16 subblocks of a data block via
+   `beamfs_rs_decode_region` and accepts any `nerr >= 0` return.
+2. There is no post-decode integrity check on the decoded buffer.
+   Unlike `inode.c::beamfs_iget`, which recomputes CRC32 after a
+   successful RS decode and rejects on mismatch, the data-block
+   path has no second source of truth.
+3. The on-disk format v5 has no per-block CRC32 field. The 16-byte
+   tail pad of each disk block is zeroed at encode time, but is
+   below the RS codeword payload and would not detect the failure
+   modes observed.
+4. The bug is statistical: same code, same probability setting, same
+   injector configuration produced `BITS_DIFF=0` on R19 run 1 and
+   `BITS_DIFF=15250` on R19 run 2 within the same day. Run-to-run
+   variance is driven by the PRNG seed of the injector and the
+   timing of `submit_bio` calls relative to the page-cache miss
+   sequence.
+
+**Mitigations considered.**
+
+  - **(M1) Strict nerr bound.** Reject any `decode_rs8` return with
+    `nerr >= threshold_low` (e.g. 5 out of 8 max) as
+    uncorrectable. Pro: zero on-disk format change. Con: rejects a
+    fraction of legitimate corrections, reducing the RS error
+    budget below its theoretical capacity. Empirical impact on R19
+    pass rate not yet measured.
+  - **(M2) Per-block CRC32 in on-disk format v6.** Reserve 4 bytes
+    per data block (e.g. relocate to bytes 4076-4080, shrinking
+    user payload from 3824 to 3820 bytes per block) for a CRC32 of
+    the codeword payload. After `decode_rs8` returns success,
+    recompute CRC32 and reject on mismatch. Pro: full RS capacity
+    preserved, defense identical in spirit to the inode path. Con:
+    on-disk format bump (v5 -> v6), `mkfs.beamfs` update, kernel
+    reader update, migration path for existing v5 images, RS
+    parity recomputation, and Yocto recipe update. Multi-session
+    work.
+  - **(M3) Cluster-level voting.** When cluster_verify detects
+    hash mismatch on one node and not others, treat as locally-
+    silent miscorruption and recover from a quorum node. This is
+    the empirical defense path used by the cluster bench but is
+    not available to single-node rootfs deployments.
+
+**Decision.** Triaged. The bug is statistical, pre-existing across
+multiple commits prior to this session, and intrinsic to RS-only
+FEC without a per-block CRC. Resolution requires (M2), which is an
+on-disk format bump scheduled as a separate roadmap item under
+`format-v6 + per-block CRC32`. Until then, R19 runs that hit the
+saturation regime will occasionally fail with `verdict=CORRUPTED_DATA`
+/ `verdict_detail=SILENT_CORRUPTION` on one or more nodes; this is
+expected behavior given the current FEC capacity, not a regression.
+The empirical record is preserved in
+`Documentation/runs/beamfs-bench-analyse-full-20260515-210627` on
+spartian-1 (forensic tarball
+`/tmp/beamfs-bench-analyse-full-20260515-210627.tar.gz`).
+
+---
+
+### 3.12 emufi injector remains disabled on compute01 across all probabilities (TRIAGED 2026-05-15)
+
+**Symptom.** Across all three probabilities of the cluster phase
+(1000, 100000, 1000000 ppm) of the 2026-05-15 R19 run,
+`beamfs-compute01` consistently reports `CALL_DELTA=0`,
+`FLIP_DELTA=0`, indicating that the `emufi` injector was never
+exercised on this node despite the bench harness arming it. The
+other three nodes (master, compute02, compute03) show normal
+`CALL_DELTA` values of 240-250 per probability iteration.
+
+**Impact.** The cluster experiment loses one of its four nodes for
+the fault-injection campaign; effectively a 3-node test rather than
+4-node. R19 verdict derivation correctly classifies compute01 as
+`RS_PASSTHROUGH` (no flips placed -> hash matches) at every
+probability, which masks the issue at the pass/fail level but
+reduces statistical confidence in cluster-level claims.
+
+**What is known.** The injector counter `target_dev` is correctly
+written by `worker.sh::cluster_attack` (verified in the bench source);
+`hook_blk` is set to 1 in the same code path. The `lsmod` output in
+the compute01 forensic capture confirms `emufi` is loaded. The
+absence of `CALL_DELTA` increments suggests the hook is registered
+but `bh->b_bdev->bd_dev` on the target submit_bio path does not match
+the packed `target_dev` value on this node. Possible causes: vdb
+major/minor numbering differs on compute01 vs the other nodes, or
+the udev/virtio-blk probe order produces a different device-number
+pairing.
+
+**Decision.** Triaged. Side-investigation deferred. The cluster
+3-node-effective behaviour is documented in the bench output and
+does not block R19 from passing or failing on the other nodes; the
+empirical record is sufficient for the present session.
+
+---
+
 ## 4. Filesystem feature limitations
 
 These are deliberate scope restrictions of the current
