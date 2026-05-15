@@ -757,6 +757,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 /* the caller's responsibility.                                              */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
+					       struct buffer_head *bh,
 					       u64 phys,
 					       struct inode *inode,
 					       u64 iblock_logical_for_log,
@@ -765,7 +766,6 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					       u32 slice_length,
 					       bool rmw_path)
 {
-	struct buffer_head *bh = NULL;
 	u8                 *tmp = NULL;
 	int                 rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
 	int                 rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
@@ -786,32 +786,24 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			 BEAMFS_DATA_INLINE_BYTES))
 		return -EINVAL;
 
-	bh = sb_bread(sb, phys);
-	if (!bh) {
-		pr_err_ratelimited("beamfs/inline: sb_bread failed phys=%llu\n",
-				   (unsigned long long)phys);
-		return -EIO;
-	}
-
 	/*
+	 * Contract: caller owns @bh -- it must be sb_bread'd and
+	 * lock_buffer'd before calling, and unlock_buffer'd + brelse'd
+	 * after. The lock_buffer serialises the RMW transit against
+	 * other writers on the same physical block via the block-device
+	 * page cache. Reads from bh->b_data into tmp happen here under
+	 * that exclusion. See writeback_folio and zero_tail_block for
+	 * the canonical callsite pattern.
+	 *
 	 * Decode RS(255,239) subblocks into a private scratch buffer
 	 * (tmp), never into bh->b_data. decode_rs8 mutates both data
-	 * and parity bytes in its input. bh->b_data is shared via the
-	 * block-device page cache, so mutating it would race against
-	 * other concurrent readers and corrupt their decode.
-	 *
-	 * Note: this fix alone is NOT sufficient under heavy parallel
-	 * read load. decode_rs8 in the upstream kernel
-	 * (lib/reed_solomon/decode_rs.c) uses shared scratch buffers
-	 * in rs_control->buffers[], which races between callers of
-	 * the same rs_control instance. See edac.c for the per-CPU
-	 * rs_control allocation that resolves the upstream race.
+	 * and parity bytes in its input. The decode_rs8 upstream race
+	 * on rs_control->buffers[] is resolved by the per-CPU
+	 * rs_control allocation in edac.c.
 	 */
 	tmp = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-	if (!tmp) {
-		brelse(bh);
+	if (!tmp)
 		return -ENOMEM;
-	}
 	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
 
 	beamfs_rs_decode_region(
@@ -929,12 +921,10 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	(void)corrected;
 
 	kfree(tmp);
-	brelse(bh);
 	return 0;
 
 out_brelse:
 	kfree(tmp);
-	brelse(bh);
 	return ret;
 }
 
@@ -1120,11 +1110,23 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 			/* HOLE: zero the slice for this block. */
 			memset(dst + folio_offset, 0, slice_length);
 		} else {
+			struct buffer_head *rbh = sb_bread(sb, phys);
+
+			if (!rbh) {
+				pr_err_ratelimited("beamfs/inline: read_folio: sb_bread phys=%llu failed\n",
+						   (unsigned long long)phys);
+				ret = -EIO;
+				kunmap_local(dst);
+				goto out_unlock;
+			}
+			lock_buffer(rbh);
 			ret = beamfs_inline_decode_block_into_buf(
-				sb, phys, inode, b,
+				sb, rbh, phys, inode, b,
 				dst + folio_offset,
 				slice_offset_in_block, slice_length,
 				false);
+			unlock_buffer(rbh);
+			brelse(rbh);
 			if (ret < 0) {
 				kunmap_local(dst);
 				goto out_unlock;
@@ -1365,6 +1367,20 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 			goto fail_kunmap;
 		}
 
+		/*
+		 * Lock the bh for the full RMW transit (decode -> splice ->
+		 * encode -> mark_dirty). bh->b_data is shared via the block-
+		 * device page cache; without this lock, two concurrent
+		 * writeback_folio paths on the same phys (e.g. bdi flusher +
+		 * fsync, or distinct folios sharing an intermediate INLINE
+		 * disk block in the tri-block coverage case) interleave their
+		 * re-scatter and rs_encode steps. The result is a corrupted
+		 * on-disk codeword while each folio's page-cache copy stays
+		 * uptodate -- the canonical "hot sha == cold sha mismatch"
+		 * symptom under multi-process load.
+		 */
+		lock_buffer(bh);
+
 		/* RMW: decode existing block contents into scratch. A freshly
 		 * allocated block is zero-init'd by lookup_or_alloc_phys, which
 		 * decodes as 16 zero subblocks (RS-trivial valid codeword).
@@ -1374,11 +1390,12 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		 * will overwrite the on-disk damage from the in-RAM scratch
 		 * buffer before any consumer can read it.
 		 */
-		ret = beamfs_inline_decode_block_into_buf(sb, phys, inode, b,
+		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
 							  scratch, 0,
 							  BEAMFS_DATA_INLINE_BYTES,
 							  true);
 		if (ret < 0) {
+			unlock_buffer(bh);
 			brelse(bh);
 			goto fail_kunmap;
 		}
@@ -1402,6 +1419,7 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		if (ret < 0) {
 			pr_err_ratelimited("beamfs/inline: writeback_folio: rs_encode_region failed: %d\n",
 					  ret);
+			unlock_buffer(bh);
 			brelse(bh);
 			goto fail_kunmap;
 		}
@@ -1434,6 +1452,15 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		 * the writeback eventually flushes is already a valid
 		 * Reed-Solomon codeword.
 		 */
+		/*
+		 * Release the bh lock before sync_dirty_buffer: sync_dirty_buffer
+		 * itself takes lock_buffer internally, so holding it here would
+		 * deadlock. Between unlock_buffer and sync_dirty_buffer the bh is
+		 * dirty + RS-encoded; any concurrent reader takes lock_buffer,
+		 * sees the valid codeword, and proceeds. Any concurrent writer
+		 * blocks on lock_buffer behind the sync, preserving exclusion.
+		 */
+		unlock_buffer(bh);
 		if (wbc && wbc->sync_mode == WB_SYNC_ALL) {
 			ret = sync_dirty_buffer(bh);
 			brelse(bh);
@@ -1673,18 +1700,6 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	 * clear). rmw_path=true so any flip detected on disk is journalled
 	 * with RMW_NEUTRALISED, consistent with the writeback_folio path.
 	 */
-	ret = beamfs_inline_decode_block_into_buf(sb, phys, inode, b,
-						  scratch, 0,
-						  BEAMFS_DATA_INLINE_BYTES,
-						  true);
-	if (ret < 0) {
-		kfree(scratch);
-		return ret;
-	}
-
-	memset(scratch + zero_offset, 0,
-	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
-
 	bh = sb_bread(sb, phys);
 	if (!bh) {
 		pr_err_ratelimited("beamfs/inline: zero_tail: sb_bread phys=%llu failed\n",
@@ -1692,6 +1707,26 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		kfree(scratch);
 		return -EIO;
 	}
+	/*
+	 * Lock bh for the full RMW transit (same rationale as
+	 * writeback_folio: serialise against concurrent writeback on the
+	 * same phys via the block-device page cache).
+	 */
+	lock_buffer(bh);
+
+	ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
+						  scratch, 0,
+						  BEAMFS_DATA_INLINE_BYTES,
+						  true);
+	if (ret < 0) {
+		unlock_buffer(bh);
+		brelse(bh);
+		kfree(scratch);
+		return ret;
+	}
+
+	memset(scratch + zero_offset, 0,
+	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
 
 	for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++) {
 		memcpy((u8 *)bh->b_data + (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
@@ -1706,6 +1741,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (ret < 0) {
 		pr_err_ratelimited("beamfs/inline: zero_tail: rs_encode_region failed: %d\n",
 				   ret);
+		unlock_buffer(bh);
 		brelse(bh);
 		kfree(scratch);
 		return ret;
@@ -1715,6 +1751,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	       BEAMFS_DATA_INLINE_PAD);
 
 	mark_buffer_dirty(bh);
+	unlock_buffer(bh);
 	ret = sync_dirty_buffer(bh);
 	brelse(bh);
 	kfree(scratch);
