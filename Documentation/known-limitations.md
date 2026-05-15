@@ -371,13 +371,109 @@ coherence, leaked blocks; reports zero issues on the canonical image),
 `beamfs_audit2.py` (audit with metadata sharing analysis and
 hardlink dump). All three are standalone Python read-only inspectors.
 
+**Session 2026-05-15 late investigation (deterministic reproduction
+and partial fix attempt).** The bug WAS reproduced deterministically
+in the second half of this session: starting from a fresh canonical
+.beamfs deploy on the master VM, the first sysvinit reboot cycle
+(`sleep 1 && /sbin/reboot` from inside the VM) produces the
+`double free of block N` warn on every run. Eight consecutive
+reboot cycles all reproduced the warn (8/8). The block number is
+stable within a sub-run of cycles (276098 for the first three cycles
+on the test of record, then drifting to 276095 from cycle 4 on as
+the bitmap state diverged from canonical).
+
+A runtime kprobe trace captured late in the boot (capture at
+t ≈ 80s post-boot, well after the t < 30s where the previous
+capture had stopped) revealed eight events on boot 0: one
+`beamfs_dir_get_block` allocation, one `S01hostname-cmd` truncate-
+down free, four `kworker beamfs_inline_lookup_or_alloc_phys`
+allocations clustered at t=14.6s, one `dbus-uuidgen` allocation at
+t=17.0s, and two late `kworker` allocations at t=45.3s and t=50.4s.
+The last two were the missing data points from the earlier trace:
+block 276098 IS legitimately allocated at t=45.3s by a kworker
+running `beamfs_inline_lookup_or_alloc_phys`, and post-shutdown
+audit of the resulting on-disk image confirms that block 276098
+is referenced by inode 28338 (mode 0o100600, size 512 bytes,
+direct[0]=276098) and the bitmap bit is correctly cleared
+(ALLOCATED).
+
+So the on-disk state at the end of boot 0 is internally consistent:
+the canary at the next boot is NOT caused by an inode/bitmap
+desync persisted to disk. The desync occurs in-memory during the
+reboot itself, between alloc/dirty time and the kernel_restart
+syscall driven by /sbin/reboot. Specifically:
+
+  - `beamfs_alloc_block` clears the bitmap bit in memory and calls
+    `mark_buffer_dirty` on the bitmap buffer head, but does NOT
+    call `sync_dirty_buffer`.
+  - `beamfs_inline_lookup_or_alloc_phys` sets the new pointer in
+    the in-memory inode and calls `mark_inode_dirty`, but does
+    NOT call `write_inode_now` or equivalent.
+  - The order in which the bdi writeback flusher commits the
+    bitmap buffer vs the inode-table buffer is not deterministic
+    relative to the reboot.
+
+**Experimental fix attempt (reverted).** A `sync_fs` super-op was
+added (super.c, ~62 lines) that on every `sync(2)`, `fsync`,
+`umount` or final pre-reboot sync iterates the bitmap buffer-head
+array `sbi->s_bitmap_blkhs[k]` and the superblock buffer head
+`sbi->s_sbh`, calling `sync_dirty_buffer` on each (or
+`write_dirty_buffer(bh, 0)` when called with wait=0). The
+hypothesis was that forcing the bitmap and superblock to disk
+during the VFS sync path would establish a deterministic ordering
+bitmap -> sb -> inode-table at sync time, since the inode-table
+flush is driven by `sync_inodes_sb` before `sync_fs` is invoked.
+
+Empirical result on the 8-cycle reproduction test: 3/8 cycles
+passed (cycles 6, 7, 8), 5/8 cycles still produced the warn.
+Cycles 1-2 produced the t ≈ 10s warn on blocks 276098 / 276095
+(same pattern as baseline), cycles 3-4 surfaced a NEW failure
+mode: the warn fires at t ≈ 3s during the mount path itself on
+block 17790, indicating that the corruption is read from on-disk
+during bitmap init. This means the desync is not purely in-memory
+ordering during writeback; some on-disk state must also be wrong.
+
+The `sync_fs` patch was reverted as insufficient. The session
+documented this work but did not commit a fix.
+
+**Next session entry points.**
+
+  1. Capture a kprobe trace on the boot that FAILS at t=3s
+     (cycle 3 or 4 of the repro test) to identify which on-disk
+     bitmap block is read at mount with a faulty bit and which
+     inode legitimately points at the same block. This requires
+     enabling kprobes earlier in boot than current setup
+     (kprobe_event= cmdline already does this, but tp_printk
+     output needs to be matched against the on-disk audit).
+  2. Investigate whether `beamfs_init_bitmap` in alloc.c may
+     itself flip a bit during RS-correction: any sub-block that
+     comes back with `rc > 0` is corrected in memory, marked
+     dirty, and synced. If RS correction produces a false-positive
+     correction (e.g. when the on-disk parity itself was hit by
+     a stale write from a previous reboot), the kernel will
+     persist a wrong bit pattern.
+  3. Evaluate adding `sync_dirty_buffer` immediately after each
+     `mark_buffer_dirty` in `beamfs_alloc_block` and
+     `beamfs_free_block` (synchronous bitmap update). This is
+     ~52 sync calls worst case (1 per bitmap block per state
+     change, but typically only the touched block is dirty),
+     measured cost ≈ 1-3ms per allocation. Tradeoff: correctness
+     vs throughput on metadata-intensive workloads. Probably
+     unacceptable on R19 bench but acceptable for rootfs use.
+  4. Consider implementing a minimal journal (write-ahead log
+     of bitmap + inode-pointer atomic pairs) since the
+     reboot-safety story will not be solid without one.
+
 **Decision.** Triaged. The intermittent single-occurrence warn at
 boot is bounded by the canary, non-fatal, and does not block the
-rootfs validation campaign. Resolution deferred until the bug can be
-reproduced deterministically (e.g. by reproducing the exact R19
-sequence on a known-clean rootfs and capturing the runtime trace
-with the kprobe boot param documented above). No code change in this
-session; only documentation in this file.
+rootfs validation campaign. Resolution deferred pending the
+follow-up investigation outlined above. The `sync_fs` patch
+attempt and its 3/8 partial result are archived as
+patch06_sync_fs.py for re-use; the full set of forensic Python
+scripts (beamfs_dump.py, beamfs_audit.py, beamfs_audit2.py,
+beamfs_audit3.py, beamfs_find_all.py, beamfs_inspect.py) and
+trace logs from this session are preserved under
+/tmp/beamfs-state-2026-05-15* on spartian-1.
 
 ---
 
