@@ -237,9 +237,10 @@ in the signature and callers (`writeback_folio`, `zero_tail_block`,
 
 ### 3.10 Single-occurrence `double free of block N` warn at boot on rootfs=.beamfs (TRIAGED 2026-05-15)
 
-**Symptom.** Booting a VM with `root=/dev/vda rw rootfstype=beamfs` against
-the Yocto-produced `hpc-arm64-research-beamfs` rootfs image emits exactly
-one kernel warn per boot:
+**Symptom.** Under certain rootfs state conditions (see below), booting
+a VM with `root=/dev/vda rw rootfstype=beamfs` against the Yocto-produced
+`hpc-arm64-research-beamfs` rootfs image emits one kernel warn at
+`t ≈ 10s` post-mount:
 
 ```
 beamfs: double free of block N
@@ -255,10 +256,27 @@ Call trace:
   ...
 ```
 
-The warn fires at `t ≈ 10s` post-mount on the first boot and on every
-subsequent reboot. Empirical block numbers observed (2026-05-15):
-master=51153, compute01/02/03=276098. The block number is stable per
-node across reboots but varies between nodes.
+The warn fires at `t ≈ 10s` post-mount but is **non-systematic**
+across boots and **state-dependent**: it appeared on three consecutive
+boots immediately after an R19 cluster bench run (master=block 51153,
+compute01/02/03=block 276098, deterministic per node across these
+three reboots), then **disappeared** on subsequent boots after interim
+activity (ftrace setup with `virsh destroy + virsh start` cycles,
+create+rm runtime stress tests, additional reboot tests). On those
+later boots, `Comm=rm` still frees a block at `t ≈ 10s` but the
+block (e.g. 51152) is a legitimately allocated block and the canary
+does not fire.
+
+The trigger condition therefore appears to be specific rootfs state
+left behind by some operation. Most likely candidates: (a) the R19
+bench-driven SSH writes to the master rootfs (logs, history, transient
+config files) creating an inode whose direct/indirect pointer slot
+clashes with a freshly-allocated block in a later truncate path;
+(b) RS-correction at mount of the rootfs bitmap if any vda block had
+been flipped by a previous run (note: R19 attacks /dev/vdb only;
+vda is not directly targeted, but the dmesg from boot 3 reported
+4 corrected bitmap subblocks at mount, which is unexplained if only
+vdb was attacked).
 
 **Impact.** None on this boot path: the canary in `alloc.c::beamfs_free_block`
 silently rejects the second free, the bitmap stays self-consistent, the
@@ -296,25 +314,70 @@ sha256 identical on the 4 nodes after 2+ reboot cycles).
    `populate-volatile.sh`, `bootmisc.sh`, `read-only-rootfs-hook.sh`
    create then immediately unlink transient files on the rootfs.
 
-4. Therefore the corruption is created **between mount and t ≈ 10s**
-   by an operation in that window. The two plausible mechanisms are
-   (a) a write-path bug where a freshly allocated block coincides with
-   a still-referenced existing block, or (b) a truncate-path bug where
-   a partial truncate frees a block that the inode still owns.
+4. ftrace + kprobe runtime traces (via kernel cmdline
+   `kprobe_event="p:fb beamfs_free_block blk=%x1;r:ab beamfs_alloc_block ret=%x0"`)
+   show that during the `t < 12s` boot window only three calls to
+   `beamfs_free_block` occur, all originating from `beamfs_inline_setattr`
+   (truncate-down on `/etc` files by init scripts), plus the final
+   `rm` from `beamfs_evict_inode`. **No calls to `beamfs_alloc_block`
+   are recorded in that window**, so the corruption is not a fresh
+   allocation collision; it pre-exists the boot.
 
-**Reproduction path for future investigation.** Add
-`ftrace_filter=beamfs_alloc_block,beamfs_free_block,beamfs_truncate`
-to the kernel cmdline in `libvirt-defs/beamfs-master.xml`, reboot the
-VM, then dump `/sys/kernel/debug/tracing/trace` post-mount to identify
-the sequence of alloc/free calls in the t<10s window. Cross-reference
-the freed block number with the audit2 reverse map
-(`beamfs_audit2.py <image> <block>`) to identify which on-disk inode
-already owned that block.
+5. A `virsh destroy` after `truncate-without-sync` (mimicking the
+   R19 bench cleanup pattern) does **not** reproduce the warn on the
+   following boot. The dirty inode from the in-memory truncate is
+   discarded by destroy and the on-disk inode retains its original
+   pointer/size, so no desync between bitmap and inode is created
+   by destroy alone.
 
-**Decision.** Triaged. The single-occurrence warn at boot is bounded,
-non-fatal, and does not block the rootfs validation campaign. Resolution
-deferred to a dedicated session with ftrace instrumentation. No commit
-required for the warn itself; only documentation in this file.
+6. Therefore the corruption is most likely created by a **write-path
+   or truncate-path operation that completed and synced cleanly**
+   (so it survives across reboots) but produced an inconsistency
+   between an inode's pointer slot and the bitmap state for the
+   referenced block. The exact operation has not been isolated; the
+   four bitmap corrections at mount on boot 3 (block 0 sub 1, block 1
+   sub 10, block 2 sub 13, block 3 sub 3) suggest a single byte flip
+   in an early bitmap block may be the proximate cause, but the
+   provenance of that flip on /dev/vda (not the R19 target) is open.
+
+**Reproduction path for future investigation.** When the warn is
+observed on a fresh boot, the offending block number can be captured
+in real time by adding the following to the kernel cmdline in
+`libvirt-defs/beamfs-master.xml` (then `virsh define + destroy + start`):
+
+```
+kprobe_event="p:fb beamfs_free_block blk=%x1;r:ab beamfs_alloc_block ret=%x0" trace_buf_size=8M tp_printk
+```
+
+then post-boot:
+
+```
+sudo bash -c "echo 1 > /sys/kernel/debug/tracing/events/kprobes/fb/enable"
+sudo bash -c "echo 1 > /sys/kernel/debug/tracing/events/kprobes/ab/enable"
+sudo cat /sys/kernel/debug/tracing/trace
+```
+
+The block number passed to the failing `beamfs_free_block` is the
+`blk=0x...` value of the entry matching the `Comm=rm` task. Cross-
+reference that block against the canonical .beamfs image using
+`beamfs_audit2.py <image> <block>` to identify the inode and pathname
+that legitimately owns it. The bug is whatever subsequently caused a
+**different** inode to also list that block in its pointer tree.
+
+Tooling produced 2026-05-15 (deferred for archival in a future commit):
+`beamfs_dump.py` (reverse map block → inode + path),
+`beamfs_audit.py` (full image audit: double allocations, bitmap
+coherence, leaked blocks; reports zero issues on the canonical image),
+`beamfs_audit2.py` (audit with metadata sharing analysis and
+hardlink dump). All three are standalone Python read-only inspectors.
+
+**Decision.** Triaged. The intermittent single-occurrence warn at
+boot is bounded by the canary, non-fatal, and does not block the
+rootfs validation campaign. Resolution deferred until the bug can be
+reproduced deterministically (e.g. by reproducing the exact R19
+sequence on a known-clean rootfs and capturing the runtime trace
+with the kprobe boot param documented above). No code change in this
+session; only documentation in this file.
 
 ---
 
