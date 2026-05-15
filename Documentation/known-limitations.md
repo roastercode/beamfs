@@ -194,7 +194,7 @@ filesystem, which beamfs does not currently aim to be.
 | Feature | Status |
 |---------|--------|
 | Maximum file size | Approximately 2 MiB (12 direct blocks + 1 single indirect block of 512 pointers). Double and triple indirect are declared in the inode but not implemented. |
-| Symbolic links | Not supported. |
+| Symbolic links | Fast symlink only. Target stored inline in `fi->i_direct[]` (96 bytes), capped at 95 bytes plus zero terminator. Targets longer than 95 bytes return `-ENAMETOOLONG` at `symlink(2)` time. Slow symlink (data-block target) not implemented. Empirical audit on the `beamfs-rootfs-test.bb` rootfs scratch tree (busybox + dropbear + bash minimal): 388 symlinks total, max target length 34 bytes, distribution concentrated at 16-23 bytes. Fast-symlink suffices for minimal rootfs deployment. Larger images (HPC research stack, Debian-style) may have longer symlinks and need to be audited separately. |
 | Extended attributes (xattr) | Not supported. |
 | SELinux labels (`security.selinux` xattr) | Not supported. |
 | POSIX ACLs (`system.posix_acl_*` xattr) | Not supported. |
