@@ -204,6 +204,7 @@ filesystem, which beamfs does not currently aim to be.
 | Online filesystem resize (grow/shrink) | Not supported. |
 | Quotas | Not supported. |
 | Reflinks (`FICLONE`, `FICLONERANGE`) | Not supported. |
+| `mknod(2)` for device, FIFO, socket nodes | Not supported. The `beamfs_dir_inode_operations` table does not register a `.mknod` callback, so `mknod(2)` returns `-EPERM`. Non-blocking for typical Linux deployments where `/dev` is served by `devtmpfs` and named pipes / sockets are created on tmpfs or other writable mounts. Also affects `mkfs.beamfs --from-dir` which skips non-regular, non-directory, non-symlink entries from the source tree with a warning rather than attempting to recreate them on the target. |
 
 ---
 
