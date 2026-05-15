@@ -181,6 +181,58 @@ This is a kernel-API drift issue: an earlier rslib.h convention may
 have used `uint16_t *`. The current kernel-mainline 7.0 used by
 this project requires the `uint8_t *` form.
 
+### 3.8 d_type=DT_FIFO on hardlink creation (RESOLVED 2026-05-15)
+
+`namei.c::beamfs_link` passed a literal `1` as the `file_type`
+argument to `beamfs_add_dirent`. The dirent ABI uses the standard
+`DT_*` enum where `1 == DT_FIFO`. Hardlinks were therefore recorded
+on disk with the FIFO type, causing `getdents(2)` to return the
+wrong `d_type` for every hardlink. Tools that trust `d_type` without
+falling back to `stat(2)` (e.g. `find -type`, recursive shell
+walkers, the busybox `ls -l` acceleration path) misclassified
+hardlinks as named pipes. `stat(2)` returned the correct mode
+because it reads `i_mode` from the on-disk inode, which is
+unaffected; only the `d_type` byte stored in the dirent slot was
+wrong.
+
+**Resolution** (commit `6fd2d96`, 2026-05-15): derive the dirent
+type from the source inode's `i_mode` via `fs_umode_to_dtype()`,
+the kernel-provided `umode_t -> DT_*` mapping (`linux/fs.h`). A
+hardlink to a regular file now records `DT_REG`, a hardlink to a
+symlink records `DT_LNK`, and so on. Hardlinks to directories are
+forbidden by VFS so the `S_IFDIR` case is not reachable. Prerequisite
+for any first-boot validation of a beamfs-served Linux rootfs where
+busybox or other tools relying on `d_type` are present.
+
+### 3.9 RMW transit not serialised against concurrent writers (RESOLVED 2026-05-15)
+
+The INLINE writeback path (scheme=2 UNIVERSAL_INLINE) RMW transit
+on `bh->b_data` was not serialised against concurrent writers
+on the same physical block. The per-inode `i_alloc_mutex` only
+covered the indirect-tree lookup, not the subsequent `sb_bread` +
+decode + splice + `rs_encode` + `mark_buffer_dirty` sequence. Two
+writeback paths reaching the same `phys` (bdi flusher + `fsync`,
+or distinct folios sharing an intermediate INLINE disk block in
+the tri-block coverage case) interleaved their re-scatter and
+`rs_encode` steps. The result was a corrupted on-disk codeword
+while each folio's page-cache copy stayed uptodate: the canonical
+hot-sha vs cold-sha mismatch symptom observed under multi-process
+load on the dindirect addressing range.
+
+**Resolution** (commit `157b2ea`, 2026-05-15): wrap the full RMW
+transit in `lock_buffer(bh)` / `unlock_buffer(bh)`. The buffer_head
+lock serialises per-`phys`-block, not per-inode, so parallel
+writes on disjoint blocks remain parallel. Reads on the same `phys`
+are also serialised against writers via the same lock, which fixes
+the reader-vs-writer corruption symmetrically. `unlock_buffer` is
+called before `sync_dirty_buffer` (which re-locks internally) to
+avoid deadlock; between the unlock and the sync the buffer is
+dirty and RS-encoded, so any concurrent reader sees a valid
+codeword. `decode_block_into_buf` was refactored to accept a
+pre-`bread` + pre-locked `bh` so the lock contract is explicit
+in the signature and callers (`writeback_folio`, `zero_tail_block`,
+`read_folio`) own the `bh` lifecycle.
+
 ---
 
 ## 4. Filesystem feature limitations

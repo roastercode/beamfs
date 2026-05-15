@@ -892,7 +892,7 @@ Le recipe Yocto canonique de l'image cluster BEAMFS est :
   ~/git/yocto-beamfs/recipes-core/images/hpc-arm64-research-beamfs.bb
 
 C'est le coeur des travaux. C'est le seul recipe d'image actif dans
-BBLAYERS et le seul qui produit les rootfs ext2 deployes sur les 4 VMs
+BBLAYERS et le seul qui produit les rootfs .beamfs deployes sur les 4 VMs
 du cluster (master + compute01..03).
 
 Tout ce qui concerne :
@@ -930,7 +930,7 @@ Build :
 Image produite :
 
   ~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/
-    hpc-arm64-research-beamfs-qemuarm64.ext2
+    hpc-arm64-research-beamfs-qemuarm64.beamfs
 
 Deployee aux 4 VMs via copie binaire vers
 /var/lib/libvirt/images/hpc-arm64/beamfs-{master,compute01,compute02,compute03}.img
@@ -1244,15 +1244,15 @@ sont bien integres dans le `beamfs.ko` charge par les VMs cluster.
    bitbake refait do_compile au prochain `bitbake beamfs-module` ou
    `bitbake hpc-arm64-research-beamfs`.
 
-3. L'image `.ext2` canonique doit avoir ete regeneree APRES le delta
+3. L'image `.beamfs` canonique doit avoir ete regeneree APRES le delta
    source. Verifier le timestamp de
-   `tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2`
+   `tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs`
    et s'assurer qu'il est posterieur au dernier `mv`/`write_text` sur
    la copie yocto-beamfs des sources.
 
-4. Le redeploy `.ext2` -> VM doit etre complet. La VM demarree doit
+4. Le redeploy `.beamfs` -> VM doit etre complet. La VM demarree doit
    charger le `beamfs.ko` dont le sha256 == sha256 du `.ko` extrait
-   par 7z/debugfs de l'`.ext2` canonique.
+   par debugfs.beamfs de l'`.beamfs` canonique.
 
 5. Phase 0.7 du pipeline `beamfs-bench full` enforce cet invariant
    automatiquement : identity FAIL bloque le bench. Cette protection
@@ -1260,10 +1260,10 @@ sont bien integres dans le `beamfs.ko` charge par les VMs cluster.
 
 **Si Phase 0.7 fail avec divergence in-VM != reference** :
 
-- verifier que le redeploy s'est bien fait (timestamp `.img` VM
-  posterieur au timestamp `.ext2` canonique)
-- verifier que la VM a redemarre sur la nouvelle `.img`
-- en dernier recours : `virsh destroy` + `cp -f` `.ext2` -> `.img` +
+- verifier que le redeploy s'est bien fait (timestamp `.beamfs` VM
+  posterieur au timestamp `.beamfs` canonique)
+- verifier que la VM a redemarre sur la nouvelle `.beamfs`
+- en dernier recours : `virsh destroy` + `cp -f` `.beamfs` -> `.beamfs` +
   `virsh start` manuel pour forcer le redeploiement
 - relancer `beamfs-bench full`
 

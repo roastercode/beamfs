@@ -1831,7 +1831,7 @@ Captured systematically (all scopes) :
   - `lsblk.log`, `lsusb.log`
   - `virsh-list.log`, `virsh-list-final.log`
   - `virsh-dumpxml-beamfs-{master,compute0[1,2,3]}.xml`
-  - `canonical-ko.log` (sha256 + path of deployed .ext2)
+  - `canonical-ko.log` (sha256 + path of deployed beamfs.ko)
 
 Captured opt-in via `--bpftrace` flag :
   - `bpftrace.log` (block_rq_complete + sched_switch counts)

@@ -49,7 +49,7 @@ post-publication of the corresponding paper + Zenodo DOI.
 | Yocto integration | `roastercode/yocto-beamfs`    | Recipes for kernel modules + image            |
 | Gentoo overlay    | `roastercode/beamfs-overlay`  | ebuilds for `sys-fs/beamfs-bench`             |
 
-`yocto-beamfs` builds the **canonical .ext2 image** that hosts beamfs
+`yocto-beamfs` builds the **canonical .beamfs image** that hosts beamfs
 + injector modules + userspace tools, deployed to 4 VMs.
 `beamfs-overlay` packages **`beamfs-bench`** as a Gentoo binary on
 the host (spartian-1) that orchestrates the VMs.
@@ -73,7 +73,7 @@ runtime.
 
 ### 1.4 Canonical image deployment
 
-The image `hpc-arm64-research-beamfs-qemuarm64.ext2` (4096 MB) is the
+The image `hpc-arm64-research-beamfs-qemuarm64.beamfs` is the
 **only** thing each VM disk gets. It is byte-identical across the 4
 VMs. Per-VM hostname differentiation happens via kernel cmdline
 `beamfs.hostname=<name>` set in the libvirt XML.
@@ -94,11 +94,11 @@ recadrage framework.
 | R14  | Visibility audit before push     | `git --no-pager remote -v`, never push to public by accident |
 | R16  | No em-dashes in our docs         | Replace `\u2014` by ASCII `--`                          |
 | R19  | Pipeline gate                    | Full multifs run before any production claim            |
-| R23  | Yocto canonical                  | The .ext2 produced by Yocto is the only valid runtime   |
+| R23  | Yocto canonical                  | The .beamfs produced by Yocto is the only valid runtime |
 | R27  | Byte-exact patches               | `python3` patches with `assert count==1` anchors        |
 | R29  | GPG-signed commits               | Interactive preauth in TTY, then 3600s cache            |
 | R30  | Pager neutralization             | `git --no-pager`, `gh --no-pager`, `journalctl --no-pager` |
-| R31  | Byte-identity .ext2              | The 4 VMs disk start byte-identical                     |
+| R31  | Byte-identity .beamfs            | The 4 VMs disk start byte-identical                     |
 | R36  | Tarball-canonical                | R19 emits a signed tarball of all forensics             |
 
 The two most often forgotten in practice :
@@ -163,14 +163,14 @@ include it in scope.
 #### A.1 Verify what is actually deployed (vs what you think is)
 
 Before EVERY cycle, verify the BuildID of the kernel module
-currently inside the canonical .ext2 image. This is non-negotiable
+currently inside the canonical .beamfs image. This is non-negotiable
 since the 2026-05-06 cycle, where two consecutive R19 runs were
 analyzed assuming emufi v0.3.1 was active when the disassembly
 revealed v0.2.1 (different work-dir alphabetical ordering picked
 by `find ... | head -1`).
 
 ```bash
-IMG=~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2
+IMG=~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
 ls -la $IMG | head -1
 sudo sha256sum $IMG | head -1
 
@@ -190,10 +190,10 @@ code on today's bench -- all conclusions will be void.
 Also verify the deployed VM disk image :
 
 ```bash
-sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-compute01.beamfs
 ```
 
-If this hash differs from the canonical .ext2 hash, the VMs are NOT
+If this hash differs from the canonical .beamfs hash, the VMs are NOT
 running the canonical image. Either the previous R31 redeploy was
 skipped, or someone manually edited the VM disk. Re-run R31 before
 the cycle.
@@ -448,7 +448,7 @@ section 5 in the bench repo. Summary :
 
 ### 3.7 Phase G : Image rebuild + R31 redeploy + R19 full
 
-**Goal** : produce the canonical .ext2 with the new injector + new
+**Goal** : produce the canonical .beamfs with the new injector + new
 worker baked in, deploy to the 4 VMs, run R19 and emit a signed
 manifest.
 
@@ -468,31 +468,34 @@ bitbake -c cleansstate hpc-arm64-research-beamfs
 bitbake hpc-arm64-research-beamfs
 
 # Verify image was rebuilt.
-ls -la tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2
+ls -la tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
 
 # Verify the new module is inside.
 TMPMNT=/tmp/check-image-$(date +%H%M%S)
 mkdir -p $TMPMNT
-sudo mount -o loop,ro tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2 $TMPMNT
+# NOTE: a .beamfs image cannot be `mount -o loop` like ext2.
+# Inspect via `debugfs.beamfs` (planned, Phase 2 fsck.beamfs) or
+# boot a throwaway VM with the image as vda and inspect live.
+#sudo mount -o loop,ro tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs $TMPMNT
 strings $TMPMNT/lib/modules/7.0.3/updates/<product>.ko | grep version=
 sudo umount $TMPMNT && rmdir $TMPMNT
 ```
 
 The `cleansstate` of the **image** is critical : without it,
 Yocto reuses the previous rootfs cache and the new module never
-makes it into the .ext2 even though the recipe was bumped.
+makes it into the .beamfs even though the recipe was bumped.
 
 #### G.2 R31 redeploy : 4 VMs byte-identical
 
-Each VM disk is replaced with a fresh copy of the canonical .ext2 :
+Each VM disk is replaced with a fresh copy of the canonical .beamfs :
 ```bash
 for vm in beamfs-master beamfs-compute01 beamfs-compute02 beamfs-compute03 ; do
     sudo virsh destroy $vm 2>/dev/null
-    sudo cp tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2 \
-            /var/lib/libvirt/images/hpc-arm64/$vm.ext2
-    sudo chown qemu:qemu /var/lib/libvirt/images/hpc-arm64/$vm.ext2
+    sudo cp tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs \
+            /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
+    sudo chown qemu:qemu /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
 done
-sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-*.ext2
+sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-*.beamfs
 # All four sha256s MUST match (R31).
 ```
 
@@ -673,7 +676,7 @@ deployed. Use BuildID matching :
 
 ```bash
 # Step 1 : extract the BuildID of the .ko inside the deployed image.
-IMG=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+IMG=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.beamfs
 TMP=/tmp/locate-$(date +%H%M%S)
 mkdir -p $TMP
 sudo mount -o loop,ro $IMG $TMP
@@ -830,7 +833,7 @@ guard, not for substring presence. See section 3.2 last block.
 ### 4.3 `bitbake` apparent success but stale artefacts (phase G)
 
 **Symptom** : `bitbake hpc-arm64-research-beamfs` exits 0 but the
-new module is not in the .ext2.
+new module is not in the .beamfs.
 
 **Cause** : the rootfs cache was reused. `cleansstate` was
 applied to the module recipe but not to the image recipe.
@@ -1114,13 +1117,13 @@ bitbake <product>-module
 ### 5.4 R31 redeploy (4 VMs)
 ```
 cd ~/yocto/poky/build-qemu-arm64
-IMG=tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.ext2
+IMG=tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
 for vm in beamfs-master beamfs-compute01 beamfs-compute02 beamfs-compute03 ; do
     sudo virsh destroy $vm 2>/dev/null
-    sudo cp $IMG /var/lib/libvirt/images/hpc-arm64/$vm.ext2
-    sudo chown qemu:qemu /var/lib/libvirt/images/hpc-arm64/$vm.ext2
+    sudo cp $IMG /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
+    sudo chown qemu:qemu /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
 done
-sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-*.ext2
+sudo sha256sum /var/lib/libvirt/images/hpc-arm64/beamfs-*.beamfs
 # All 4 hashes MUST be identical.
 ```
 
@@ -1170,11 +1173,16 @@ SYMBOL=<from-dmesg>     # e.g. emufi_kp_blk_pre
 OFFSET=<from-dmesg>     # e.g. 0x27c
 
 # Step 1 : BuildID of the .ko inside the deployed VM image.
-DEPLOYED=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.ext2
+DEPLOYED=/var/lib/libvirt/images/hpc-arm64/beamfs-compute01.beamfs
 TMP=/tmp/locate-$(date +%H%M%S)
 mkdir -p $TMP
-sudo mount -o loop,ro $DEPLOYED $TMP
-DEPLOYED_KO=$(sudo find $TMP/lib/modules -name "$PRODUCT.ko" 2>/dev/null | head -1)
+# NOTE: a .beamfs image cannot be `mount -o loop` like ext2.
+# Use debugfs.beamfs (Phase 2 fsck.beamfs) once available, or
+# extract via `mkfs.beamfs --extract` (planned), or boot a VM and
+# scp the .ko from /lib/modules. Until then, derive BuildID from
+# the in-VM `beamfs.ko` via SSH and skip the loop-mount step.
+#sudo mount -o loop,ro $DEPLOYED $TMP
+#DEPLOYED_KO=$(sudo find $TMP/lib/modules -name "$PRODUCT.ko" 2>/dev/null | head -1)
 TARGET_BUILDID=$(sudo readelf -n "$DEPLOYED_KO" | grep "Build ID" | awk '{print $NF}')
 sudo umount $TMP && rmdir $TMP
 
