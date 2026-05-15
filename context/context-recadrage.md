@@ -1665,5 +1665,103 @@ Decouverte 2026-05-04, session func-12 sub-4 demonstration.
 
 ---
 
-**Fin R0-R38. Lecture obligatoire de R0-R38 en debut de session.**
+## R39 - R-anti-leak-tooling : enforce R14 via pre-push hook, not procedure alone
+
+L'incident R14 fondateur (2026-04-30) avait ete corrige en ajoutant la
+regle R14 a recadrage.md, en s'appuyant sur la procedure manuelle
+(verifier gh repo view, choisir le bon remote, etc.). 6 jours plus
+tard, la regle R14 a ete violee deux fois sur la meme branche, par
+le meme acteur, sans detection pendant 9 jours. Voir
+context/R14-INCIDENT-20260515.md pour la timeline complete.
+
+Conclusion : la procedure seule ne suffit pas. Toute regle anti-leak
+doit etre enforce par tooling, pas seulement documentee.
+
+### Mecanisme
+
+Le script context/pre-push-hook.sh est versionne dans le repo. Sur
+chaque clone, le script doit etre symlinke dans .git/hooks/pre-push :
+
+```bash
+cd ~/git/beamfs
+ln -sf $(pwd)/context/pre-push-hook.sh .git/hooks/pre-push
+chmod +x context/pre-push-hook.sh
+```
+
+Le hook refuse tout push vers le remote origin (PUBLIC) pour toute
+branche autre que main. Les pushes vers private (PRIVATE) ou tout
+autre remote nomme sont autorises sans restriction. Les pushes vers
+origin main sont autorises sans restriction.
+
+### Convention de naming des remotes pour beamfs
+
+| Remote name | URL                                    | Visibility | Allowed branches |
+|-------------|----------------------------------------|------------|------------------|
+| origin      | roastercode/beamfs.git                 | PUBLIC     | main only        |
+| private     | roastercode/beamfs-devel.git           | PRIVATE    | any              |
+
+Cette convention est inversee par rapport a l'usage courant ou
+origin = remote prive. Sur beamfs, origin = PUBLIC mirror, parce
+que le repo PUBLIC est la vitrine et que le clone HTTPS par defaut
+pointe dessus pour les utilisateurs externes. La PRIVATE devel
+est un remote secondaire nomme private.
+
+Sur yocto-beamfs (PRIVATE entier) et beamfs-bench (PRIVATE entier),
+la convention est normale : origin = PRIVATE, pas de remote PUBLIC.
+
+### Commandes canoniques pour pousser
+
+Au lieu de git push (qui peut resoudre vers le default upstream et
+surprendre), TOUJOURS expliciter le remote :
+
+```bash
+# Sur ~/git/beamfs :
+git push private devel       # CORRECT : push devel sur PRIVATE
+git push origin main         # CORRECT : push main sur PUBLIC
+
+# JAMAIS :
+git push origin devel        # BLOQUE par le hook
+git push                     # ambigu, peut leaker selon upstream
+```
+
+### Bypass d'urgence
+
+Si un push origin pour une branche non-main est intentionnel et
+necessaire (cas rarissime : preparation d'une release PUBLIC v3
+depuis une branche staging par exemple), le bypass est :
+
+```bash
+git push --no-verify origin <branch>
+```
+
+L'option --no-verify court-circuite tous les hooks pre-push. Elle
+est intentionnellement hostile : taper --no-verify force la
+conscience de ce qu'on fait.
+
+### Pour Claude
+
+Tout bloc shell que Claude livre pour un git push sur ~/git/beamfs
+DOIT utiliser la forme git push <remote-name> <branch> explicite,
+JAMAIS git push tout court. Si Claude doit pousser sur PUBLIC pour
+une raison legitime, il l'annonce clairement et utilise
+--no-verify pour bypass intentionnel, en expliquant pourquoi dans
+le commentaire du bloc.
+
+### Verification a chaque debut de session
+
+Premier check d'un nouveau clone beamfs :
+
+```bash
+test -L ~/git/beamfs/.git/hooks/pre-push || \
+    ln -sf $(pwd)/context/pre-push-hook.sh ~/git/beamfs/.git/hooks/pre-push
+ls -la ~/git/beamfs/.git/hooks/pre-push
+```
+
+Le hook devant pointer vers context/pre-push-hook.sh, executable.
+
+Cree 2026-05-15 suite a l'incident R14-INCIDENT-20260515.md.
+
+---
+
+**Fin R0-R39. Lecture obligatoire de R0-R39 en debut de session.**
 
