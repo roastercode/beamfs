@@ -56,6 +56,8 @@ context/*
 !context/context-recadrage.md
 !context/STATUS.md
 !context/TODO.md
+!context/R14-INCIDENT-20260515.md
+!context/pre-push-hook.sh
 
 # Bitbake transient artefacts (do not commit)
 pn-buildlist
