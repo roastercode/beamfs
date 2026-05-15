@@ -235,6 +235,89 @@ in the signature and callers (`writeback_folio`, `zero_tail_block`,
 
 ---
 
+### 3.10 Single-occurrence `double free of block N` warn at boot on rootfs=.beamfs (TRIAGED 2026-05-15)
+
+**Symptom.** Booting a VM with `root=/dev/vda rw rootfstype=beamfs` against
+the Yocto-produced `hpc-arm64-research-beamfs` rootfs image emits exactly
+one kernel warn per boot:
+
+```
+beamfs: double free of block N
+CPU: ... PID: ... Comm: rm Not tainted ...
+Call trace:
+  beamfs_free_block+0xfc/0x130
+  beamfs_evict_inode+0x148/0x2a0
+  evict+0xd8/0x238
+  iput.part.0+0x134/0x240
+  iput+0x1c/0x38
+  filename_unlinkat+0x1a8/0x298
+  __arm64_sys_unlinkat+0x4c/0x90
+  ...
+```
+
+The warn fires at `t ≈ 10s` post-mount on the first boot and on every
+subsequent reboot. Empirical block numbers observed (2026-05-15):
+master=51153, compute01/02/03=276098. The block number is stable per
+node across reboots but varies between nodes.
+
+**Impact.** None on this boot path: the canary in `alloc.c::beamfs_free_block`
+silently rejects the second free, the bitmap stays self-consistent, the
+rootfs survives, mount remains beamfs, no panic, no Oops, witness files
+in `/etc` persist across reboots. The R19 bench harness runs to exit 0
+under EM injection (`beamfs-bench full --injector emufi`) without any
+correlated regression.
+
+**Risk.** If the same block is referenced by two distinct in-use
+inodes and the kernel reuses the apparently-free block for a third
+inode before the second one is unlinked, silent data corruption is
+possible. To date, no such reuse has been observed; the rootfs hashes
+remain stable across reboot cycles (`/lib/modules/7.0.3/modules.alias`
+sha256 identical on the 4 nodes after 2+ reboot cycles).
+
+**What is known about the cause.**
+
+1. The on-disk image produced by `mkfs.beamfs --from-dir` is
+   bitmap-coherent: an exhaustive offline audit (Python parser walking
+   direct + indirect + dindirect + tindirect-L1, cross-checked against
+   the RS-decoded on-disk bitmap) reports zero double allocations and
+   zero referenced-but-free blocks. Mount-time bitmap initialization in
+   `alloc.c` reads the on-disk bitmap faithfully into `s_block_bitmap`.
+
+2. Runtime reproduction attempts fail: creating then unlinking small
+   files (single 4 KiB), a tight loop of 100 small files, or a 10 MB
+   file exercising the indirect path do **not** add new `double free`
+   warns past the boot-time one. The free path in `super.c::beamfs_free_data_blocks`
+   (direct + indirect only; dindirect/tindirect free is a separate
+   gap, not exercised by rootfs files in this image) is correct in
+   steady state for the paths that are exercised.
+
+3. The warn originates from `Comm=rm` at `t ≈ 10s`, i.e. during the
+   Yocto sysvinit run-level switch where scripts such as
+   `populate-volatile.sh`, `bootmisc.sh`, `read-only-rootfs-hook.sh`
+   create then immediately unlink transient files on the rootfs.
+
+4. Therefore the corruption is created **between mount and t ≈ 10s**
+   by an operation in that window. The two plausible mechanisms are
+   (a) a write-path bug where a freshly allocated block coincides with
+   a still-referenced existing block, or (b) a truncate-path bug where
+   a partial truncate frees a block that the inode still owns.
+
+**Reproduction path for future investigation.** Add
+`ftrace_filter=beamfs_alloc_block,beamfs_free_block,beamfs_truncate`
+to the kernel cmdline in `libvirt-defs/beamfs-master.xml`, reboot the
+VM, then dump `/sys/kernel/debug/tracing/trace` post-mount to identify
+the sequence of alloc/free calls in the t<10s window. Cross-reference
+the freed block number with the audit2 reverse map
+(`beamfs_audit2.py <image> <block>`) to identify which on-disk inode
+already owned that block.
+
+**Decision.** Triaged. The single-occurrence warn at boot is bounded,
+non-fatal, and does not block the rootfs validation campaign. Resolution
+deferred to a dedicated session with ftrace instrumentation. No commit
+required for the warn itself; only documentation in this file.
+
+---
+
 ## 4. Filesystem feature limitations
 
 These are deliberate scope restrictions of the current
