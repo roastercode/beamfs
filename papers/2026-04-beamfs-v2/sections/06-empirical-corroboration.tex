@@ -245,6 +245,14 @@ correction.
 
 These results corroborate \cref{thm:soundness-v21} on a single
 direct-corruption event and characterize the performance envelope
-of the two implemented protection schemes. Saturation testing
-under multi-symbol-error perturbation (Theorem v2.2 active
-falsification) is part of the post-Zenodo continuation.
+of the two implemented protection schemes. An active saturation
+falsification protocol against \cref{thm:saturation-v22a} on the
+inode and superblock regions of format v5 is part of the
+post-Zenodo continuation. The unconditional Theorem v2.2 of the
+prior draft was empirically falsified on format v5 data blocks
+under high-density EM injection; the present report restates the
+data-region saturation contract as \cref{thm:saturation-v22b}, a
+conjecture conditional on format v6, with the empirical record of
+the v5 falsification preserved in
+\texttt{Documentation/known-limitations.md}~\cite{beamfs-impl}
+\S3.11.

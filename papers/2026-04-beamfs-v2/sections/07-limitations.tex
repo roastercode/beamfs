@@ -17,20 +17,35 @@ LOC of the 5{,}000-line audit budget. INLINE write is part of the
 v2.x roadmap, post the present technical report and Zenodo
 upload.
 
-\paragraph{Saturation falsification (Theorem v2.2).}
+\paragraph{Saturation falsification (Theorems v2.2a, v2.2b).}
 The empirical section corroborates \cref{thm:soundness-v21} on a
-single-symbol-error event well within the
-correction capacity. \cref{thm:saturation-v22} (saturation
-observability) is stated in the present report but not yet
-exercised by an active falsification protocol. A saturation
-protocol would force \(>8\) symbol errors on a single subblock,
-verify that \(\mathcal{G}\) returns \(\bot\), and verify that the
-journal contains a \texttt{UNCORRECTABLE}-flagged entry with the
-correct \((\text{block}, \text{subblock})\) coordinates. The
-protocol is straightforward to derive from the Stage 3
-\texttt{dd}-based corruption template, by injecting nine or more
-distinct symbol-position flips in one subblock; we mark this as
-the immediate post-Zenodo experimental task.
+single-symbol-error event well within the correction capacity.
+\cref{thm:saturation-v22a} (saturation observability on
+CRC-protected regions) is stated in the present report but not
+yet exercised by an active falsification protocol. A saturation
+protocol on the inode region would force \(>8\) symbol errors on
+a single inode subblock, verify that \(\mathcal{G}\) returns
+\(\bot\) (rejection driven by the post-decode CRC32 recomputation
+of \cref{def:G} step 1), and verify that the journal contains a
+\texttt{UNCORRECTABLE}-flagged entry with the correct
+\((\text{block}, \text{subblock})\) coordinates. The protocol is
+straightforward to derive from the Stage 3 \texttt{dd}-based
+corruption template by injecting nine or more distinct
+symbol-position flips in one subblock of an inode block; an
+analogous protocol applies to the superblock region. We mark
+this as the immediate post-Zenodo experimental task.
+\cref{thm:saturation-v22b} (saturation observability on data
+regions) is, in the present report, a conjecture conditional on
+on-disk format v6. The reference implementation's
+\texttt{Documentation/known-limitations.md}~\cite{beamfs-impl}
+\S3.11 records an empirical event of silent Reed--Solomon
+miscorrection on a format v5 data block under high-density EM
+injection, which is precisely the falsification the conditional
+form of v2.2b acknowledges. Closing v2.2b unconditionally is the
+explicit motivation for format v6 work; the candidate mechanism
+(per-block CRC32, candidate M2 in \S3.11) is the natural
+extension of the integrity-field discipline that already protects
+the inode and superblock regions in format v5.
 
 \paragraph{Companion fault injection diagnostic.}
 The companion fault injection module RadFI v0.1.2 exhibited a
@@ -52,11 +67,12 @@ remains the formal reference~\cite{desbrieres2026radfi}.
 
 \paragraph{Verified compilation.}
 The present report's recovery operator is defined and proved at
-the mathematical level (\cref{def:G,thm:soundness-v21,thm:saturation-v22});
+the mathematical level (\cref{def:G,thm:soundness-v21,thm:saturation-v22a,thm:saturation-v22b});
 the kernel implementation is paired with the operator definition
 through the traceability table of \cref{tab:m2c-trace}. We do not
 claim that the implementation satisfies the operator definition
-in any machine-checked sense. Closing this gap requires either an
+in any machine-checked sense, even on the CRC-protected regions
+where \cref{thm:saturation-v22a} is provable in principle. Closing this gap requires either an
 extraction-based approach in the FSCQ
 tradition~\cite{chen2015fscq} or a refinement-based approach in
 the seL4 tradition~\cite{klein2009sel4}, applied to the BEAMFS

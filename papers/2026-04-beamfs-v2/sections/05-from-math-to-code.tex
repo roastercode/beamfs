@@ -19,10 +19,28 @@ steps:
 \begin{enumerate}
 \item \textbf{Decode.} For each region \(R\) of \(\Lambda_P\)
   flagged inconsistent by I1's CRC, apply RS decode subblock by
-  subblock. If a subblock decode returns a residual syndrome
-  (decode failure beyond capacity), proceed to step 5.
-  Otherwise, replace the in-memory copy of \(R\) with the
-  decoded content.
+  subblock. The kernel decoder
+  \texttt{decode\_rs8}~\cite{kernelrslib} returns the number of
+  corrected symbols \(\mathrm{nerr} \geq 0\) on apparent success
+  and a negative value (\texttt{-EBADMSG}) when it detects an
+  out-of-capacity word. If any subblock decode returns
+  \texttt{-EBADMSG}, proceed to step 5. If every subblock decode
+  returns \(\mathrm{nerr} \geq 0\) and the region \(R\) belongs to
+  \(\Lambda_{\mathrm{crc}}\) (\(R\) carries a CRC32 integrity
+  field over its decoded payload, e.g.\ the inode region or the
+  superblock region in BEAMFS format v5), recompute the CRC32 on
+  the decoded payload and compare with the on-disk value: on
+  mismatch, the decode is rejected as a silent miscorrection
+  (probability \(1 - 2^{-32}\) detected per event) and the
+  operator proceeds to step 5. Otherwise (region either passes
+  CRC32 recomputation, or is not in \(\Lambda_{\mathrm{crc}}\)),
+  replace the in-memory copy of \(R\) with the decoded content.
+  Regions outside \(\Lambda_{\mathrm{crc}}\) on format v5 (data
+  regions) have no second-source soundness predicate available;
+  the operator cannot detect silent miscorrection on such regions
+  under format v5, and the saturation contract for them is
+  \cref{thm:saturation-v22b}, a conjecture conditional on format
+  v6.
 \item \textbf{Repair.} If any subblock was corrected in step 1,
   schedule the corrected disk block for write-back via
   \texttt{mark\_buffer\_dirty} and \texttt{sync\_dirty\_buffer},
@@ -35,8 +53,10 @@ steps:
 \item \textbf{Sentinel verification.} For each sentinel of
   \cref{def:consistent} clause~4, verify the canonical value. If
   not, return \(\bot\) (I5).
-\item \textbf{Saturation handling.} If step 1 detected a residual
-  syndrome on any subblock, emit a journal entry by calling
+\item \textbf{Saturation handling.} If step 1 detected either a
+  \texttt{-EBADMSG} return from the decoder or a CRC32 mismatch
+  after a putative successful decode on a region of
+  \(\Lambda_{\mathrm{crc}}\), emit a journal entry by calling
   \texttt{beamfs\_log\_rs\_event} with
   \texttt{positions = NULL}, \texttt{n\_positions = 0}, and
   \texttt{flags |= BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE}, with

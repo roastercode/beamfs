@@ -1,4 +1,4 @@
-\section{Appendix: proofs of \cref{thm:soundness-v21,thm:saturation-v22}}\label{app:proof}
+\section{Appendix: proofs of \cref{thm:soundness-v21,thm:saturation-v22a} and status of \cref{thm:saturation-v22b}}\label{app:proof}
 
 \subsection{Auxiliary results}
 
@@ -13,14 +13,21 @@ If \(s \neq \bot\) and \(N(s) > 0\), then either
 \begin{proof}
 By construction of \(\mathcal{G}\) (\cref{def:G}). Step 1
 (decode) examines each inconsistent region. For each such region,
-either every subblock RS-decodes within capacity (no residual
-syndrome), in which case the region's syndrome becomes zero after
-the decoded content is installed and \(N\) decreases by one for
-that region; or at least one subblock yields a residual syndrome,
-in which case step 5 emits the journal entry and the operator
-returns \(\bot\) by I5. In either case, \(N\) cannot remain
-unchanged: an iteration that does not return \(\bot\) strictly
-decreases \(N\).
+either every subblock decode returns \(\mathrm{nerr} \geq 0\) and
+(if the region belongs to \(\Lambda_{\mathrm{crc}}\)) the
+post-decode CRC32 recomputation matches the on-disk value, in
+which case the decoded content is installed and \(N\) decreases
+by one for that region; or at least one subblock decode returns
+\texttt{-EBADMSG}, or the post-decode CRC32 recomputation fails
+on a \(\Lambda_{\mathrm{crc}}\) region, in which case step 5
+emits the journal entry and the operator returns \(\bot\) by I5.
+On a region outside \(\Lambda_{\mathrm{crc}}\) under format v5,
+the operator has no second-source predicate available: a silent
+miscorrection within the decoder's \(\mathrm{nerr} \geq 0\) arm
+is, in this case, not detected. This residual case is the explicit
+content of \cref{thm:saturation-v22b} stated as a conjecture
+conditional on format v6. In every detected case, an iteration
+that does not return \(\bot\) strictly decreases \(N\).
 \end{proof}
 
 \begin{proposition}[Fail-closed absorption]\label{prop:absorb}
@@ -48,9 +55,15 @@ no subblock of \(s_1\) carries more than \(t\) symbol errors. The
 RS decoder is well-defined within capacity, returning the unique
 codeword within Hamming distance~\(t\) of the received word
 (MacWilliams--Sloane~\cite{macwilliams1977}, Ch.~9); the kernel
-\texttt{lib/reed\_solomon}~\cite{kernelrslib} implements this. Hence step 1 of \cref{def:G} succeeds
-on every region of \(\Lambda\) on which \(s_1\) differs from
-\(s_0\), without invoking the saturation handling of step 5.
+\texttt{lib/reed\_solomon}~\cite{kernelrslib} implements this and
+returns \(\mathrm{nerr} = \) (number of corrected symbols) \(\geq 0\)
+on every such subblock. Hence step 1 of \cref{def:G} succeeds on
+every region of \(\Lambda\) on which \(s_1\) differs from
+\(s_0\). On regions of \(\Lambda_{\mathrm{crc}}\), the post-decode
+CRC32 recomputation matches the on-disk value because the decoded
+payload is, by the within-capacity decoder property, the unique
+codeword originally encoded; the saturation handling of step 5 is
+not invoked.
 
 By \cref{lem:descent}, if \(s_i \neq \bot\) and \(N(s_i) > 0\),
 then \(N(s_{i+1}) < N(s_i)\) and \(s_{i+1} \neq \bot\) (because
@@ -72,41 +85,77 @@ operator's response is the designed safe failure. This case is bounded by I2's s
 property and does not affect the termination claim.
 \end{proof}
 
-\subsection{Proof of \cref{thm:saturation-v22}}
+\subsection{Proof of \cref{thm:saturation-v22a}}
 
-\begin{proof}[Proof of \cref{thm:saturation-v22}]
+\begin{proof}[Proof of \cref{thm:saturation-v22a}]
 Fix a consistent \(s_0\) and an event
-\(e \in \mathcal{E}_{\mathrm{sat}}\). Let \(s_1 = e(s_0)\). By
-hypothesis, there exists at least one subblock of \(s_1\) whose
-symbol-error count exceeds \(t\). Apply \(\mathcal{G}\) to \(s_1\).
+\(e \in \mathcal{E}_{\mathrm{sat}}\) saturating a subblock of a
+region \(R \in \Lambda_{\mathrm{crc}}\). Let \(s_1 = e(s_0)\).
+Apply \(\mathcal{G}\) to \(s_1\).
 
 Step 1 of \cref{def:G} (decode) invokes the RS decoder on every
-subblock of every inconsistent region. On the saturating
-subblock, the decoder returns a non-zero residual syndrome (the
-canonical out-of-capacity behaviour~\cite{kernelrslib}). The
-operator detects the residual and proceeds to step 5.
+subblock of \(R\). The kernel decoder
+\texttt{decode\_rs8}~\cite{kernelrslib} on the saturating
+subblock has two possible outcomes. Outcome (i): the decoder
+detects the out-of-capacity condition and returns
+\texttt{-EBADMSG}. Outcome (ii): the decoder converges to a valid
+codeword distinct from the originally encoded one (a silent
+miscorrection) and returns \(\mathrm{nerr} \geq 0\). In outcome
+(i), step 1 directly transitions to step 5. In outcome (ii),
+step 1 proceeds to recompute the region's CRC32 over the decoded
+payload and compares it with the on-disk CRC32 value: because
+\(R \in \Lambda_{\mathrm{crc}}\), the CRC32 is a well-defined
+soundness predicate over the decoded payload, and because the
+CRC32 algebra is independent of the Reed--Solomon code algebra,
+the probability that the silently-miscorrected payload accidentally
+satisfies the on-disk CRC32 is \(2^{-32}\) per event; with
+overwhelming probability the recomputation fails and step 1
+transitions to step 5.
 
 Step 5 (saturation log) calls \texttt{beamfs\_log\_rs\_event}
 with \texttt{positions} \(=\) \texttt{NULL},
 \texttt{n\_positions} \(=\) 0, and
 \texttt{flags |= BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE}, with
 the affected \((\text{block}, \text{subblock})\) coordinates
-identified by the RS-decode failure. The journal entry is
-committed to persistent storage by the standard buffer-write
-sequence (\texttt{mark\_buffer\_dirty},
-\texttt{sync\_dirty\_buffer}). We assume the implementation commits the journal entry to
-persistent storage before returning, an assumption realized by the
-kernel function \texttt{beamfs\_log\_rs\_event} which calls
+identified by either the \texttt{-EBADMSG} return or the CRC32
+mismatch. The journal entry is committed to persistent storage by
+the standard buffer-write sequence (\texttt{mark\_buffer\_dirty},
+\texttt{sync\_dirty\_buffer}). We assume the implementation
+commits the journal entry to persistent storage before returning,
+an assumption realized by the kernel function
+\texttt{beamfs\_log\_rs\_event} which calls
 \texttt{sync\_dirty\_buffer} before its return path; this is
 verifiable by audit and is the on-disk format v4
 contract~\cite{beamfs-impl}.
 
-The operator returns \(\bot\). Conclusion (1) holds. The journal
-entry committed in step 5 satisfies conclusion (2): it is tagged
-with \texttt{UNCORRECTABLE}, and its \((\text{block},
-\text{subblock})\) coordinates correspond to a saturating subblock
-of \(e(s_0)\) by construction.
+The operator returns \(\bot\). Conclusion (1) holds modulo the
+\(2^{-32}\) accidental CRC collision in outcome (ii), which is
+the irreducible noise of a 32-bit integrity field and the only
+gap closed by widening the integrity field in any future format
+revision. The journal entry committed in step 5 satisfies
+conclusion (2): it is tagged with \texttt{UNCORRECTABLE}, and
+its \((\text{block}, \text{subblock})\) coordinates correspond
+to a saturating subblock of \(e(s_0)\) by construction.
 \end{proof}
+
+\subsection{Status of \cref{thm:saturation-v22b}}
+
+\Cref{thm:saturation-v22b} is, in the present report, a
+conjecture conditional on an on-disk format v6 satisfying the
+integrity-field hypothesis stated in its premise. The proof
+structure of \cref{thm:saturation-v22a} carries over verbatim
+once the format v6 hypothesis is met: replace
+\(\Lambda_{\mathrm{crc}}\) with the union of
+\(\Lambda_{\mathrm{crc}}\) and the format v6
+integrity-protected data subset of \(\Lambda_{\mathrm{data}}\),
+and replace the CRC32 of step 1 with the format v6 integrity
+function. The substantive open work is therefore not the proof
+but the on-disk format v6 specification, the \texttt{mkfs.beamfs}
+update, and the kernel reader update. Until format v6 lands, the
+present report acknowledges the falsification of the unconditional
+v2.2 statement on format v5 data blocks documented in
+\texttt{Documentation/known-limitations.md}~\cite{beamfs-impl}
+\S3.11.
 
 \subsection{Remark on falsification scope}
 

@@ -1,11 +1,14 @@
 \section{Conclusion}\label{sec:conclusion}
 
 We have presented BEAMFS v2, a Linux filesystem with an
-electromagnetic-resilience recovery contract stated as two
+electromagnetic-resilience recovery contract stated as three
 theorems: \cref{thm:soundness-v21} for recovery under bounded
-EMR perturbation, and \cref{thm:saturation-v22} for saturation
-observability through an auditable
-\texttt{UNCORRECTABLE}-flagged journal entry. The contract was
+EMR perturbation, \cref{thm:saturation-v22a} for saturation
+observability on regions carrying a CRC32 integrity field
+(inode, superblock) through an auditable
+\texttt{UNCORRECTABLE}-flagged journal entry, and
+\cref{thm:saturation-v22b}, a conjecture conditional on on-disk
+format v6, for the analogous contract on data regions. The contract was
 stated after the previous version of this calculus was empirically
 falsified by the companion RadFI instrument and was retracted
 publicly. The revision retains the v1 mathematical scaffolding
@@ -40,9 +43,14 @@ infrastructure deployment must adopt.
 
 The immediate continuation tasks, in approximate order, are: the
 INLINE write path, an active saturation falsification protocol
-for \cref{thm:saturation-v22}, the diagnostic of the deferred
-RadFI kprobe interaction, an \texttt{xfstests} subset, and
-preparation for \texttt{linux-fsdevel} submission. The longer
+for \cref{thm:saturation-v22a} on the inode and superblock
+regions of format v5, the on-disk format v6 work targeting
+discharge of \cref{thm:saturation-v22b} (per-block integrity
+field on data regions, candidate M2 in
+\texttt{Documentation/known-limitations.md}\,\S3.11), the
+diagnostic of the deferred RadFI kprobe interaction, an
+\texttt{xfstests} subset, and preparation for
+\texttt{linux-fsdevel} submission. The longer
 horizon includes the v3 verified-compilation work and the
 extension of the EMR threat model with more targeted Family B
 adversarial waveforms.

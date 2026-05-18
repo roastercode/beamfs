@@ -5,13 +5,26 @@
 \renewcommand{\thedefinition}{v2.\arabic{definition}}
 \setcounter{definition}{0}
 
-We state two theorems. \cref{thm:soundness-v21} (Theorem v2.1)
+We state three theorems. \cref{thm:soundness-v21} (Theorem v2.1)
 covers the recovery of states perturbed by an EMR event whose
 per-subblock symbol-error count is within the Reed--Solomon
-correction capacity. \cref{thm:saturation-v22} (Theorem v2.2)
-covers the saturation regime: an event whose per-subblock count
-exceeds the capacity yields fail-closed recovery with an auditable
-journal entry flagged uncorrectable.
+correction capacity. The saturation regime is stated in two parts.
+\cref{thm:saturation-v22a} (Theorem v2.2a) covers the regime on
+regions whose on-disk representation carries an integrity field
+(CRC32 in BEAMFS format v5: the inode region and the superblock
+region); on such regions the recovery operator detects silent
+miscorrection by post-decode integrity recomputation, returns
+\(\bot\), and emits a journal entry flagged uncorrectable.
+\cref{thm:saturation-v22b} (Theorem v2.2b) covers the regime on
+regions whose on-disk representation does not carry an integrity
+field independent of the Reed--Solomon codeword (data regions in
+BEAMFS format v5); it is stated as a conjecture conditional on an
+on-disk format v6 satisfying the integrity-field hypothesis. The
+conditional form is the honest statement of what format v5
+permits us to prove: \S3.11 of the reference implementation's
+\texttt{Documentation/known-limitations.md}~\cite{beamfs-impl}
+records the empirical falsification of the unconditional v2.2
+statement on format v5 data blocks.
 
 \subsection{Theorem v2.1: recovery under bounded EMR perturbation}
 
@@ -59,16 +72,26 @@ silently masks the violation.
 The hypothesis on~\(\mathcal{E}_{\mathrm{EMR}}\) (no event corrupts
 more than~\(t\) symbols in any single subblock) is exactly the RS
 code's correction capacity. Events that violate this hypothesis
-are addressed by \cref{thm:saturation-v22}.
+are addressed by \cref{thm:saturation-v22a} on the CRC-protected
+regions and by \cref{thm:saturation-v22b} (conditional on format
+v6) on the data regions.
 
-\subsection{Theorem v2.2: saturation observability}
+\subsection{Theorem v2.2a: saturation observability on CRC-protected regions}
 
-\begin{theorem}[Saturation observability]\label{thm:saturation-v22}
+\begin{theorem}[Saturation observability, CRC-protected regions]\label{thm:saturation-v22a}
 Let~\(\Lambda\) and~\(\mathcal{G}\) be as in
-\cref{thm:soundness-v21}. Let~\(\mathcal{E}_{\mathrm{sat}}\) be the
-family of electromagnetic perturbation events such that, for some
-\(e \in \mathcal{E}_{\mathrm{sat}}\) and some state~\(s\), there
-exists at least one RS subblock of~\(e(s)\) whose symbol-error
+\cref{thm:soundness-v21}. Let \(\Lambda_{\mathrm{crc}} \subseteq \Lambda\)
+be the subset of regions whose on-disk representation carries an
+integrity field \(c\) computed over the region payload excluding
+\(c\) itself, such that the recomputation of \(c\) on the decoded
+payload after RS decode is a soundness predicate (in BEAMFS format
+v5, \(\Lambda_{\mathrm{crc}}\) consists of the inode region and
+the superblock region, each carrying a 32-bit CRC over its
+payload~\cite{beamfs-impl}). Let~\(\mathcal{E}_{\mathrm{sat}}\) be
+the family of electromagnetic perturbation events such that, for
+some \(e \in \mathcal{E}_{\mathrm{sat}}\) and some state~\(s\),
+there exists at least one RS subblock of a region
+\(R \in \Lambda_{\mathrm{crc}}\) of \(e(s)\) whose symbol-error
 count exceeds~\(t\). Then for every consistent~\(s_0\) and every
 \(e \in \mathcal{E}_{\mathrm{sat}}\):
 \begin{enumerate}
@@ -84,11 +107,24 @@ count exceeds~\(t\). Then for every consistent~\(s_0\) and every
 The proof appears in \cref{app:proof}. The argument has two parts.
 
 \paragraph{Fail-closed.}
-The recovery operator's RS decode step on a saturating subblock
-returns a non-zero residual syndrome after decode (the canonical
-behaviour of an RS decoder beyond its capacity~\cite{kernelrslib}).
-The operator interprets this residual as a saturation event,
-returning~\(\bot\) by I5.
+The kernel \texttt{lib/reed\_solomon} decoder
+\texttt{decode\_rs8}~\cite{kernelrslib} returns the number of
+corrected symbols on success (\(\mathrm{nerr} \geq 0\)) and a
+negative value (\texttt{-EBADMSG}) when the received word is at
+distance \(> t\) from every codeword and the decoder detects this.
+A saturating event may, however, drive the decoder to converge to a
+\emph{different} valid codeword than the originally encoded one
+(silent miscorrection), in which case \(\mathrm{nerr} \geq 0\) is
+returned and the decode return value alone cannot distinguish the
+event from a legitimate correction. On a region
+\(R \in \Lambda_{\mathrm{crc}}\), the operator's step 1 recomputes
+the region's CRC32 on the decoded payload and rejects the decode
+if the recomputed CRC32 does not match the on-disk value: the CRC32
+acts as a soundness predicate independent of the Reed--Solomon code
+algebra, so a silent miscorrection driving the decoded payload
+toward a different valid codeword fails the recomputation with
+probability \(1 - 2^{-32}\) per event. On rejection, the operator
+proceeds to step 5 and returns~\(\bot\) by I5.
 
 \paragraph{Observability.}
 Before returning~\(\bot\), the operator emits a journal entry by
@@ -101,14 +137,51 @@ saturating event. The entry includes the affected
 \texttt{re\_flags}~\cite{beamfs-impl}). The entry is committed to
 persistent storage before the operator returns.
 
+\subsection{Theorem v2.2b: saturation observability on data regions
+(conjecture conditional on format v6)}
+
+\begin{theorem}[Saturation observability, data regions, conjecture]\label{thm:saturation-v22b}
+Let~\(\Lambda\) and~\(\mathcal{G}\) be as in
+\cref{thm:soundness-v21}. Let \(\Lambda_{\mathrm{data}} \subseteq \Lambda\)
+be the subset of regions whose on-disk representation is the data
+payload of a regular file. Assume an on-disk format v6 in which
+every region \(R \in \Lambda_{\mathrm{data}}\) carries an integrity
+field \(c\) of width \(w \geq 32\) bits computed over \(R\)'s
+codeword payload by a hash function whose preimage resistance is
+independent of the Reed--Solomon code algebra (call this the
+\emph{format v6 hypothesis}). Then, under the format v6 hypothesis,
+the conclusions of \cref{thm:saturation-v22a} hold for the family
+\(\mathcal{E}_{\mathrm{sat}}\) restricted to \(\Lambda_{\mathrm{data}}\).
+\end{theorem}
+
+\paragraph{Status.}
+The format v6 hypothesis is not satisfied by the present on-disk
+format v5: data blocks carry their Reed--Solomon parity but no
+integrity field independent of the codeword. The reference
+implementation's
+\texttt{Documentation/known-limitations.md}~\cite{beamfs-impl}
+records under \S3.11 an empirical event of silent Reed--Solomon
+miscorrection on a data block under high-density EM injection that
+falsifies the unconditional v2.2 statement on format v5. The
+conjecture is therefore stated, in the spirit of the falsifiability
+discipline of the present report, as a contract that format v6
+must satisfy and that the v6 implementation must demonstrate by an
+active saturation falsification protocol on data blocks. The
+mitigation path is documented in \S3.11 of the reference
+implementation as candidate M2 (per-block CRC32 in format v6).
+
 \subsection{Discussion}
 
 \paragraph{What these theorems do, and do not, prove.}
-\Cref{thm:soundness-v21,thm:saturation-v22} establish that the
-recovery operator either returns to consistency or to fail-closed
-in a bounded number of steps under the EMR-bounded hypothesis,
-and that fail-closed is auditable, in the sense that a subsequent
-inspection of the journal identifies the saturating coordinates.
+\Cref{thm:soundness-v21,thm:saturation-v22a} establish, on
+\(\Lambda \setminus \Lambda_{\mathrm{data}}\) under format v5, that
+the recovery operator either returns to consistency or to
+fail-closed in a bounded number of steps under the EMR-bounded
+hypothesis, and that fail-closed is auditable, in the sense that
+a subsequent inspection of the journal identifies the saturating
+coordinates. \Cref{thm:saturation-v22b} extends the contract to
+\(\Lambda_{\mathrm{data}}\) conditionally on format v6, and is
+stated as a conjecture to be discharged by the v6 implementation.
 They do \emph{not} prove that the kernel implementation of
 \(\mathcal{G}\) is bug-free: a buggy implementation can violate
 \textbf{I4} or \textbf{I5} even with a correct operator
@@ -141,22 +214,33 @@ written, exactly. The present soundness theorem assumes the
 substrate is \emph{adversarial} within the EMR-bounded family,
 and the filesystem must recover. The two proofs compose: a
 BEAMFS-compliant implementation satisfying
-\cref{thm:soundness-v21,thm:saturation-v22} \emph{and} satisfying
+\cref{thm:soundness-v21,thm:saturation-v22a} \emph{and} satisfying
 crash-Hoare logic in the FSCQ sense recovers from the union of
-both threat models. Mechanizing this composition is left for
+both threat models on \(\Lambda \setminus \Lambda_{\mathrm{data}}\)
+under format v5, and on all of \(\Lambda\) under format v6 if and
+when \cref{thm:saturation-v22b}'s conditional hypothesis is met. Mechanizing this composition is left for
 future work.
 
 \paragraph{Falsifiability.}
-By construction, both theorems are falsifiable: a counter-example
-is any RadFI~\cite{desbrieres2026radfi} run, or any equivalent
-fault-injection trace, that exhibits a state \(e(s_0)\) under
+By construction, all three theorems are falsifiable. A
+counter-example to \cref{thm:soundness-v21} is any
+fault-injection trace exhibiting a state \(e(s_0)\) under
 \(e \in \mathcal{E}_{\mathrm{EMR}}\) for which
 \(\mathcal{G}^K(e(s_0)) \neq \models\) and
-\(\mathcal{G}^K(e(s_0)) \neq \bot\); or a state under
-\(e \in \mathcal{E}_{\mathrm{sat}}\) for which \(\mathcal{G}\) does
-not return \(\bot\) or fails to emit the
-\texttt{UNCORRECTABLE}-flagged journal entry. The empirical
-section (\cref{sec:empirical}) reports a corroboration of
-\cref{thm:soundness-v21} by direct disk corruption; saturation
-testing (Theorem v2.2 active falsification) is part of the
-post-Zenodo continuation.
+\(\mathcal{G}^K(e(s_0)) \neq \bot\). A counter-example to
+\cref{thm:saturation-v22a} is a trace under
+\(e \in \mathcal{E}_{\mathrm{sat}}\) targeting a region of
+\(\Lambda_{\mathrm{crc}}\) for which \(\mathcal{G}\) does not
+return \(\bot\) or fails to emit the
+\texttt{UNCORRECTABLE}-flagged journal entry. A falsification of
+\cref{thm:saturation-v22b} requires first that a format v6
+satisfying the integrity-field hypothesis exists, after which the
+same trace shape on data regions would constitute the
+counter-example; until format v6 lands, v2.2b is a conjecture and
+\S3.11 of the reference implementation already records the
+unconditional v2.2's empirical falsification on format v5 data
+blocks. The empirical section (\cref{sec:empirical}) reports a
+corroboration of \cref{thm:soundness-v21} by direct disk
+corruption on the canary block; an active saturation falsification
+protocol against \cref{thm:saturation-v22a} on the inode and
+superblock regions is part of the post-Zenodo continuation.

@@ -31,10 +31,17 @@ calculus, and presents two replacement statements:
 \textbf{Theorem v2.1} (recovery under bounded EMR perturbation),
 which retains the termination/safety/coverage structure of
 Theorem\,IV.1 with an EMR-stated hypothesis on the perturbation
-family; and \textbf{Theorem v2.2} (saturation observability),
-which formalizes the contract that fail-closed recovery emits an
-auditable uncorrectable-flagged journal entry at the affected
-\((\text{block},\text{subblock})\) coordinates.
+family; and a saturation-observability contract stated in two
+parts: \textbf{Theorem v2.2a} (saturation observability on
+CRC-protected regions), which is provable today on the inode and
+superblock regions of on-disk format v5 by post-decode CRC32
+recomputation, and \textbf{Theorem v2.2b} (saturation observability
+on data regions), which is stated as a conjecture conditional on an
+on-disk format v6 carrying a per-block integrity check independent
+of the Reed--Solomon codeword. Format v5 does not satisfy that
+hypothesis on data blocks; the empirical record of this falsification
+is documented in the reference implementation under
+\texttt{Documentation/known-limitations.md}\,\S3.11.
 
 Empirical results are reported on a Yocto-built aarch64 research
 image: byte-level disk corruption of an INLINE-formatted volume is

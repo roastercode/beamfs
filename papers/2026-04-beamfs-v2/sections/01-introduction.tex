@@ -49,13 +49,21 @@ preserved) and Family\,B adversarial perturbations (intentional
 electromagnetic interference, high-power microwave, electromagnetic
 pulse, treated under IEC\,61000-2-13 and
 61000-4-36~\cite{iec61000-2-13,iec61000-4-36,radasky2004iemi}).
-The recovery contract is split into two theorems: Theorem v2.1
+The recovery contract is restated in three parts. Theorem v2.1
 covers the recovery of states perturbed by an event whose
-per-subblock corruption is within the Reed--Solomon capacity;
-Theorem v2.2 covers the saturation regime, formally requiring that
-events exceeding the capacity yield fail-closed recovery with an
-auditable journal entry flagging the uncorrectable
-\((\text{block},\text{subblock})\) coordinates.
+per-subblock corruption is within the Reed--Solomon capacity.
+Theorem v2.2a covers the saturation regime on CRC-protected regions
+(inode, superblock), where post-decode CRC32 recomputation defends
+the recovery operator against silent miscorrection: events exceeding
+the Reed--Solomon capacity yield fail-closed recovery with an
+auditable journal entry at the affected
+\((\text{block},\text{subblock})\) coordinates. Theorem v2.2b
+states the same contract for data regions, conditional on an
+on-disk format v6 carrying a per-block integrity field independent
+of the Reed--Solomon codeword; the present format v5 does not
+satisfy that hypothesis and v2.2b is therefore stated as a
+conjecture, with the empirical record of falsification on format v5
+documented in the reference implementation.
 
 \subsection{Position with respect to neighbouring work}
 
@@ -93,13 +101,22 @@ This report's contributions are:
   \textbf{I1}--\textbf{I5} on the layout and the recovery
   operator. The v1 mathematical scaffolding is preserved; only the
   perturbation family hypothesis is restated.
-\item Two replacement theorems
+\item Replacement theorems
   (\cref{sec:soundness}). \textbf{Theorem v2.1} states recovery
   under bounded EMR perturbation, with the
   termination/safety/coverage proof structure of v1 Theorem IV.1
-  retained. \textbf{Theorem v2.2} states saturation observability,
-  formally requiring that the recovery operator on a saturating
-  event emits an auditable uncorrectable-flagged journal entry.
+  retained. The saturation observability contract is stated in two
+  parts. \textbf{Theorem v2.2a} states saturation observability on
+  regions carrying a CRC32 integrity field (inode, superblock);
+  it is provable on the present on-disk format v5 because the
+  post-decode CRC32 recomputation defends the recovery operator
+  against silent Reed--Solomon miscorrection. \textbf{Theorem v2.2b}
+  states saturation observability on data regions; it is stated as
+  a conjecture conditional on an on-disk format v6 carrying a
+  per-block integrity check independent of the Reed--Solomon
+  codeword. The conditional form is not a softening of the contract:
+  it is the honest statement of what the present format permits us
+  to prove, with the path to closure (format v6) explicit.
 \item A three-tier descent from mathematics to algorithm to kernel
   implementation (\cref{sec:m2c}), with a traceability table
   pairing each operator step with the corresponding kernel
@@ -128,4 +145,4 @@ exhaustive coverage of all conceivable EMR events: Family\,B is
 parametrized by IEC standards but real-world adversarial waveform
 synthesis exceeds the present model's scope. Finally, this report
 explicitly does not republish the v1 soundness theorem; the
-present Theorems v2.1 and v2.2 supersede it.
+present Theorems v2.1, v2.2a, and v2.2b supersede it.

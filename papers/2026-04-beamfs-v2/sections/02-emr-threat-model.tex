@@ -101,12 +101,17 @@ perturbation family, not as a property of the operator. A
 filesystem cannot, by any algorithm, recover a perturbation that
 saturates its code; the appropriate response is fail-closed with
 auditable signalling. Theorem v2.1 (\cref{sec:soundness}) covers
-the regime within the boundary; Theorem v2.2 covers the regime at
-or beyond the boundary, and formally requires the recovery
-operator to emit a journal entry flagged with
+the regime within the boundary. Theorem v2.2a covers the regime
+at or beyond the boundary on regions carrying a CRC32 integrity
+field (inode, superblock in format v5), where the recovery operator
+detects silent Reed--Solomon miscorrection by post-decode CRC32
+recomputation and emits a journal entry flagged with
 \texttt{BEAMFS\_RS\_EVENT\_FLAG\_UNCORRECTABLE} at the affected
 \((\text{block}, \text{subblock})\) coordinates before returning
-fail-closed.
+fail-closed. Theorem v2.2b states the same contract for data
+regions, conditional on an on-disk format v6 carrying an analogous
+per-block integrity field; format v5 does not satisfy that
+hypothesis and v2.2b is stated as a conjecture.
 
 \subsection{Out of scope}
 
