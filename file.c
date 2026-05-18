@@ -62,7 +62,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			iomap->addr = IOMAP_NULL_ADDR;
 			return 0;
 		}
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			pr_err("beamfs: iomap: no free blocks\n");
 			return -ENOSPC;
@@ -87,14 +87,14 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			indirect_blk = beamfs_alloc_block(sb);
+			indirect_blk = beamfs_alloc_block(sb, inode);
 			if (!indirect_blk) {
 				pr_err("beamfs: iomap: no free blocks for indirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, indirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, indirect_blk);
+				beamfs_free_block(sb, indirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -125,7 +125,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			iomap->addr = IOMAP_NULL_ADDR;
 			return 0;
 		}
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(ibh);
 			pr_err("beamfs: iomap: no free blocks\n");
@@ -155,14 +155,14 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			dindirect_blk = beamfs_alloc_block(sb);
+			dindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!dindirect_blk) {
 				pr_err("beamfs: iomap: no free blocks for dindirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, dindirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, dindirect_blk);
+				beamfs_free_block(sb, dindirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -187,7 +187,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			l1_blk = beamfs_alloc_block(sb);
+			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
 				pr_err("beamfs: iomap: no free blocks for dindirect L1\n");
@@ -195,7 +195,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			}
 			l1bh = sb_getblk(sb, l1_blk);
 			if (!l1bh) {
-				beamfs_free_block(sb, l1_blk);
+				beamfs_free_block(sb, l1_blk, inode);
 				brelse(ibh);
 				return -EIO;
 			}
@@ -228,7 +228,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			iomap->addr = IOMAP_NULL_ADDR;
 			return 0;
 		}
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l1bh);
 			pr_err("beamfs: iomap: no free blocks (dindirect data)\n");
@@ -259,14 +259,14 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			tindirect_blk = beamfs_alloc_block(sb);
+			tindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!tindirect_blk) {
 				pr_err("beamfs: iomap: no free blocks for tindirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, tindirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, tindirect_blk);
+				beamfs_free_block(sb, tindirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -291,7 +291,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			l1_blk = beamfs_alloc_block(sb);
+			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
 				pr_err("beamfs: iomap: no free blocks for tindirect L1\n");
@@ -299,7 +299,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			}
 			l1bh = sb_getblk(sb, l1_blk);
 			if (!l1bh) {
-				beamfs_free_block(sb, l1_blk);
+				beamfs_free_block(sb, l1_blk, inode);
 				brelse(ibh);
 				return -EIO;
 			}
@@ -326,7 +326,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 				iomap->addr = IOMAP_NULL_ADDR;
 				return 0;
 			}
-			l2_blk = beamfs_alloc_block(sb);
+			l2_blk = beamfs_alloc_block(sb, inode);
 			if (!l2_blk) {
 				brelse(l1bh);
 				pr_err("beamfs: iomap: no free blocks for tindirect L2\n");
@@ -334,7 +334,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			}
 			l2bh = sb_getblk(sb, l2_blk);
 			if (!l2bh) {
-				beamfs_free_block(sb, l2_blk);
+				beamfs_free_block(sb, l2_blk, inode);
 				brelse(l1bh);
 				return -EIO;
 			}
@@ -367,7 +367,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			iomap->addr = IOMAP_NULL_ADDR;
 			return 0;
 		}
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l2bh);
 			pr_err("beamfs: iomap: no free blocks (tindirect data)\n");

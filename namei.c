@@ -139,12 +139,12 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		if (!alloc)
 			return 0;
 
-		block_no = beamfs_alloc_block(sb);
+		block_no = beamfs_alloc_block(sb, dir);
 		if (!block_no)
 			return -ENOSPC;
 		dbh = sb_getblk(sb, block_no);
 		if (!dbh) {
-			beamfs_free_block(sb, block_no);
+			beamfs_free_block(sb, block_no, dir);
 			return -EIO;
 		}
 		lock_buffer(dbh);
@@ -169,12 +169,12 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 	if (!indirect_blk) {
 		if (!alloc)
 			return 0;
-		indirect_blk = beamfs_alloc_block(sb);
+		indirect_blk = beamfs_alloc_block(sb, dir);
 		if (!indirect_blk)
 			return -ENOSPC;
 		ibh = sb_getblk(sb, indirect_blk);
 		if (!ibh) {
-			beamfs_free_block(sb, indirect_blk);
+			beamfs_free_block(sb, indirect_blk, dir);
 			return -EIO;
 		}
 		lock_buffer(ibh);
@@ -204,14 +204,14 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		return 0;
 	}
 
-	block_no = beamfs_alloc_block(sb);
+	block_no = beamfs_alloc_block(sb, dir);
 	if (!block_no) {
 		brelse(ibh);
 		return -ENOSPC;
 	}
 	dbh = sb_getblk(sb, block_no);
 	if (!dbh) {
-		beamfs_free_block(sb, block_no);
+		beamfs_free_block(sb, block_no, dir);
 		brelse(ibh);
 		return -EIO;
 	}

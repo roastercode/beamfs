@@ -475,6 +475,125 @@ beamfs_audit3.py, beamfs_find_all.py, beamfs_inspect.py) and
 trace logs from this session are preserved under
 /tmp/beamfs-state-2026-05-15* on spartian-1.
 
+**Session 2026-05-18 follow-up (defensive patches, root cause still
+open).** A multi-session investigation extended the 2026-05-15 work
+with forensic instrumentation (pr_info on every alloc_block,
+free_block, evict_inode, write_bitmap_block with watchdog on the
+suspect bit) and a debug-build kernel with PROVE_LOCKING + LOCKDEP +
+DEBUG_INFO_DWARF5. Findings refined the 2026-05-15 hypothesis:
+
+  1. The H3 drift (bitmap=free, inode-table=referenced) is
+     reproducible at 4/5 runs of the same trigger sequence
+     (`100 file create + 50 unlink + drop_caches + halt`) on a
+     freshly-deployed canonical .beamfs image, with
+     `cache=writethrough` qemu (rules out qemu page-cache loss as
+     the sole cause).
+
+  2. The drift consistently targets two inode/block pairs per run:
+     (a) `/etc/timestamp` (inode 854, mode=0x81a4, nlink=1) whose
+     `direct[0]` is rewritten at boot by sysvinit; (b) a transient
+     inode allocated during the trigger (inode 28365 in the test
+     of record). The specific block numbers vary across runs
+     (17790/19657/19148 for inode 854; 276398/279446 for inode
+     28365) but always follow the same allocation-order pattern.
+
+  3. `dump_stack()` instrumentation in `beamfs_free_block` did
+     NOT fire on the suspect blocks (the bits that ended up
+     drifted to `free` on disk). Combined with the grep of
+     `set_bit(.*s_block_bitmap)` showing only ONE site in the
+     entire codebase (the `free_block` body itself), this is
+     **empirical proof that the bitmap bit was not flipped to 1
+     by any `free_block` call** in the boot window. Some other
+     code path is writing to either `s_block_bitmap` (RAM) or
+     `bh->b_data` (the bitmap buffer head) without going through
+     the `alloc.c` accessor functions.
+
+  4. LOCKDEP with PROVE_LOCKING enabled produced ZERO warnings
+     during boot + trigger. This rules out locking inversion,
+     missing-lock-while-held, sleep-in-atomic, or RCU violations
+     as the cause. The race -- if there is one -- is a data race
+     that lockdep cannot detect by construction.
+
+  5. KCSAN (the kernel data-race detector that would close the
+     analytical gap) cannot be enabled on this kernel + arm64
+     target: the merge_config silently drops `CONFIG_KCSAN=y`
+     during `make oldconfig`. Determining whether arm64 kernel
+     7.0.3 supports KCSAN at all (`select HAVE_ARCH_KCSAN` in
+     `arch/arm64/Kconfig`) is the next investigation step.
+
+**Defensive patches landed in this session** (semantically correct
+even though they do not close §3.10 alone):
+
+  - **C1: `mark_buffer_dirty_inode(bh, owner)`** in
+    `alloc.c::beamfs_write_bitmap_block`. Binds the bitmap buffer
+    head to the inode whose `direct[]` change triggered the
+    allocation, so the VFS `__writeback_single_inode` path runs
+    `sync_mapping_buffers` first, establishing bitmap-before-
+    inode ordering at writeback time.
+
+  - **D2: `beamfs_sync_fs` super-op** (super.c). Iterates
+    `sbi->s_bitmap_blkhs[k]` and `sbi->s_sbh` and calls
+    `sync_dirty_buffer` on each. The kernel sync_filesystem
+    sequence places this hook BEFORE `sync_blockdev_nowait`, so
+    the bitmap reaches disk before the inode-table buffer is
+    even submitted. Same ordering hypothesis as C1 but at the
+    sync(2)/fsync/umount level rather than per-allocation.
+
+  - **`lock_buffer(bh)`** in `beamfs_write_bitmap_block` around
+    the memset + reconstruction + RS-encode + mark_buffer_dirty
+    sequence. Closes the torn-write race between the bh
+    reconstruction and a concurrent BDI flusher reading
+    `bh->b_data` for I/O. Required release of `sbi->s_lock`
+    before calling `write_bitmap_block` (lock_buffer can sleep);
+    callers refactored accordingly. The bitmap RAM mutation
+    stays under `s_lock` (the bh reconstruction reads it via
+    atomic `test_bit`, no lock needed).
+
+  - **owner parameter** added to `beamfs_alloc_block` and
+    `beamfs_free_block` signatures, propagated through all
+    callers (`file.c`, `file_inline.c`, `namei.c`, `super.c`).
+    Required by C1; harmless for paths that pass NULL (mount-
+    time RS auto-correction in `beamfs_setup_bitmap`).
+
+These patches do NOT close §3.10 in isolation: the 4/5 drift rate
+persists. They DO close real races identified by static reading
+(torn-write on bh, missing writeback ordering hint). Keep them.
+
+**Next session entry points (revised).**
+
+  1. Determine whether arm64 kernel 7.0.3 has `HAVE_ARCH_KCSAN`.
+     If yes, fix the merge_config drop and rerun with KCSAN
+     active. If no, evaluate KCSAN backport vs upgrade to
+     kernel 7.0.4+ where arm64 KCSAN landed.
+
+  2. Inspect `beamfs_inline_writeback_folio` (file_inline.c
+     :1284-1488) for potential off-by-one or wrong-block writes
+     into `bh->b_data` of a buffer head that happens to belong
+     to a bitmap block rather than a data block. The function
+     does `lock_buffer(bh)` correctly, but the `phys` value is
+     produced by `beamfs_inline_lookup_or_alloc_phys` and used
+     immediately for `sb_bread(sb, phys)` -- if `phys` collides
+     with a bitmap block number, the writeback path would
+     legitimately overwrite a bitmap block. Verify the
+     allocator never returns block numbers in the bitmap
+     range (`[bitmap_blk, data_start)`).
+
+  3. Read kernel mainline for any guidance on multi-block FS
+     bitmap management with per-block RS FEC. The reconstruct-
+     from-RAM approach is unusual; ext4 patches the byte
+     in-place under `lock_buffer` rather than full memset +
+     reconstruction.
+
+  4. If KCSAN cannot be enabled, fall back to bpftrace kfunc
+     hooks (with the kernel's DWARF5 info now exposed) to
+     instrument `bh->b_data` reads and writes globally,
+     correlating any unexpected write to bitmap-bh regions
+     with the call stack of the offending kernel thread.
+
+The Yocto debug build infrastructure (PROVE_LOCKING + LOCKDEP +
+DEBUG_INFO_DWARF5 via `beamfs-debug.cfg` fragment, merged through
+`linux-mainline_%.bbappend`) is preserved for future sessions.
+
 ---
 
 ### 3.11 RS(255,239) silent miscorrection on data blocks under high-density EM injection (TRIAGED 2026-05-15)

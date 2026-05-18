@@ -345,7 +345,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			*phys_out = phys;
 			return 0;
 		}
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			pr_err_ratelimited("beamfs/inline: no free blocks (direct)\n");
 			return -ENOSPC;
@@ -353,7 +353,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		/* Zero-init the freshly allocated data block on disk. */
 		dbh = sb_getblk(sb, new_block);
 		if (!dbh) {
-			beamfs_free_block(sb, new_block);
+			beamfs_free_block(sb, new_block, inode);
 			return -EIO;
 		}
 		lock_buffer(dbh);
@@ -377,14 +377,14 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 
 		if (!indirect_blk) {
 			/* Allocate indirect block first, zero-init. */
-			indirect_blk = beamfs_alloc_block(sb);
+			indirect_blk = beamfs_alloc_block(sb, inode);
 			if (!indirect_blk) {
 				pr_err_ratelimited("beamfs/inline: no free blocks (indirect)\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, indirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, indirect_blk);
+				beamfs_free_block(sb, indirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -415,7 +415,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 
 		/* Allocate data block and zero-init. */
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(ibh);
 			pr_err_ratelimited("beamfs/inline: no free blocks (data)\n");
@@ -423,7 +423,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		dbh = sb_getblk(sb, new_block);
 		if (!dbh) {
-			beamfs_free_block(sb, new_block);
+			beamfs_free_block(sb, new_block, inode);
 			brelse(ibh);
 			return -EIO;
 		}
@@ -462,14 +462,14 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		/* --- Stage 1: dindirect block --- */
 		dindirect_blk = le64_to_cpu(fi->i_dindirect);
 		if (!dindirect_blk) {
-			dindirect_blk = beamfs_alloc_block(sb);
+			dindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!dindirect_blk) {
 				pr_err_ratelimited("beamfs/inline: no free blocks (dindirect)\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, dindirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, dindirect_blk);
+				beamfs_free_block(sb, dindirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -492,7 +492,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
 		if (!l1_blk) {
-			l1_blk = beamfs_alloc_block(sb);
+			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
 				pr_err_ratelimited("beamfs/inline: no free blocks (L1 indirect)\n");
@@ -500,7 +500,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			}
 			l1bh = sb_getblk(sb, l1_blk);
 			if (!l1bh) {
-				beamfs_free_block(sb, l1_blk);
+				beamfs_free_block(sb, l1_blk, inode);
 				brelse(ibh);
 				return -EIO;
 			}
@@ -530,7 +530,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			return 0;
 		}
 
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l1bh);
 			pr_err_ratelimited("beamfs/inline: no free blocks (dindirect data)\n");
@@ -538,7 +538,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		dbh = sb_getblk(sb, new_block);
 		if (!dbh) {
-			beamfs_free_block(sb, new_block);
+			beamfs_free_block(sb, new_block, inode);
 			brelse(l1bh);
 			return -EIO;
 		}
@@ -576,14 +576,14 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		/* --- Stage 1: tindirect block --- */
 		tindirect_blk = le64_to_cpu(fi->i_tindirect);
 		if (!tindirect_blk) {
-			tindirect_blk = beamfs_alloc_block(sb);
+			tindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!tindirect_blk) {
 				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect)\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, tindirect_blk);
 			if (!ibh) {
-				beamfs_free_block(sb, tindirect_blk);
+				beamfs_free_block(sb, tindirect_blk, inode);
 				return -EIO;
 			}
 			lock_buffer(ibh);
@@ -606,7 +606,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
 		if (!l1_blk) {
-			l1_blk = beamfs_alloc_block(sb);
+			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
 				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L1)\n");
@@ -614,7 +614,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			}
 			l1bh = sb_getblk(sb, l1_blk);
 			if (!l1bh) {
-				beamfs_free_block(sb, l1_blk);
+				beamfs_free_block(sb, l1_blk, inode);
 				brelse(ibh);
 				return -EIO;
 			}
@@ -639,7 +639,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs = (__le64 *)l1bh->b_data;
 		l2_blk = le64_to_cpu(ptrs[l2_slot]);
 		if (!l2_blk) {
-			l2_blk = beamfs_alloc_block(sb);
+			l2_blk = beamfs_alloc_block(sb, inode);
 			if (!l2_blk) {
 				brelse(l1bh);
 				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L2)\n");
@@ -647,7 +647,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			}
 			l2bh = sb_getblk(sb, l2_blk);
 			if (!l2bh) {
-				beamfs_free_block(sb, l2_blk);
+				beamfs_free_block(sb, l2_blk, inode);
 				brelse(l1bh);
 				return -EIO;
 			}
@@ -677,7 +677,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			return 0;
 		}
 
-		new_block = beamfs_alloc_block(sb);
+		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l2bh);
 			pr_err_ratelimited("beamfs/inline: no free blocks (tindirect data)\n");
@@ -685,7 +685,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		dbh = sb_getblk(sb, new_block);
 		if (!dbh) {
-			beamfs_free_block(sb, new_block);
+			beamfs_free_block(sb, new_block, inode);
 			brelse(l2bh);
 			return -EIO;
 		}
@@ -1606,7 +1606,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		u64 blk = le64_to_cpu(fi->i_direct[i]);
 
 		if (blk) {
-			beamfs_free_block(sb, blk);
+			beamfs_free_block(sb, blk, inode);
 			fi->i_direct[i] = 0;
 		}
 	}
@@ -1637,7 +1637,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 			u64 blk = le64_to_cpu(ptrs[j]);
 
 			if (blk) {
-				beamfs_free_block(sb, blk);
+				beamfs_free_block(sb, blk, inode);
 				ptrs[j] = 0;
 			}
 		}
@@ -1649,7 +1649,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		 * block itself.
 		 */
 		if (slot_first == 0) {
-			beamfs_free_block(sb, indirect_blk);
+			beamfs_free_block(sb, indirect_blk, inode);
 			fi->i_indirect = 0;
 		}
 	}

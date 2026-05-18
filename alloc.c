@@ -261,7 +261,8 @@ int beamfs_setup_bitmap(struct super_block *sb)
  * just modified in sbi->s_block_bitmap by the caller.
  */
 int beamfs_write_bitmap_block(struct super_block *sb,
-			      unsigned long bit_global)
+			      unsigned long bit_global,
+			      struct inode *owner)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct buffer_head *bh;
@@ -287,6 +288,24 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	bh = sbi->s_bitmap_blkhs[k];
 	if (!bh)
 		return -EINVAL;
+
+	/*
+	 * Acquire bh buffer lock BEFORE touching bh->b_data.
+	 * Without this, memset() + reconstruction race against
+	 * concurrent BDI writeback that reads bh->b_data while
+	 * I/O is in flight, producing torn writes on disk
+	 * (sec. 3.10 bitmap drift, RCA 2026-05-16: under writeback
+	 * cache=writethrough qemu, 100 file create + 50 unlink burst
+	 * triggered a 4 KiB block being persisted with bit clear
+	 * even though the in-memory bitmap had it set, because the
+	 * BDI flusher started DMA on the bh between memset() and
+	 * the reconstruction loop).
+	 *
+	 * lock_buffer() can sleep; this function MUST therefore be
+	 * called OUTSIDE sbi->s_lock (spinlock). Callers refactored
+	 * to release s_lock before invoking us.
+	 */
+	lock_buffer(bh);
 
 	bdata = (u8 *)bh->b_data;
 	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
@@ -319,6 +338,23 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 		BEAMFS_BITMAP_SUBBLOCKS);
 
 	mark_buffer_dirty(bh);
+	/* Bind to owner inode so VFS writeback flushes this bitmap
+	 * block BEFORE the owner inode is marked clean. The VFS
+	 * runs sync_mapping_buffers in __writeback_single_inode
+	 * before write_inode, which establishes the bitmap-before-
+	 * inode ordering required to prevent the sec. 3.10 boot-time
+	 * double_free symptom: without this, boot N could persist
+	 * an inode pointer without persisting the matching bitmap
+	 * clear, leaving boot N+1 to mount a bitmap declaring the
+	 * block free while an inode still referenced it. owner is
+	 * NULL on the mount path (RS auto-correction in
+	 * beamfs_setup_bitmap), where the caller already drives a
+	 * synchronous sync_dirty_buffer.
+	 */
+	if (owner)
+		mark_buffer_dirty_inode(bh, owner);
+
+	unlock_buffer(bh);
 	return 0;
 }
 
@@ -362,7 +398,7 @@ void beamfs_destroy_bitmap(struct super_block *sb)
  * or 0 on failure (block 0 is the superblock, never a valid data block).
  * No I/O performed; bitmap is in memory.
  */
-u64 beamfs_alloc_block(struct super_block *sb)
+u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
@@ -391,9 +427,15 @@ u64 beamfs_alloc_block(struct super_block *sb)
 	sbi->s_free_blocks--;
 	sbi->s_beamfs_sb->s_free_blocks = cpu_to_le64(sbi->s_free_blocks);
 	beamfs_dirty_super(sbi);
-	beamfs_write_bitmap_block(sb, bit);
 
 	spin_unlock(&sbi->s_lock);
+
+	/* Reconstruct on-disk bitmap block from current s_block_bitmap
+	 * RAM state. Done OUTSIDE s_lock because write_bitmap_block now
+	 * uses lock_buffer (sleepable). Reading s_block_bitmap via
+	 * test_bit is atomic, no lock needed for the reconstruction.
+	 */
+	beamfs_write_bitmap_block(sb, bit, owner);
 
 	return (u64)(sbi->s_data_start + bit);
 }
@@ -401,7 +443,7 @@ u64 beamfs_alloc_block(struct super_block *sb)
 /*
  * beamfs_free_block - return a data block to the free pool
  */
-void beamfs_free_block(struct super_block *sb, u64 block)
+void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
@@ -435,9 +477,11 @@ void beamfs_free_block(struct super_block *sb, u64 block)
 	sbi->s_free_blocks++;
 	sbi->s_beamfs_sb->s_free_blocks = cpu_to_le64(sbi->s_free_blocks);
 	beamfs_dirty_super(sbi);
-	beamfs_write_bitmap_block(sb, bit);
 
 	spin_unlock(&sbi->s_lock);
+
+	/* See alloc_block: reconstruct on-disk bitmap outside lock. */
+	beamfs_write_bitmap_block(sb, bit, owner);
 }
 
 /* ------------------------------------------------------------------ */

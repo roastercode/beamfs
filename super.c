@@ -11,6 +11,7 @@
 #include <linux/fs_context.h>
 #include <linux/slab.h>
 #include <linux/buffer_head.h>
+#include <linux/ktime.h>
 #include <linux/statfs.h>
 #include "beamfs.h"
 
@@ -155,7 +156,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 		u64 blk = le64_to_cpu(fi->i_direct[i]);
 
 		if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
-			beamfs_free_block(sb, blk);
+			beamfs_free_block(sb, blk, inode);
 			if (seen)
 				seen[n_seen++] = blk;
 		}
@@ -175,7 +176,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 				u64 blk = le64_to_cpu(ptrs[j]);
 
 				if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
-					beamfs_free_block(sb, blk);
+					beamfs_free_block(sb, blk, inode);
 					if (seen)
 						seen[n_seen++] = blk;
 				}
@@ -183,7 +184,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 			brelse(ibh);
 		}
 		if (!seen || !seen_block(seen, n_seen, indirect_blk))
-			beamfs_free_block(sb, indirect_blk);
+			beamfs_free_block(sb, indirect_blk, inode);
 		fi->i_indirect = 0;
 	}
 
@@ -208,12 +209,106 @@ static void beamfs_evict_inode(struct inode *inode)
 	clear_inode(inode);
 }
 
+/*
+ * beamfs_sync_fs - establish bitmap-before-inode ordering at sync time.
+ *
+ * Race fixed (sec. 3.10): without this hook, sync_filesystem() submits
+ * the inode-table buffer (containing fresh inode->i_direct[] pointers)
+ * through sync_blockdev_nowait() while the bitmap buffer (carrying the
+ * matching bit clear) is left to the bdi writeback queue without
+ * deterministic ordering. On reboot()/kernel_restart shortly after,
+ * the inode may reach disk while the bitmap clear does not, persisting
+ * a state where boot N+1 mounts a bitmap that declares the block free
+ * while an inode still references it. First unlink at t~10s on boot N+1
+ * trips beamfs_free_block canary "double free of block N".
+ *
+ * Kernel sync_filesystem() sequence (fs/sync.c):
+ *   writeback_inodes_sb(sb)         // start I/O on dirty inodes, no wait
+ *   sb->s_op->sync_fs(sb, 0)        // <-- our hook, wait=0
+ *   sync_blockdev_nowait(s_bdev)    // submit other dirty bhs, no wait
+ *   sync_inodes_sb(sb)              // wait inodes flushed
+ *   sb->s_op->sync_fs(sb, 1)        // <-- our hook, wait=1
+ *   sync_blockdev(s_bdev)           // wait all bhs
+ *
+ * The wait=0 call lands BEFORE sync_blockdev_nowait, so calling
+ * sync_dirty_buffer (= submit + wait) on every bitmap buffer here
+ * forces bitmap to disk BEFORE the inode-table buffer is even
+ * submitted. This is the exact ordering required.
+ *
+ * Instrumentation: pr_info under pr_fmt "beamfs/sync310:" logs the
+ * count of dirty bitmap buffers found and the time spent. ftrace
+ * trace_printk emits the same data into the ring buffer for fine
+ * post-mortem correlation against beamfs_alloc_block/evict events.
+ */
+static int beamfs_sync_fs(struct super_block *sb, int wait)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	u32 k;
+	unsigned int n_bitmap_dirty = 0;
+	unsigned int n_bitmap_synced = 0;
+	unsigned int n_sb_synced = 0;
+	int last_err = 0;
+	u64 t0_ns, t1_ns;
+
+	if (!sbi)
+		return 0;
+
+	t0_ns = ktime_get_ns();
+	trace_printk("beamfs/sync310 enter wait=%d\n", wait);
+
+	/* Flush all dirty bitmap buffers synchronously. */
+	if (sbi->s_bitmap_blkhs) {
+		for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+			struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
+			int rc;
+
+			if (!bh)
+				continue;
+			if (!buffer_dirty(bh))
+				continue;
+			n_bitmap_dirty++;
+			rc = sync_dirty_buffer(bh);
+			trace_printk("beamfs/sync310 bitmap k=%u rc=%d\n",
+				     k, rc);
+			if (rc) {
+				if (!last_err)
+					last_err = rc;
+			} else {
+				n_bitmap_synced++;
+			}
+		}
+	}
+
+	/* Flush superblock buffer (free_blocks counter + RS journal). */
+	if (sbi->s_sbh && buffer_dirty(sbi->s_sbh)) {
+		int rc = sync_dirty_buffer(sbi->s_sbh);
+
+		trace_printk("beamfs/sync310 sbh rc=%d\n", rc);
+		if (rc) {
+			if (!last_err)
+				last_err = rc;
+		} else {
+			n_sb_synced = 1;
+		}
+	}
+
+	t1_ns = ktime_get_ns();
+	pr_info("beamfs/sync310: wait=%d bitmap_dirty=%u bitmap_synced=%u sb_synced=%u err=%d dt_ns=%llu\n",
+		wait, n_bitmap_dirty, n_bitmap_synced, n_sb_synced,
+		last_err, (unsigned long long)(t1_ns - t0_ns));
+	trace_printk("beamfs/sync310 leave wait=%d dt_ns=%llu\n",
+		     wait, (unsigned long long)(t1_ns - t0_ns));
+
+	return last_err;
+}
+
 static const struct super_operations beamfs_super_ops = {
 	.alloc_inode    = beamfs_alloc_inode,
 	.free_inode     = beamfs_free_inode,
 	.evict_inode    = beamfs_evict_inode,
 	.put_super      = beamfs_put_super,
 	.write_inode    = beamfs_write_inode,
+	.sync_fs        = beamfs_sync_fs,
 	.statfs         = beamfs_statfs,
 };
 
