@@ -205,6 +205,7 @@ static void beamfs_evict_inode(struct inode *inode)
 		inode->i_mode = 0;
 		beamfs_write_inode_raw(inode);
 	}
+	invalidate_inode_buffers(inode);
 	clear_inode(inode);
 	/*
 	 * Ordering constraint: beamfs_free_inode_num() must run AFTER
