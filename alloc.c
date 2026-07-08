@@ -351,7 +351,7 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * beamfs_setup_bitmap), where the caller already drives a
 	 * synchronous sync_dirty_buffer.
 	 */
-	if (owner)
+	if (owner && !(inode_state_read_once(owner) & I_FREEING))
 		mark_buffer_dirty_inode(bh, owner);
 
 	unlock_buffer(bh);
