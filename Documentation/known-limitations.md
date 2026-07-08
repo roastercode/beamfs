@@ -616,17 +616,24 @@ evicts the old inode via `beamfs_evict_inode` ->
 `mark_buffer_dirty_inode(bh, inode)` -- polluting the private list
 of the inode currently being torn down.
 
-**Fix (commit f146cbd in beamfs, 6f89af2 lockstep in yocto-beamfs):**
-1. Pass `NULL` as `owner` in all 3 `beamfs_free_block()` calls within
-   `beamfs_free_data_blocks()` (eviction path). NULL is the documented
-   safe path already used by mount-time RS auto-correction.
-2. Defer `beamfs_free_inode_num()` to after `clear_inode()` to close
-   a secondary window where a concurrent `beamfs_alloc_inode_num()`
-   could hand out the same ino before VFS teardown completes.
+**Fix (three layers, applied incrementally):**
+1. *Definitive fix* (commit 11c844f): call `invalidate_inode_buffers(inode)`
+   immediately before `clear_inode(inode)` in `beamfs_evict_inode()`.
+   This is the standard VFS pattern used by ext2, minixfs, and all
+   buffer_head-based filesystems to detach orphan bh entries from
+   `inode->i_data.i_private_list` before the VFS asserts it empty.
+2. *Defense-in-depth* (commit f964b27): guard `mark_buffer_dirty_inode()`
+   in `beamfs_write_bitmap_block()` with `!(inode_state_read_once(owner)
+   & I_FREEING)` to prevent attachment to dying inodes at the source.
+   Centralized: covers all 25+ call sites without per-site patching.
+3. *Eviction-path hardening* (commit f146cbd): pass `NULL` as owner in
+   all 3 `beamfs_free_block()` calls within `beamfs_free_data_blocks()`
+   and defer `beamfs_free_inode_num()` to after `clear_inode()`.
 
 **Validation:** 10/10 `depmod -a` on rootfs=beamfs with tainted=0;
-full `beamfs-bench full` R19 pipeline exit 0 on 4-node cluster
-(manifest GPG-signed).
+full `beamfs-bench full` R19 pipeline exit 0 on 4-node cluster under
+RadFI injection (5 FS x 3 probabilities, tainted=4096 OOT-only on
+all 4 nodes, zero DIE). Manifest GPG-signed.
 
 ---
 
