@@ -235,7 +235,7 @@ in the signature and callers (`writeback_folio`, `zero_tail_block`,
 
 ---
 
-### 3.10 Single-occurrence `double free of block N` warn at boot on rootfs=.beamfs (TRIAGED 2026-05-15)
+### 3.10 Single-occurrence `double free of block N` warn at boot on rootfs=.beamfs (CLOSED 2026-07-08)
 
 **Symptom.** Under certain rootfs state conditions (see below), booting
 a VM with `root=/dev/vda rw rootfstype=beamfs` against the Yocto-produced
@@ -593,6 +593,40 @@ persists. They DO close real races identified by static reading
 The Yocto debug build infrastructure (PROVE_LOCKING + LOCKDEP +
 DEBUG_INFO_DWARF5 via `beamfs-debug.cfg` fragment, merged through
 `linux-mainline_%.bbappend`) is preserved for future sessions.
+
+**CLOSED 2026-07-08 -- root cause identified and fixed.**
+
+The true root cause was NOT the bitmap-before-inode ordering race
+hypothesized above (though those mitigations remain valid hardening).
+The actual bug: `beamfs_free_block()` in `alloc.c` called
+`mark_buffer_dirty_inode(bh, owner)` with `owner` set to the inode
+being evicted. This appended bitmap buffer_heads to the dying
+inode's `i_data.i_private_list` AFTER `truncate_inode_pages_final()`
+had cleared it. When VFS then called `clear_inode()`, the assertion
+`BUG_ON(!list_empty(&inode->i_data.i_private_list))` at
+`fs/inode.c:801` fired, producing a kernel BUG/Oops (not just the
+WARN-level canary documented above -- the earlier sessions observed
+the canary because the bitmap writeback ordering masked the
+i_private_list pollution in some timing windows).
+
+**Trigger path (deterministic reproducer):** `depmod -a` on
+rootfs=beamfs performs `renameat2()` replacing `modules.dep`, which
+evicts the old inode via `beamfs_evict_inode` ->
+`beamfs_free_data_blocks` -> `beamfs_free_block(sb, blk, inode)` ->
+`mark_buffer_dirty_inode(bh, inode)` -- polluting the private list
+of the inode currently being torn down.
+
+**Fix (commit f146cbd in beamfs, 6f89af2 lockstep in yocto-beamfs):**
+1. Pass `NULL` as `owner` in all 3 `beamfs_free_block()` calls within
+   `beamfs_free_data_blocks()` (eviction path). NULL is the documented
+   safe path already used by mount-time RS auto-correction.
+2. Defer `beamfs_free_inode_num()` to after `clear_inode()` to close
+   a secondary window where a concurrent `beamfs_alloc_inode_num()`
+   could hand out the same ino before VFS teardown completes.
+
+**Validation:** 10/10 `depmod -a` on rootfs=beamfs with tainted=0;
+full `beamfs-bench full` R19 pipeline exit 0 on 4-node cluster
+(manifest GPG-signed).
 
 ---
 
