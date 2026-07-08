@@ -156,7 +156,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 		u64 blk = le64_to_cpu(fi->i_direct[i]);
 
 		if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
-			beamfs_free_block(sb, blk, inode);
+			beamfs_free_block(sb, blk, NULL);
 			if (seen)
 				seen[n_seen++] = blk;
 		}
@@ -176,7 +176,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 				u64 blk = le64_to_cpu(ptrs[j]);
 
 				if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
-					beamfs_free_block(sb, blk, inode);
+					beamfs_free_block(sb, blk, NULL);
 					if (seen)
 						seen[n_seen++] = blk;
 				}
@@ -184,7 +184,7 @@ static void beamfs_free_data_blocks(struct inode *inode)
 			brelse(ibh);
 		}
 		if (!seen || !seen_block(seen, n_seen, indirect_blk))
-			beamfs_free_block(sb, indirect_blk, inode);
+			beamfs_free_block(sb, indirect_blk, NULL);
 		fi->i_indirect = 0;
 	}
 
@@ -204,9 +204,31 @@ static void beamfs_evict_inode(struct inode *inode)
 		beamfs_free_data_blocks(inode);
 		inode->i_mode = 0;
 		beamfs_write_inode_raw(inode);
-		beamfs_free_inode_num(inode->i_sb, (u64)inode->i_ino);
 	}
 	clear_inode(inode);
+	/*
+	 * Ordering constraint: beamfs_free_inode_num() must run AFTER
+	 * clear_inode(). clear_inode() asserts that i_data.i_private_list
+	 * is empty (BUG_ON at fs/inode.c:801). beamfs_free_data_blocks()
+	 * above calls beamfs_free_block(sb, blk, NULL) -- the NULL owner
+	 * prevents mark_buffer_dirty_inode() from re-attaching bitmap
+	 * buffer_heads to the dying inode's i_private_list after
+	 * truncate_inode_pages_final() has cleared it. Additionally,
+	 * deferring the bitmap free of the inode number to after
+	 * clear_inode() avoids a window where a concurrent
+	 * beamfs_alloc_inode_num() could hand out the same ino before
+	 * the VFS has finished tearing down the old inode.
+	 *
+	 * Root cause: beamfs_free_block() previously passed the evicted
+	 * inode as owner to mark_buffer_dirty_inode(), which appended
+	 * bitmap bh's to inode->i_data.i_private_list AFTER
+	 * truncate_inode_pages_final() had emptied it, triggering
+	 * clear_inode()'s BUG_ON(!list_empty(&i_data.i_private_list)).
+	 * Confirmed via ftrace/kprobe on beamfs_evict_inode + clear_inode
+	 * during `depmod -a` on the rootfs (renameat2 path, §3.10).
+	 */
+	if (!inode->i_nlink)
+		beamfs_free_inode_num(inode->i_sb, (u64)inode->i_ino);
 }
 
 /*
