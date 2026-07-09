@@ -73,6 +73,16 @@
 #define BEAMFS_DATA_INLINE_PAD        (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL)         /* 16  */
 
 /*
+ * DATA_CSUM descriptor layout inside the 16-byte block tail pad
+ * [BEAMFS_DATA_INLINE_TOTAL .. BEAMFS_BLOCK_SIZE). Not part of any RS
+ * codeword. See format-v6.md section 3.1. Only 8 bytes are used; the
+ * remaining 8 stay zero-filled and reserved.
+ */
+#define BEAMFS_DATA_CSUM_TYPE_OFF     (BEAMFS_DATA_INLINE_TOTAL + 0)  /* 4080 u8      */
+#define BEAMFS_DATA_CSUM_VALUE_OFF    (BEAMFS_DATA_INLINE_TOTAL + 4)  /* 4084 __le32  */
+#define BEAMFS_DATA_CSUM_DESC_BYTES   8                               /* type+rsvd+csum */
+
+/*
  * Conformance fixture (canary block) -- v4 INLINE only.
  *
  * Under BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE, mkfs.beamfs writes a
@@ -396,6 +406,15 @@ struct beamfs_rs_event {
 #define BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE  2
 #define BEAMFS_DATA_PROTECTION_UNIVERSAL_SHADOW  3
 #define BEAMFS_DATA_PROTECTION_UNIVERSAL_EXTENT  4
+
+/*
+ * Per-data-block integrity field type (format v6, DATA_CSUM feature).
+ * Stored in the block tail pad descriptor; see format-v6.md section 3.
+ * CRC32 reuses beamfs_crc32 (crc32_le), the primitive backing i_crc32
+ * and s_crc32. Values 2..255 reserved for keyed integrity (Family B).
+ */
+#define BEAMFS_CSUM_NONE   0   /* no integrity field present            */
+#define BEAMFS_CSUM_CRC32  1   /* beamfs_crc32 over decoded user payload */
 #define BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL   5
 #define BEAMFS_DATA_PROTECTION_MAX               BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL
 
@@ -425,6 +444,12 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_RO_COMPAT_HUGE_FILE        (1ULL << 1)
 #define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      (1ULL << 2)
 #define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        (1ULL << 3)
+#define BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM        (1ULL << 4)
+					  /* per-data-block integrity field in
+					   * the block tail pad; see format-v6.md.
+					   * NOT in _SUPP until read/write path
+					   * lands (declaration only).
+					   */
 
 /* INCOMPAT features (refuse mount if unknown) */
 #define BEAMFS_FEATURE_INCOMPAT_EXTENTS           (1ULL << 0)
@@ -447,7 +472,7 @@ struct beamfs_rs_event {
  * unlocks the read-side decoder under any s_data_protection_scheme.
  */
 #define BEAMFS_FEAT_COMPAT_SUPP    0ULL
-#define BEAMFS_FEAT_RO_COMPAT_SUPP 0ULL
+#define BEAMFS_FEAT_RO_COMPAT_SUPP BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM
 #define BEAMFS_FEAT_INCOMPAT_SUPP  BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS
 
 /*
@@ -573,6 +598,7 @@ struct beamfs_sb_info {
 	unsigned long             s_free_inodes;
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
+	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
 };
 
 /*

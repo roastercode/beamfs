@@ -25,6 +25,8 @@
 #include <linux/slab.h>
 #include <linux/uio.h>
 #include <linux/writeback.h>
+#include <linux/crc32.h>
+#include <linux/unaligned.h>
 #include "beamfs.h"
 
 /* ------------------------------------------------------------------------- */
@@ -710,6 +712,50 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 }
 
 /* ------------------------------------------------------------------------- */
+/*
+ * beamfs_inline_stamp_tail_pad -- write the DATA_CSUM descriptor into the
+ * 16-byte block tail pad after RS encode. The pad is always fully zeroed
+ * first, which covers the reserved bytes and the csum-disabled (NONE)
+ * case. When the volume has DATA_CSUM active, stamp csum_type = CRC32 and
+ * the beamfs_crc32 (crc32_le) of the 3824-byte decoded payload, the same
+ * bytes just fed to the RS encoder. See format-v6.md sections 3 and 4.2.
+ * The descriptor lives outside every RS codeword by design (3.3): a flip
+ * in it yields at worst a false-positive fail-closed on read, never a
+ * silent accept of wrong data.
+ */
+static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
+					 u8 *block, const u8 *payload)
+{
+	memset(block + BEAMFS_DATA_INLINE_TOTAL, 0, BEAMFS_DATA_INLINE_PAD);
+	if (sbi->s_data_csum) {
+		u32 crc = beamfs_crc32(payload, BEAMFS_DATA_INLINE_BYTES);
+
+		block[BEAMFS_DATA_CSUM_TYPE_OFF] = BEAMFS_CSUM_CRC32;
+		put_unaligned_le32(crc, block + BEAMFS_DATA_CSUM_VALUE_OFF);
+	}
+}
+
+/*
+ * beamfs_inline_payload_crc -- recompute the DATA_CSUM over the decoded
+ * payload held in @codeword (post-RS-decode, interleaved 255-byte stride,
+ * 16 subblocks of 239 data bytes). Chains crc32_le over the 16 data
+ * segments; by associativity of crc32_le over concatenation this equals
+ * beamfs_crc32() over the contiguous de-interleaved 3824-byte payload,
+ * the value the write path stored (see beamfs_inline_stamp_tail_pad and
+ * beamfs_crc32_sb for the same non-contiguous chaining idiom). No alloc.
+ */
+static u32 beamfs_inline_payload_crc(const u8 *codeword)
+{
+	u32 c = 0xFFFFFFFF;
+	unsigned int i;
+
+	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
+		c = crc32_le(c,
+			     codeword + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
+			     BEAMFS_SUBBLOCK_DATA);
+	return c ^ 0xFFFFFFFF;
+}
+
 /* beamfs_inline_decode_block_into_buf -- read disk block, RS-decode all 16  */
 /*                                        subblocks, copy a user-byte slice  */
 /*                                        into the supplied buffer.          */
@@ -774,6 +820,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	bool                uncorrectable = false;
 	unsigned int        i;
 	int                 ret = 0;
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
 	/* Defensive contract checks (cheap; helpful in audit and fuzzing). */
 	if (WARN_ON_ONCE(phys == 0))
@@ -869,6 +916,38 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	if (uncorrectable) {
 		ret = -EIO;
 		goto out_brelse;
+	}
+
+	/*
+	 * DATA_CSUM verification (format-v6). decode_rs8 can return success
+	 * while having converged to a wrong valid codeword (silent
+	 * miscorrection, known-limitations 3.11). Recompute the payload
+	 * checksum and reject on mismatch. The descriptor lives in the tail
+	 * pad, which decode does not touch, so it is read from tmp. A NONE
+	 * type accepts unconditionally (opt-in / lazy upgrade). On mismatch,
+	 * journal an UNCORRECTABLE event and fail closed before any slice
+	 * copy, as the per-subblock uncorrectable path does. Observability
+	 * mechanism of Theorem v2.2a extended to data regions (v2.2b).
+	 */
+	if (sbi->s_data_csum &&
+	    tmp[BEAMFS_DATA_CSUM_TYPE_OFF] == BEAMFS_CSUM_CRC32) {
+		u32 want = get_unaligned_le32(tmp + BEAMFS_DATA_CSUM_VALUE_OFF);
+		u32 got  = beamfs_inline_payload_crc(tmp);
+
+		if (want != got) {
+			beamfs_log_rs_event_flagged(sb,
+				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS,
+				NULL, 0,
+				BEAMFS_SUBBLOCK_DATA,
+				rmw_path ? BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0);
+			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_csum mismatch want=0x%08x got=0x%08x%s\n",
+					   inode->i_ino,
+					   (unsigned long long)iblock_logical_for_log,
+					   want, got,
+					   rmw_path ? " (rmw)" : "");
+			ret = -EIO;
+			goto out_brelse;
+		}
 	}
 
 	/*
@@ -1424,9 +1503,9 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 			goto fail_kunmap;
 		}
 
-		/* Zero the 16-byte pad zone (4080..4096). */
-		memset((u8 *)bh->b_data + BEAMFS_DATA_INLINE_TOTAL, 0,
-		       BEAMFS_DATA_INLINE_PAD);
+		/* Stamp DATA_CSUM descriptor and zero pad (format-v6). */
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
+					     (u8 *)bh->b_data, scratch);
 
 		mark_buffer_dirty(bh);
 
@@ -1747,8 +1826,8 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		return ret;
 	}
 
-	memset((u8 *)bh->b_data + BEAMFS_DATA_INLINE_TOTAL, 0,
-	       BEAMFS_DATA_INLINE_PAD);
+	beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
+				     (u8 *)bh->b_data, scratch);
 
 	mark_buffer_dirty(bh);
 	unlock_buffer(bh);

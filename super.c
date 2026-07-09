@@ -876,6 +876,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	sbi->s_scheme = le32_to_cpu(fsb->s_data_protection_scheme);
 	sbi->s_feat_incompat = le64_to_cpu(fsb->s_feat_incompat);
+	sbi->s_data_csum = !!(le64_to_cpu(fsb->s_feat_ro_compat) &
+			      BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM);
 
 	pr_info("beamfs: mounted v%u (blocks=%llu free=%lu inodes=%llu scheme=%u feat=0x%016llx/0x%016llx/0x%016llx)\n",
 		le32_to_cpu(fsb->s_version),
