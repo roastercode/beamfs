@@ -15,15 +15,15 @@ eviction-path `beamfs_free_block()` calls (f146cbd). Validated R19
 under RadFI injection, tainted=4096 (OOT-only) on all 4 nodes.
 
 ### System update (Gentoo spartian-1)
-- World update 619 packages, kernel hôte 6.18.18 → 7.1.3 (Alder Lake)
-- CFLAGS `-march=native` → `-march=alderlake` via resolve-march-native
+- World update 619 packages, kernel hôte 6.18.18 -> 7.1.3 (Alder Lake)
+- CFLAGS `-march=native` -> `-march=alderlake` via resolve-march-native
 - Python 3.14 as system default (python3.13 for bitbake, pending upstream fix)
 - beamfs-bench ebuild sudoers doublon fix (9999 + 24 versioned ebuilds)
 
 ### Yocto HPC stack bumps
-- libevent 2.1.12 → 2.1.13 (security: integer overflow, OOB read, HTTP smuggling)
-- pmix 5.0.3 → 5.0.10 (bugfix series, slurm hang fix)
-- linux-mainline 7.0.3 → 7.0.9 (6 stable point releases)
+- libevent 2.1.12 -> 2.1.13 (security: integer overflow, OOB read, HTTP smuggling)
+- pmix 5.0.3 -> 5.0.10 (bugfix series, slurm hang fix)
+- linux-mainline 7.0.3 -> 7.0.9 (6 stable point releases)
 
 ---
 
