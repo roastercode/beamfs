@@ -68,10 +68,10 @@ and will fail on missing APIs (`inode_state_read_once`, mainline 7.0+).
 
 ## Companion repositories
 
-- [yocto-beamfs](https://github.com/roastercode/yocto-beamfs) — Yocto layer (lockstep mirror, cluster config, HPC stack)
-- [beamfs-bench](https://github.com/roastercode/beamfs-bench) — Rust validation pipeline (R0/R19, multifs bench, RadFI orchestration)
-- [emufi](https://github.com/roastercode/emufi) — EM fault injector (kprobe-based, bio-layer)
-- [beamfs-overlay](https://github.com/roastercode/beamfs-overlay) — Gentoo ebuild overlay
+- [yocto-beamfs](https://github.com/roastercode/yocto-beamfs) - Yocto layer (lockstep mirror, cluster config, HPC stack)
+- [beamfs-bench](https://github.com/roastercode/beamfs-bench) - Rust validation pipeline (R0/R19, multifs bench, RadFI orchestration)
+- [emufi](https://github.com/roastercode/emufi) - EM fault injector (kprobe-based, bio-layer)
+- [beamfs-overlay](https://github.com/roastercode/beamfs-overlay) - Gentoo ebuild overlay
 
 ## Status
 

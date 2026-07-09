@@ -1,4 +1,4 @@
-# beamfs — TODO / RAF
+# beamfs - TODO / RAF
 *Updated: 2026-07-08 (post system update + §3.10 closure session)*
 
 ---
@@ -27,7 +27,7 @@ under RadFI injection, tainted=4096 (OOT-only) on all 4 nodes.
 
 ---
 
-## OPEN — beamfs kernel
+## OPEN - beamfs kernel
 
 ### §3.11 RS(255,239) silent miscorrection on data blocks (TRIAGED)
 Format v6 + per-block CRC32 deferred. Under high-density EM injection
@@ -39,12 +39,12 @@ emufi module present on disk but not loaded/functional on compute01.
 Root cause not isolated.
 
 ### Theorem v2.2b (conjecture)
-Saturation observability on data blocks — split from v2.2a (proven)
+Saturation observability on data blocks - split from v2.2a (proven)
 in commit 66c8eb8. Conditional on format v6 per-block CRC32.
 
 ---
 
-## OPEN — beamfs-bench
+## OPEN - beamfs-bench
 
 ### TUI dashboard (ratatui)
 Real-time multi-panel terminal UI for `beamfs-bench full`:
@@ -65,14 +65,14 @@ re-running the full bench.
 
 ### Fix locate_repo_root() heuristic
 `multifs.rs::walk_up_for_repo()` searches for `Documentation` +
-`bin` + `beamfs-bench` directories walking upward from cwd — only
+`bin` + `beamfs-bench` directories walking upward from cwd - only
 matches when launched from within `yocto-beamfs/`. Should search
 sibling directories or accept an env var `BEAMFS_YOCTO_ROOT`.
 Currently worked around by launching from `~/git/yocto-beamfs/`.
 
 ---
 
-## OPEN — Gentoo system (spartian-1)
+## OPEN - Gentoo system (spartian-1)
 
 ### depclean pending
 51 obsolete packages (old gcc, llvm-21, python-3.13, rust-bin-1.95,
@@ -97,7 +97,7 @@ python3.13 set as eselect default until upstream fix in bitbake.
 
 ### CONFIG_DEBUG_INFO_BTF absent
 bpftrace/bpftool functional but emit BTF warnings at build time.
-Low priority — not blocking any workflow.
+Low priority - not blocking any workflow.
 
 ### Microcode amd-uc.img in grub.cfg
 Cosmetic: grub references AMD microcode but CPU is Intel i7-12700F.
@@ -105,7 +105,7 @@ No functional impact.
 
 ---
 
-## OPEN — Kernel security / bug bounty
+## OPEN - Kernel security / bug bounty
 
 ### RDMA/rtrs-srv integer underflow
 Patch submitted to linux-rdma@vger.kernel.org (June 2026).
