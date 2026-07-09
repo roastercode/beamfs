@@ -73,11 +73,12 @@ field `c` whose recomputation on the decoded payload after RS
 decode is a soundness predicate independent of the Reed-Solomon
 code algebra. The `DATA_CSUM` field specified here instantiates
 that hypothesis for adversary Family A (stochastic miscorrection):
-CRC32c over the decoded payload fails, for a codeword-valid but
+CRC32 over the decoded payload fails, for a codeword-valid but
 originally-unencoded payload, with probability at least
 `1 - 2^-32` per event, independent of the RS algebra.
 
-CRC32c is unkeyed and linear. It therefore instantiates the
+CRC32 (crc32_le, the primitive shared with the inode and
+superblock paths) is unkeyed and linear. It therefore instantiates the
 hypothesis for Family A only. Family B (adversarial saturation, an
 attacker steering the decoder toward a chosen codeword) can, in
 principle, craft a payload whose linear checksum matches the
@@ -184,7 +185,7 @@ is already RS-excluded.
 
 ```c
 #define BEAMFS_CSUM_NONE     0   /* no integrity field present            */
-#define BEAMFS_CSUM_CRC32C   1   /* CRC32c over decoded user payload       */
+#define BEAMFS_CSUM_CRC32    1   /* CRC32 (crc32_le) over decoded payload  */
 /* values 2..255 reserved for keyed / second-preimage-resistant fields
  * (Family B observability); not specified by format v6                    */
 ```
@@ -203,7 +204,7 @@ kernel rejects a decode that was in fact correct, returning
 `-EIO` on good data. That is an availability cost, never a
 correctness cost. The field can never cause a silent accept of
 wrong data, because a wrong payload plus any csum value other than
-the wrong payload's own CRC32c fails the check. The design goal
+the wrong payload's own CRC32 fails the check. The design goal
 (no silent wrong bytes) is preserved even under corruption of the
 integrity field itself.
 
@@ -213,9 +214,10 @@ integrity field itself.
 
 ### 4.1 Coverage
 
-`csum` for `BEAMFS_CSUM_CRC32C` is the CRC32c (Castagnoli
-polynomial, the same variant used by ext4 `metadata_csum` and
-btrfs) computed over the **3824-byte decoded user payload** of the
+`csum` for `BEAMFS_CSUM_CRC32` is the CRC32 computed by
+`beamfs_crc32` (the kernel `crc32_le` IEEE variant, XOR-inverted),
+the exact same primitive already used for `i_crc32` and `s_crc32`.
+It is computed over the **3824-byte decoded user payload** of the
 block, in logical (de-interleaved) order, including any trailing
 zero pad written to fill a partial final block. It is computed
 over the payload as it exists after RS decode on read, and before
@@ -244,10 +246,10 @@ On writeback of a data block under a `DATA_CSUM` volume:
 
 1. Assemble the 3824-byte user payload (zero-fill a partial final
    block to 3824 as in v5).
-2. Compute `crc = crc32c(payload[0..3824))`.
+2. Compute `crc = beamfs_crc32(payload, 3824)`.
 3. RS-encode the payload into the 16 interleaved subblocks
    (unchanged from v5).
-4. Write `csum_type = BEAMFS_CSUM_CRC32C`, `reserved = 0`,
+4. Write `csum_type = BEAMFS_CSUM_CRC32`, `reserved = 0`,
    `csum = crc` into the tail-pad descriptor; zero the remaining
    pad bytes.
 
@@ -262,8 +264,8 @@ On `read_folio` of a data block under a `DATA_CSUM` volume:
    (unchanged from v5).
 2. If `csum_type == BEAMFS_CSUM_NONE`, accept (lazy-upgrade
    tolerance, section 3.2).
-3. If `csum_type == BEAMFS_CSUM_CRC32C`, compute
-   `crc32c(decoded_payload[0..3824))` and compare with the stored
+3. If `csum_type == BEAMFS_CSUM_CRC32`, compute
+   `beamfs_crc32(decoded_payload, 3824)` and compare with the stored
    `csum`. On match, accept. On mismatch, fail closed:
    - return `-EIO` for the folio;
    - emit an RS-journal entry via `beamfs_log_rs_event` with
@@ -291,7 +293,7 @@ lacked.
 `mkfs.beamfs --profile=embedded --data-csum` (flag name subject to
 section 7) sets `BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM` in
 `s_feat_ro_compat` and, for every data block it writes (including
-the canary fixture), computes and stores the CRC32c descriptor per
+the canary fixture), computes and stores the CRC32 descriptor per
 section 4.2. Volumes formatted without the flag are byte-identical
 to v5 and set no new bit.
 
@@ -326,7 +328,7 @@ the same spirit as `data-protection-design.md` section 7:
 > It detects the failure; it does not add correction capacity.
 > Detection covers Family A (stochastic miscorrection) with
 > per-event probability at least `1 - 2^-32`. Family B
-> (adversarial saturation) can defeat the unkeyed CRC32c; keyed
+> (adversarial saturation) can defeat the unkeyed CRC32; keyed
 > integrity for Family B is reserved through the `csum_type` field
 > and is not claimed by this feature. Burst-tolerant recovery for
 > Family B remains the separate, reserved `SHADOW_PARITY` feature.
