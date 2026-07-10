@@ -365,7 +365,7 @@ that legitimately owns it. The bug is whatever subsequently caused a
 **different** inode to also list that block in its pointer tree.
 
 Tooling produced 2026-05-15 (deferred for archival in a future commit):
-`beamfs_dump.py` (reverse map block → inode + path),
+`beamfs_dump.py` (reverse map block -> inode + path),
 `beamfs_audit.py` (full image audit: double allocations, bitmap
 coherence, leaked blocks; reports zero issues on the canonical image),
 `beamfs_audit2.py` (audit with metadata sharing analysis and
@@ -637,7 +637,7 @@ all 4 nodes, zero DIE). Manifest GPG-signed.
 
 ---
 
-### 3.11 RS(255,239) silent miscorrection on data blocks under high-density EM injection (TRIAGED 2026-05-15)
+### 3.11 RS(255,239) silent miscorrection on data blocks under high-density EM injection (RESOLVED 2026-07-09 via DATA_CSUM, format-v6)
 
 **Symptom.** During the 2026-05-15 publication-grade R19 run on
 commit `caf9caf`, the cluster `cluster_attack` phase at
@@ -803,6 +803,40 @@ The empirical record is preserved in
 `Documentation/runs/beamfs-bench-analyse-full-20260515-210627` on
 spartian-1 (forensic tarball
 `/tmp/beamfs-bench-analyse-full-20260515-210627.tar.gz`).
+
+**Resolution (2026-07-09).** Mitigation (M2) was implemented as the
+DATA_CSUM feature (on-disk format-v6): a per-data-block CRC32 stored in
+the 16-byte block tail pad, gated by RO_COMPAT bit 4, recomputed after
+RS decode and compared with the stored value. On mismatch the read
+fails closed (-EIO) and emits an UNCORRECTABLE journal entry. The CRC32
+is a soundness predicate independent of the Reed-Solomon algebra, so a
+codeword-valid but originally-unencoded payload is rejected with
+probability at least 1 - 2^-32 per event. This discharges the
+antecedent of Theorem v2.2b for adversary Family A.
+
+The fix was validated empirically with a deterministic reproduction of
+this failure mode, rather than by waiting for a rare stochastic
+miscorrection. emufi 0.4.0 adds the EMUFI_LOC_CODEWORD_SUBST mode
+(flip_locality=5): it overwrites one RS codeword window with the
+all-zero codeword, valid by linearity. decode_rs8 then succeeds
+(nerr=0) and returns a zero payload differing from the original: the
+deterministic analogue of the silent miscorrection described above.
+
+Result (run `beamfs-bench-analyse-full-20260709-221712`, injector
+emufi, flip_locality=5, prob=1000000, DATA_CSUM active):
+
+- `dmesg`: `beamfs/inline: ... data_csum mismatch want=... got=...`
+- `cluster-records.txt`: `CAT_RC=1`, `DMESG_UNCORRECTABLE>0` on 4 nodes
+- `multifs-synthesis.md`: verdict `RS_FAIL_CLOSED` / `DETECTED_FAIL_CLOSED`
+- manifest `manifest-20260709T202958Z.json.asc` (GPG-signed, overall_rc=0)
+
+Without DATA_CSUM the same substitution reads back silently wrong
+(`SILENT_CORRUPTION`); with it, `RS_FAIL_CLOSED`. The run and manifest
+are archived under `Documentation/runs/` (promoted via `git add -f`).
+DATA_CSUM is opt-in (`mkfs.beamfs --data-csum`); the default path is
+byte-identical to v5. Family B (adversarial saturation) can defeat the
+unkeyed CRC32 and is not claimed here; keyed integrity is reserved via
+the `csum_type` field.
 
 ---
 
