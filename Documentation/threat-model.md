@@ -396,7 +396,7 @@ elevates them.
 
 **Constraint.** The on-disk event journal (named the **Electromagnetic
 Resilience Journal** in v4 of the format; previously "Radiation Event
-Journal" in v1–v3 nomenclature) must record sufficient information
+Journal" in v1-v3 nomenclature) must record sufficient information
 across three regimes:
 
 1. **Multi-symbol corrections** (n_positions ≥ 2): per-entry timestamp

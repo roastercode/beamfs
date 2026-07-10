@@ -400,7 +400,7 @@ one subblock.
 This is a deliberate design choice for burst tolerance per TM §6.2:
 distributing parity across multiple short codewords gives independent
 failure-correctable regions, which trade off against per-codeword
-correction radius. Thirteen subblocks were chosen to absorb the v3 → v4
+correction radius. Thirteen subblocks were chosen to absorb the v3 -> v4
 journal enlargement while keeping parity in the trailing 208-byte zone.
 
 ## 6. Electromagnetic Resilience Journal
@@ -411,7 +411,7 @@ The Electromagnetic Resilience Journal is a fixed-size, on-disk,
 ring-buffer log of Reed-Solomon FEC events that have occurred during
 the lifetime of the volume. The on-disk symbol `s_rs_journal[]` is
 preserved across versions for source compatibility; the journal's role
-broadened from radiation-only event recording (v1–v3 nomenclature) to
+broadened from radiation-only event recording (v1-v3 nomenclature) to
 the full electromagnetic resilience taxonomy (v4, see TM §2) without
 any change to the on-disk byte layout. It serves three audiences:
 
@@ -435,7 +435,7 @@ ring-buffer head index is the `s_rs_journal_head` field (`__u8`, modulo
 `BEAMFS_RS_JOURNAL_SIZE`). When the buffer wraps, the oldest entry is
 overwritten silently - operators are expected to drain the journal
 periodically to durable storage if long-term retention is required. The
-v4 enlargement (24 → 40 bytes per entry) increased the journal
+v4 enlargement (24 -> 40 bytes per entry) increased the journal
 **information density**, not its entry count.
 
 ### 6.3 Entry layout

@@ -33,9 +33,9 @@ beamfs v4 is the on-disk format produced by `mkfs.beamfs` and consumed by
 the beamfs kernel module starting from kernel module version 0.1.0. It
 extends the v3 layout with:
 
-1. A 24 → 40 byte enlargement of `struct beamfs_rs_event`, adding a
+1. A 24 -> 40 byte enlargement of `struct beamfs_rs_event`, adding a
    per-event Shannon entropy field, a flags field, and a per-entry CRC32.
-2. An 8 → 13 subblock enlargement of the superblock RS protection
+2. An 8 -> 13 subblock enlargement of the superblock RS protection
    layout, raising correction capacity from 64 to 104 symbol errors per
    superblock.
 3. A revised `s_pad[]` layout (1383 bytes vs. 2407 bytes in v3) reflecting
@@ -227,10 +227,10 @@ one subblock.
 This is a deliberate design choice for burst tolerance per TM §6.2:
 distributing parity across multiple short codewords gives independent
 failure-correctable regions, which trade off against per-codeword
-correction radius. Thirteen subblocks were chosen to absorb the v3 → v4
+correction radius. Thirteen subblocks were chosen to absorb the v3 -> v4
 journal enlargement while keeping parity in the trailing 208-byte zone.
 
-### 5.4 Growth v3 → v4
+### 5.4 Growth v3 -> v4
 
 | Field                         | v3           | v4           | Δ          |
 |-------------------------------|--------------|--------------|------------|
@@ -244,7 +244,7 @@ journal enlargement while keeping parity in the trailing 208-byte zone.
 | `s_rs_journal[]` total length | 1536 (24×64) | 2560 (40×64) | +1024      |
 | Correction capacity           | 64 sym       | 104 sym      | +40 sym    |
 
-The v3 → v4 transition expands CRC/RS coverage by exactly the
+The v3 -> v4 transition expands CRC/RS coverage by exactly the
 `s_rs_journal[]` enlargement (1024 bytes), keeping the staging buffer
 size constant at 2743 bytes by repacking into 13 shorter subblocks
 instead of 8 longer ones. The 80 additional parity bytes (208 - 128)
@@ -261,7 +261,7 @@ The Electromagnetic Resilience Journal is a fixed-size, on-disk,
 ring-buffer log of Reed-Solomon FEC events that have occurred during
 the lifetime of the volume. The on-disk symbol `s_rs_journal[]` is
 preserved across versions for source compatibility; the journal's role
-broadened from radiation-only event recording (v1–v3 nomenclature) to
+broadened from radiation-only event recording (v1-v3 nomenclature) to
 the full electromagnetic resilience taxonomy (v4, see TM §2) without
 any change to the on-disk byte layout. It serves three audiences:
 
@@ -285,7 +285,7 @@ ring-buffer head index is the `s_rs_journal_head` field (`__u8`, modulo
 `BEAMFS_RS_JOURNAL_SIZE`). When the buffer wraps, the oldest entry is
 overwritten silently - operators are expected to drain the journal
 periodically to durable storage if long-term retention is required. The
-v4 enlargement (24 → 40 bytes per entry) increased the journal
+v4 enlargement (24 -> 40 bytes per entry) increased the journal
 **information density**, not its entry count.
 
 ### 6.3 Entry layout
@@ -834,7 +834,7 @@ A successor format (v5) will produce a new document
 ## 13. References
 
 - `Documentation/threat-model.md` - failure model, certification
-  context, design constraints (TM §1–10).
+  context, design constraints (TM §1-10).
 - `Documentation/design.md` - architectural overview, partially
   superseded by this document for v4 specifics.
 - `Documentation/known-limitations.md` - explicit non-goals.
