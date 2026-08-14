@@ -635,6 +635,28 @@ full `beamfs-bench full` R19 pipeline exit 0 on 4-node cluster under
 RadFI injection (5 FS x 3 probabilities, tainted=4096 OOT-only on
 all 4 nodes, zero DIE). Manifest GPG-signed.
 
+**Recurrence observed 2026-08-14 (post-close, informational).**
+
+A single `beamfs: double free of block N` WARN (Comm=rm, canary path,
+no crash/Oops, bitmap left consistent) recurred on `beamfs-compute02`
+during a routine R19 run at HEAD `28095b78` (descendant of the
+three-layer fix `11c844f`/`f964b27`/`f146cbd`, all three confirmed
+present in the compiled source). Trigger context: `drop_caches` +
+remount + `rm` during a cluster `verify` cycle -- different from the
+`depmod -a` reproducer validated 10/10 at closure. `beamfs-bench full`
+still exited 0, dmesg reported clean, no fatal regression. Not treated
+as a regression of the fix (the code paths it touches are all present
+and correct); recorded because the closure's claim that the
+WARN-canary and the BUG_ON/Oops share a single root cause was
+asserted from the `depmod -a` evidence and has not been independently
+re-verified under this trigger. Left as an open question for a future
+investigation session, not reopened for action.
+
+*Noted by Claude Sonnet 5 during this session; flagged explicitly per
+user request, given a documented general caution about over-reading
+signal into benign variance -- treat this entry as a data point to
+weigh, not a claim.*
+
 ---
 
 ### 3.11 RS(255,239) silent miscorrection on data blocks under high-density EM injection (RESOLVED 2026-07-09 via DATA_CSUM, format-v6)
