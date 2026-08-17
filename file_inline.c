@@ -929,10 +929,48 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 * copy, as the per-subblock uncorrectable path does. Observability
 	 * mechanism of Theorem v2.2a extended to data regions (v2.2b).
 	 */
-	if (sbi->s_data_csum &&
-	    tmp[BEAMFS_DATA_CSUM_TYPE_OFF] == BEAMFS_CSUM_CRC32) {
+	if (sbi->s_data_csum) {
+		u8  ctype = tmp[BEAMFS_DATA_CSUM_TYPE_OFF];
 		u32 want = get_unaligned_le32(tmp + BEAMFS_DATA_CSUM_VALUE_OFF);
 		u32 got  = beamfs_inline_payload_crc(tmp);
+
+		/*
+		 * csum_type gates the whole check, and the descriptor is
+		 * outside every RS codeword, so it is neither corrected nor
+		 * detected by the code. Accepting any type other than CRC32 as
+		 * "no checksum present" therefore let a single flip on offset
+		 * 4080 disable verification for that block, silently. Measured
+		 * 2026-08-17 at 128 flips on a 64-block file: 20 RS symbols
+		 * corrected, no uncorrectable, no csum mismatch logged, and
+		 * 15296 wrong bits returned to userspace across two blocks --
+		 * exactly the silent accept that format-v6 section 3.3 claimed
+		 * the layout could not produce. That argument holds for the
+		 * csum value (a corrupted CRC can only over-reject) but not for
+		 * the type byte.
+		 *
+		 * On a DATA_CSUM volume every data block is stamped at write
+		 * time, so any other type is a corrupted descriptor, not an
+		 * unstamped block: fail closed instead of waving it through.
+		 */
+		if (ctype != BEAMFS_CSUM_CRC32) {
+			u32 xflags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
+
+			if (rmw_path)
+				xflags |= BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED;
+
+			beamfs_log_rs_event_flagged(sb,
+						    (u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS,
+						    NULL, 0,
+						    BEAMFS_SUBBLOCK_DATA,
+						    xflags);
+			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_csum bad descriptor type=0x%02x (expected 0x%02x)%s\n",
+					   inode->i_ino,
+					   (unsigned long long)iblock_logical_for_log,
+					   ctype, BEAMFS_CSUM_CRC32,
+					   rmw_path ? " (rmw)" : "");
+			ret = -EIO;
+			goto out_brelse;
+		}
 
 		if (want != got) {
 			beamfs_log_rs_event_flagged(sb,

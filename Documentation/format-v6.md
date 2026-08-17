@@ -198,15 +198,29 @@ partially-written volumes without a hard error.
 ### 3.3 Integrity field: the csum is not RS-protected
 
 The 8-byte descriptor lives outside the RS codeword, so it is not
-error-corrected. This is deliberate and safe. A bit flip in the
-`csum` field can only produce a **false mismatch**: an aware
-kernel rejects a decode that was in fact correct, returning
-`-EIO` on good data. That is an availability cost, never a
-correctness cost. The field can never cause a silent accept of
-wrong data, because a wrong payload plus any csum value other than
-the wrong payload's own CRC32 fails the check. The design goal
-(no silent wrong bytes) is preserved even under corruption of the
-integrity field itself.
+error-corrected. A bit flip in the `csum` value field can only
+produce a **false mismatch**: an aware kernel rejects a decode that
+was in fact correct, returning `-EIO` on good data. That is an
+availability cost, never a correctness cost, because a wrong
+payload plus any csum value other than the wrong payload's own
+CRC32 fails the check.
+
+That argument covers the value field only. Earlier revisions of
+this section generalised it to the whole descriptor, which was
+wrong: `csum_type` gates whether the check runs at all, so a flip
+turning it into any value other than `BEAMFS_CSUM_CRC32` was read
+as "no checksum present" and the block was accepted unverified.
+Measured 2026-08-17 under a 128-flip budget on a 64-block file: 20
+RS symbols corrected, no uncorrectable event, no mismatch logged,
+and 15296 wrong bits returned to userspace across two blocks.
+
+The read path therefore fails closed on any `csum_type` other than
+`BEAMFS_CSUM_CRC32` when the volume has `DATA_CSUM` set. Every data
+block on such a volume is stamped at write time, so an unexpected
+type is a corrupted descriptor rather than an unstamped block. A
+flip in the type byte now costs availability, like a flip in the
+value, and the design goal (no silent wrong bytes) holds for the
+descriptor as a whole.
 
 ---
 
