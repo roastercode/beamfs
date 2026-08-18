@@ -58,6 +58,8 @@ static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
 				    struct iattr *attr);
 static void    beamfs_inline_free_blocks_from(struct inode *inode,
 					      u64 b_first_freed);
+static void    beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
+					    u8 *block, const u8 *payload);
 static int     beamfs_inline_zero_tail_block(struct inode *inode,
 					     u64 b, u32 zero_offset);
 
@@ -360,6 +362,24 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		lock_buffer(dbh);
 		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		/*
+		 * Stamp the DATA_CSUM descriptor on the freshly allocated data
+		 * block. An all-zero block is a valid RS codeword by linearity,
+		 * so decode accepts it, but the descriptor would stay 0x00 and
+		 * the read path would have nothing to verify against. Before
+		 * the type byte was made fail-closed that meant silent
+		 * acceptance; afterwards it means a legitimate newly allocated
+		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
+		 * test file logged "bad descriptor type=0x00" on five runs out
+		 * of six, because allocation writes the block here while the
+		 * only other stamp sites are writeback_folio and
+		 * zero_tail_block, neither of which runs for a block that is
+		 * allocated but not yet written through the folio path. The
+		 * payload is the zeroed block itself. Indirect blocks carry no
+		 * DATA_CSUM descriptor and are deliberately left untouched.
+		 */
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
+					     (const u8 *)dbh->b_data);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -431,6 +451,24 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		lock_buffer(dbh);
 		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		/*
+		 * Stamp the DATA_CSUM descriptor on the freshly allocated data
+		 * block. An all-zero block is a valid RS codeword by linearity,
+		 * so decode accepts it, but the descriptor would stay 0x00 and
+		 * the read path would have nothing to verify against. Before
+		 * the type byte was made fail-closed that meant silent
+		 * acceptance; afterwards it means a legitimate newly allocated
+		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
+		 * test file logged "bad descriptor type=0x00" on five runs out
+		 * of six, because allocation writes the block here while the
+		 * only other stamp sites are writeback_folio and
+		 * zero_tail_block, neither of which runs for a block that is
+		 * allocated but not yet written through the folio path. The
+		 * payload is the zeroed block itself. Indirect blocks carry no
+		 * DATA_CSUM descriptor and are deliberately left untouched.
+		 */
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
+					     (const u8 *)dbh->b_data);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -546,6 +584,24 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		lock_buffer(dbh);
 		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		/*
+		 * Stamp the DATA_CSUM descriptor on the freshly allocated data
+		 * block. An all-zero block is a valid RS codeword by linearity,
+		 * so decode accepts it, but the descriptor would stay 0x00 and
+		 * the read path would have nothing to verify against. Before
+		 * the type byte was made fail-closed that meant silent
+		 * acceptance; afterwards it means a legitimate newly allocated
+		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
+		 * test file logged "bad descriptor type=0x00" on five runs out
+		 * of six, because allocation writes the block here while the
+		 * only other stamp sites are writeback_folio and
+		 * zero_tail_block, neither of which runs for a block that is
+		 * allocated but not yet written through the folio path. The
+		 * payload is the zeroed block itself. Indirect blocks carry no
+		 * DATA_CSUM descriptor and are deliberately left untouched.
+		 */
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
+					     (const u8 *)dbh->b_data);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -693,6 +749,24 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		lock_buffer(dbh);
 		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		/*
+		 * Stamp the DATA_CSUM descriptor on the freshly allocated data
+		 * block. An all-zero block is a valid RS codeword by linearity,
+		 * so decode accepts it, but the descriptor would stay 0x00 and
+		 * the read path would have nothing to verify against. Before
+		 * the type byte was made fail-closed that meant silent
+		 * acceptance; afterwards it means a legitimate newly allocated
+		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
+		 * test file logged "bad descriptor type=0x00" on five runs out
+		 * of six, because allocation writes the block here while the
+		 * only other stamp sites are writeback_folio and
+		 * zero_tail_block, neither of which runs for a block that is
+		 * allocated but not yet written through the folio path. The
+		 * payload is the zeroed block itself. Indirect blocks carry no
+		 * DATA_CSUM descriptor and are deliberately left untouched.
+		 */
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
+					     (const u8 *)dbh->b_data);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
