@@ -59,7 +59,8 @@ static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
 static void    beamfs_inline_free_blocks_from(struct inode *inode,
 					      u64 b_first_freed);
 static void    beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
-					    u8 *block, const u8 *payload);
+					    u8 *block, const u8 *payload,
+					    u64 ino, u64 iblock);
 static int     beamfs_inline_zero_tail_block(struct inode *inode,
 					     u64 b, u32 zero_offset);
 
@@ -379,7 +380,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * DATA_CSUM descriptor and are deliberately left untouched.
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
-					     (const u8 *)dbh->b_data);
+					     (const u8 *)dbh->b_data,
+					     inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -468,7 +470,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * DATA_CSUM descriptor and are deliberately left untouched.
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
-					     (const u8 *)dbh->b_data);
+					     (const u8 *)dbh->b_data,
+					     inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -601,7 +604,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * DATA_CSUM descriptor and are deliberately left untouched.
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
-					     (const u8 *)dbh->b_data);
+					     (const u8 *)dbh->b_data,
+					     inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -766,7 +770,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * DATA_CSUM descriptor and are deliberately left untouched.
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
-					     (const u8 *)dbh->b_data);
+					     (const u8 *)dbh->b_data,
+					     inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -798,7 +803,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
  * silent accept of wrong data.
  */
 static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
-					 u8 *block, const u8 *payload)
+					 u8 *block, const u8 *payload,
+					 u64 ino, u64 iblock)
 {
 	memset(block + BEAMFS_DATA_INLINE_TOTAL, 0, BEAMFS_DATA_INLINE_PAD);
 	if (sbi->s_data_csum) {
@@ -806,6 +812,16 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 
 		block[BEAMFS_DATA_CSUM_TYPE_OFF] = BEAMFS_CSUM_CRC32;
 		put_unaligned_le32(crc, block + BEAMFS_DATA_CSUM_VALUE_OFF);
+	}
+	/*
+	 * DATA_SELFID: bind the block to the (inode, logical index) pair it
+	 * was written for, so a read reaching it through a corrupted pointer
+	 * fails closed instead of returning another file's intact data.
+	 */
+	if (sbi->s_data_selfid) {
+		u64 id = beamfs_data_selfid(ino, iblock);
+
+		put_unaligned_le64(id, block + BEAMFS_DATA_SELFID_OFF);
 	}
 }
 
@@ -1056,6 +1072,43 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					   inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
 					   want, got,
+					   rmw_path ? " (rmw)" : "");
+			ret = -EIO;
+			goto out_brelse;
+		}
+	}
+
+	/*
+	 * DATA_SELFID verification. DATA_CSUM proves the block is intact; it
+	 * cannot prove it is the block that was asked for. A corrupted
+	 * pointer landing inside the data area reaches a different but valid
+	 * block whose own descriptor verifies, so every check above passes on
+	 * the wrong data. Measured 2026-08-19: a direct pointer moved from
+	 * physical 471 to 503 and the read returned that block's contents,
+	 * 15245 wrong bits, with no kernel signal. Comparing the stored
+	 * identity digest against the (inode, iblock) actually being read
+	 * closes that path.
+	 */
+	if (sbi->s_data_selfid) {
+		u64 want_id = beamfs_data_selfid(inode->i_ino,
+						 iblock_logical_for_log);
+		u64 got_id  = get_unaligned_le64(tmp + BEAMFS_DATA_SELFID_OFF);
+
+		if (want_id != got_id) {
+			u32 xflags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
+
+			if (rmw_path)
+				xflags |= BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED;
+
+			beamfs_log_rs_event_flagged(sb,
+						    (u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS,
+						    NULL, 0,
+						    BEAMFS_SUBBLOCK_DATA,
+						    xflags);
+			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_selfid mismatch want=0x%016llx got=0x%016llx%s\n",
+					   inode->i_ino,
+					   (unsigned long long)iblock_logical_for_log,
+					   want_id, got_id,
 					   rmw_path ? " (rmw)" : "");
 			ret = -EIO;
 			goto out_brelse;
@@ -1617,7 +1670,8 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 
 		/* Stamp DATA_CSUM descriptor and zero pad (format-v6). */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
-					     (u8 *)bh->b_data, scratch);
+					     (u8 *)bh->b_data, scratch,
+					     inode->i_ino, b);
 
 		mark_buffer_dirty(bh);
 
@@ -1939,7 +1993,8 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	}
 
 	beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
-				     (u8 *)bh->b_data, scratch);
+				     (u8 *)bh->b_data, scratch,
+				     inode->i_ino, b);
 
 	mark_buffer_dirty(bh);
 	unlock_buffer(bh);
