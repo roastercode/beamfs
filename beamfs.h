@@ -81,6 +81,26 @@
 #define BEAMFS_DATA_CSUM_TYPE_OFF     (BEAMFS_DATA_INLINE_TOTAL + 0)  /* 4080 u8      */
 #define BEAMFS_DATA_CSUM_VALUE_OFF    (BEAMFS_DATA_INLINE_TOTAL + 4)  /* 4084 __le32  */
 #define BEAMFS_DATA_CSUM_DESC_BYTES   8                               /* type+rsvd+csum */
+/*
+ * DATA_SELFID: block self-identification, in the second half of the tail
+ * pad. DATA_CSUM proves a block's contents are intact; it cannot prove the
+ * block is the right one. A corrupted block pointer that still lands inside
+ * the data area addresses a different, perfectly valid block, whose own
+ * descriptor verifies. Measured 2026-08-19 at a 128-flip budget: an inode's
+ * direct pointer went from physical 471 to 503, the read returned that
+ * block's contents (15245 wrong bits) with cat exiting 0 and no kernel
+ * signal, because every integrity check passed on a block that simply was
+ * not the one asked for. The existing bounds check only rejects pointers
+ * outside [s_data_start, s_data_start + s_nblocks).
+ *
+ * The field holds beamfs_data_selfid(ino, iblock), so a read that lands on
+ * the wrong block fails closed. A 64-bit digest rather than the raw pair
+ * keeps the field within the 8 reserved bytes without capping inode numbers
+ * or file size, which matters for the datacenter workloads this filesystem
+ * targets as much as for embedded ones.
+ */
+#define BEAMFS_DATA_SELFID_OFF        (BEAMFS_DATA_INLINE_TOTAL + 8)  /* 4088 __le64  */
+#define BEAMFS_DATA_SELFID_BYTES      8
 
 /*
  * Conformance fixture (canary block) -- v4 INLINE only.
@@ -445,6 +465,7 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      (1ULL << 2)
 #define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        (1ULL << 3)
 #define BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM        (1ULL << 4)
+#define BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID      (1ULL << 5)
 					  /* per-data-block integrity field in
 					   * the block tail pad; see format-v6.md.
 					   * NOT in _SUPP until read/write path
@@ -472,7 +493,8 @@ struct beamfs_rs_event {
  * unlocks the read-side decoder under any s_data_protection_scheme.
  */
 #define BEAMFS_FEAT_COMPAT_SUPP    0ULL
-#define BEAMFS_FEAT_RO_COMPAT_SUPP BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM
+#define BEAMFS_FEAT_RO_COMPAT_SUPP (BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM | \
+				    BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID)
 #define BEAMFS_FEAT_INCOMPAT_SUPP  BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS
 
 /*
@@ -599,6 +621,7 @@ struct beamfs_sb_info {
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
+	bool                      s_data_selfid;    /* DATA_SELFID active, cached at mount */
 };
 
 /*
@@ -734,6 +757,24 @@ extern const struct inode_operations beamfs_inline_inode_operations;
 void beamfs_rs_init_tables(void);
 void beamfs_rs_exit_tables(void);
 __u32 beamfs_crc32(const void *buf, size_t len);
+
+/*
+ * beamfs_data_selfid -- 64-bit identity digest of (ino, iblock), stored in
+ * the block tail pad when DATA_SELFID is active. Two independent CRC32s,
+ * one per dimension, concatenated: reuses the single hashing primitive
+ * already backing i_crc32, s_crc32 and DATA_CSUM rather than introducing a
+ * second algorithm for an auditor to review. Collision probability 2^-64.
+ */
+static inline __u64 beamfs_data_selfid(__u64 ino, __u64 iblock)
+{
+	__le64 a = cpu_to_le64(ino);
+	__le64 b = cpu_to_le64(iblock);
+	__u32  lo = beamfs_crc32(&a, sizeof(a));
+	__u32  hi = beamfs_crc32(&b, sizeof(b));
+
+	return ((__u64)hi << 32) | lo;
+}
+
 __u32 beamfs_crc32_sb(const struct beamfs_super_block *fsb);
 int beamfs_rs_encode(u8 *data, size_t len, u8 *parity);
 
