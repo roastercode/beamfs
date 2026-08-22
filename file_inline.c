@@ -1812,16 +1812,20 @@ const struct file_operations beamfs_inline_file_operations = {
 /* ------------------------------------------------------------------------- */
 /* Truncate support (sub-step 6 INLINE-MULTIBLOCK)                           */
 /*                                                                           */
-/* Scope: direct + single indirect. The allocator (lookup_or_alloc_phys)    */
-/* does not yet allocate dindirect/tindirect in v0.1.x baseline, so          */
-/* truncate has nothing to free at those levels here. Maximum file size in   */
-/* the current baseline is (BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS) *   */
-/* 3824 = 524 blocks = ~1.91 MiB.                                            */
+/* The allocator reaches every level: lookup_or_alloc_phys has allocation    */
+/* sites for direct, indirect, double and triple indirect, so the write      */
+/* path is not capped at 524 blocks. Measured 2026-08-20 on a freshly        */
+/* formatted volume: a 64 MiB file, about 17500 blocks and well into double  */
+/* indirect, was written and read back intact at 24 MB/s with no             */
+/* EOPNOTSUPP. Capacity per file is BEAMFS_MAX_IBLOCK_TINDIRECT * 3824,      */
+/* roughly 512 GiB. See BEAMFS_DINDIRECT_PTRS / BEAMFS_TINDIRECT_PTRS in     */
+/* beamfs.h and the Documentation/format-v5.md section on indirect           */
+/* addressing.                                                               */
 /*                                                                           */
-/* Multi-level indirect (dindirect ~1 GiB, tindirect ~512 GiB) extends this  */
-/* ceiling in subsequent v0.1.x increments without a format bump (see        */
-/* BEAMFS_DINDIRECT_PTRS / BEAMFS_TINDIRECT_PTRS in beamfs.h and the         */
-/* Documentation/format-v5.md section on Indirect addressing). The 64BIT +   */
+/* Truncate, however, still walks direct and single indirect only, so        */
+/* freeing a file larger than 524 blocks leaves the deeper levels            */
+/* allocated. That is a space leak rather than a correctness problem for     */
+/* reads, and closing it is the remaining part of sub-step 6. The 64BIT +    */
 /* EXTENTS feature flags remain orthogonal to multi-level indirect and       */
 /* target the post-v5.0 patch series.                                        */
 /* ------------------------------------------------------------------------- */
