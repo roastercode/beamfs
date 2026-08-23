@@ -854,6 +854,7 @@ int  beamfs_write_bitmap_block(struct super_block *sb,
 void beamfs_destroy_bitmap(struct super_block *sb);
 u64  beamfs_alloc_block(struct super_block *sb, struct inode *owner);
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner);
+bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
 u64  beamfs_alloc_inode_num(struct super_block *sb);
 void beamfs_free_inode_num(struct super_block *sb, u64 ino);
 

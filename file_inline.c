@@ -116,6 +116,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   sbi->s_data_start + sbi->s_nblocks);
 				return -EUCLEAN;
 			}
+			if (!beamfs_block_is_allocated(sb, phys)) {
+				pr_err_ratelimited("beamfs/inline: unallocated direct pointer ino=%lu iblock=%llu phys=%llu\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys);
+				return -EUCLEAN;
+			}
 		}
 		*phys_out = dphys;
 		return 0;
@@ -150,6 +157,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
 						   sbi->s_data_start + sbi->s_nblocks);
+				return -EUCLEAN;
+			}
+			if (!beamfs_block_is_allocated(sb, phys)) {
+				pr_err_ratelimited("beamfs/inline: unallocated indirect pointer ino=%lu iblock=%llu phys=%llu\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys);
 				return -EUCLEAN;
 			}
 		}
@@ -210,6 +224,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
 						   sbi->s_data_start + sbi->s_nblocks);
+				return -EUCLEAN;
+			}
+			if (!beamfs_block_is_allocated(sb, phys)) {
+				pr_err_ratelimited("beamfs/inline: unallocated dindirect pointer ino=%lu iblock=%llu phys=%llu\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys);
 				return -EUCLEAN;
 			}
 		}
@@ -287,6 +308,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
 						   sbi->s_data_start + sbi->s_nblocks);
+				return -EUCLEAN;
+			}
+			if (!beamfs_block_is_allocated(sb, phys)) {
+				pr_err_ratelimited("beamfs/inline: unallocated tindirect pointer ino=%lu iblock=%llu phys=%llu\n",
+						   inode->i_ino,
+						   (unsigned long long)iblock_logical,
+						   (unsigned long long)phys);
 				return -EUCLEAN;
 			}
 		}

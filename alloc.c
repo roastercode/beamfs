@@ -443,6 +443,44 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 /*
  * beamfs_free_block - return a data block to the free pool
  */
+/*
+ * beamfs_block_is_allocated -- is @block currently in use?
+ *
+ * Indirect blocks hold 512 pointers in exactly 4096 bytes, leaving no room
+ * for a checksum, so unlike data blocks, inodes and the superblock they carry
+ * no integrity field of their own. A flip in one corrupts a pointer, and the
+ * bounds check at the read sites only rejects values outside the data area.
+ * A corrupted pointer that lands inside it reaches an unrelated block and the
+ * read proceeds. DATA_SELFID catches the case where that block belongs to
+ * another file; this catches the case where it belongs to no file at all,
+ * which is what a random flip on a 64-bit pointer usually produces.
+ *
+ * The in-memory bitmap uses 1 for free, so an allocated block has its bit
+ * clear. It is held for the lifetime of the mount and is RS-protected on
+ * disk, so consulting it costs a bit test and no I/O.
+ *
+ * A prior version of this check (2026-08-22) found that mkfs.beamfs never
+ * marked root_dir_blk allocated (fixed in yocto-beamfs c2bebac): every
+ * root-fs image built with --from-dir failed to boot, because the first
+ * pointer resolved at mount, i_direct[0] of the root inode, pointed at a
+ * block the bitmap called free. Re-enabled after that fix.
+ */
+bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	unsigned long bit;
+
+	if (!sbi->s_block_bitmap)
+		return true;   /* bitmap unavailable: do not reject */
+	if (block < sbi->s_data_start)
+		return false;
+	bit = (unsigned long)(block - sbi->s_data_start);
+	if (bit >= sbi->s_nblocks)
+		return false;
+
+	return !test_bit(bit, sbi->s_block_bitmap);
+}
+
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
