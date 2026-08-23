@@ -470,10 +470,27 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
 
+	/*
+	 * 2026-08-23: blocks below s_data_start (superblock, inode table,
+	 * bitmap, root dir, canary) are reserved and never covered by the
+	 * bitmap by construction -- see the layout comment at the top of
+	 * this file. Treating them as "not allocated" made every legitimate
+	 * pointer into that zone fail, starting with i_direct[0] of the
+	 * root inode: the very first block resolved at mount was rejected,
+	 * and no image built with --from-dir could boot. mkfs was patched
+	 * to mark root_dir_blk in the bitmap to work around this (yocto-beamfs
+	 * c2bebac) and that patch has been reverted (846c2bd): the root and
+	 * canary blocks are not supposed to be bitmap-covered, matching the
+	 * "silently skip reserved blocks" doctrine already applied in
+	 * beamfs_free_block below. The reserved zone is bounded above by
+	 * s_data_start and below by 0, both already enforced by the bounds
+	 * check at every read site (file_inline.c), so no separate check is
+	 * needed here for it.
+	 */
+	if (block < sbi->s_data_start)
+		return true;
 	if (!sbi->s_block_bitmap)
 		return true;   /* bitmap unavailable: do not reject */
-	if (block < sbi->s_data_start)
-		return false;
 	bit = (unsigned long)(block - sbi->s_data_start);
 	if (bit >= sbi->s_nblocks)
 		return false;
