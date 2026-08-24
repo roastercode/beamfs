@@ -34,6 +34,7 @@
 #define BEAMFS_SB_RS_SUBBLOCKS       13
 #define BEAMFS_SB_RS_PARITY_BYTES    208
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888
+#define BEAMFS_SB_RS_STAGING_BYTES   2743   /* 13 * BEAMFS_SB_RS_DATA_LEN */
 
 /*
  * Electromagnetic Resilience Journal entry -- 40 bytes (v4 format).

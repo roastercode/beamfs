@@ -29,6 +29,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "crc32.h"
+#include "rs_decode.h"
+#include "sb_layout.h"
+
 /*
  * Exit codes per fsck(8) convention.
  * See Documentation/fsck.beamfs.md section 3.1 for the contract.
@@ -50,6 +54,7 @@ struct fsck_opts {
 	bool        repair;
 	bool        force;
 	bool        verbose;
+	int         fd;
 };
 
 static void print_usage(FILE *stream, const char *prog)
@@ -88,10 +93,151 @@ static void version(void)
  * and logs to stderr that it is not yet implemented. Real
  * implementations land in sub-phases 2-6.
  */
+/*
+ * pass1_superblock -- read, RS-decode and CRC-validate block 0.
+ *
+ * Order matters: RS-decode runs first, over the 13 shortened
+ * RS(255,239) subblocks covering [0, off_crc32) + [off_uuid, off_pad),
+ * exactly as mkfs.beamfs::sb_to_rs_staging lays them out. s_magic sits
+ * inside that coverage (offset 0), so a corrupted magic byte is a
+ * candidate for RS correction like any other covered byte, not a
+ * reason to abort before attempting one.
+ *
+ * s_crc32 itself is deliberately outside RS coverage (same doctrine
+ * as the DATA_CSUM descriptor, format-v6.md section 3.3): a flip on
+ * s_crc32 can only produce a false mismatch against data that RS has
+ * already proven correct, never mask a real corruption of the data
+ * RS decoded. So RS-clean + CRC-mismatch means the checksum field
+ * itself is wrong, not the superblock content; --repair restates
+ * s_crc32 from the computed value rather than treating it as a data
+ * loss event.
+ *
+ * check-only reports a correctable finding as FSCK_UNCORRECTED, not
+ * FSCK_OK: an in-memory correction that is never written back is not
+ * something that happened to the volume, and silently returning OK
+ * would hide a real (if repairable) error from the operator.
+ */
 static int pass1_superblock(const struct fsck_opts *o)
 {
-	(void)o;
-	fprintf(stderr, "fsck.beamfs: pass 1 (superblock) not yet implemented\n");
+	struct beamfs_super_block sb;
+	uint8_t   staging[BEAMFS_SB_RS_STAGING_BYTES];
+	uint8_t  *parity = (uint8_t *)&sb + BEAMFS_SB_RS_PARITY_OFFSET;
+	struct rs_codec *rs;
+	ssize_t   got;
+	unsigned int i;
+	unsigned int total_corrected = 0;
+	unsigned int uncorrectable = 0;
+	int       positions[RS_NROOTS / 2];
+	uint32_t  computed_crc;
+
+	const size_t off_crc32 = offsetof(struct beamfs_super_block, s_crc32);
+	const size_t off_uuid  = offsetof(struct beamfs_super_block, s_uuid);
+	const size_t off_pad   = offsetof(struct beamfs_super_block, s_pad);
+
+	if (lseek(o->fd, 0, SEEK_SET) < 0) {
+		fprintf(stderr, "fsck.beamfs: pass 1: lseek: %s\n",
+			strerror(errno));
+		return FSCK_ERROR;
+	}
+	got = read(o->fd, &sb, sizeof(sb));
+	if (got != (ssize_t)sizeof(sb)) {
+		fprintf(stderr, "fsck.beamfs: pass 1: short read on block 0 (%zd/%zu)\n",
+			got, sizeof(sb));
+		return FSCK_ERROR;
+	}
+
+	rs = rs_init();
+	if (!rs) {
+		fprintf(stderr, "fsck.beamfs: pass 1: rs_init failed\n");
+		return FSCK_ERROR;
+	}
+
+	memcpy(staging, &sb, off_crc32);
+	memcpy(staging + off_crc32, (uint8_t *)&sb + off_uuid, off_pad - off_uuid);
+	memset(staging + BEAMFS_SB_RS_COVERAGE_BYTES, 0,
+	       sizeof(staging) - BEAMFS_SB_RS_COVERAGE_BYTES);
+
+	for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
+		int rc = rs_decode_subblock(rs,
+					    staging + i * BEAMFS_SB_RS_DATA_LEN,
+					    BEAMFS_SB_RS_DATA_LEN,
+					    parity + i * RS_NROOTS,
+					    positions);
+		if (rc == RS_UNCORRECTABLE) {
+			uncorrectable++;
+			if (o->verbose)
+				fprintf(stderr, "fsck.beamfs: pass 1: subblock %u uncorrectable\n", i);
+		} else if (rc > 0) {
+			total_corrected += (unsigned int)rc;
+			if (o->verbose)
+				fprintf(stderr, "fsck.beamfs: pass 1: subblock %u: %d symbol(s) corrected\n", i, rc);
+		}
+	}
+	rs_free(rs);
+
+	if (uncorrectable > 0) {
+		fprintf(stderr, "fsck.beamfs: pass 1: superblock RS-uncorrectable (%u/%u subblocks)\n",
+			uncorrectable, BEAMFS_SB_RS_SUBBLOCKS);
+		return FSCK_UNCORRECTED;
+	}
+
+	if (total_corrected > 0) {
+		/* Parity bytes were already corrected in place: parity
+		 * pointed directly into sb.s_pad, so rs_decode_subblock's
+		 * in-place correction applied to sb itself, not a copy.
+		 */
+		memcpy(&sb, staging, off_crc32);
+		memcpy((uint8_t *)&sb + off_uuid, staging + off_crc32, off_pad - off_uuid);
+	}
+
+	if (sb.s_magic != BEAMFS_MAGIC) {
+		if (!o->force) {
+			fprintf(stderr, "fsck.beamfs: pass 1: bad magic 0x%08x (expected 0x%08x); use --force to proceed\n",
+				sb.s_magic, BEAMFS_MAGIC);
+			return FSCK_UNCORRECTED;
+		}
+		fprintf(stderr, "fsck.beamfs: pass 1: bad magic 0x%08x, continuing (--force)\n",
+			sb.s_magic);
+	}
+
+	computed_crc = crc32_sb(&sb);
+	if (computed_crc != sb.s_crc32) {
+		if (total_corrected > 0) {
+			fprintf(stderr, "fsck.beamfs: pass 1: s_crc32 stale after RS correction (have 0x%08x, want 0x%08x)\n",
+				sb.s_crc32, computed_crc);
+		} else {
+			fprintf(stderr, "fsck.beamfs: pass 1: s_crc32 mismatch on RS-clean block (have 0x%08x, want 0x%08x)\n",
+				sb.s_crc32, computed_crc);
+		}
+		if (o->repair) {
+			sb.s_crc32 = computed_crc;
+			total_corrected++;
+		} else {
+			return FSCK_UNCORRECTED;
+		}
+	}
+
+	if (total_corrected > 0 && !o->repair) {
+		fprintf(stderr, "fsck.beamfs: pass 1: %u correctable error(s) found; rerun with --repair\n",
+			total_corrected);
+		return FSCK_UNCORRECTED;
+	}
+
+	if (o->repair && total_corrected > 0) {
+		if (lseek(o->fd, 0, SEEK_SET) < 0 ||
+		    write(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb)) {
+			fprintf(stderr, "fsck.beamfs: pass 1: write-back failed: %s\n",
+				strerror(errno));
+			return FSCK_ERROR;
+		}
+		if (o->verbose)
+			printf("fsck.beamfs: pass 1: superblock repaired (%u correction(s))\n",
+			       total_corrected);
+		return FSCK_CORRECTED;
+	}
+
+	if (o->verbose)
+		printf("fsck.beamfs: pass 1: superblock OK\n");
 	return FSCK_OK;
 }
 
@@ -210,12 +356,17 @@ int main(int argc, char **argv)
 			opts.device, strerror(errno));
 		return FSCK_ERROR;
 	}
-	close(fd);
+	opts.fd = fd;
 
 	if (opts.verbose)
 		printf("fsck.beamfs %s: checking %s (%s mode)\n",
 		       FSCK_BEAMFS_VERSION, opts.device,
 		       opts.repair ? "repair" : "check-only");
 
-	return run_passes(&opts);
+	{
+		int rc = run_passes(&opts);
+
+		close(fd);
+		return rc;
+	}
 }
