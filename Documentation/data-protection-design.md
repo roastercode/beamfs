@@ -254,6 +254,35 @@ expected to cover Family B at the scale of bursts up to a few
 KiB without the complexity of an extent-based parity layout.
 Scheme 4 is retained as a future option only.
 
+### 6.1 Indirect-block integrity residual under scheme 2
+
+Scheme 2 addresses indirection blocks (512 raw `__le64` pointers,
+occupying the full 4096-byte block with no free byte for a
+checksum) the same way ext2 always has: no integrity field of
+their own. `beamfs_check_intermediate_block()` (2026-08-24) closes
+the dominant failure mode -- a corrupted pointer landing outside
+`[s_data_start, s_data_start + s_nblocks)` or on a block the
+bitmap marks free -- at all six read sites in
+`beamfs_inline_lookup_phys`.
+
+The residual is a corrupted pointer that lands on a block that is
+both in range and allocated. Nothing in scheme 2 distinguishes
+that from a legitimate pointer, because the block it reaches
+passes every check that exists for it. This is not closed by
+scheme 2 and is not attempted here: shrinking the 512-pointer
+array to fit a CRC changes the on-disk indirection geometry
+(`BEAMFS_INDIRECT_PTRS` and every `BEAMFS_MAX_IBLOCK_*` derived
+from it), which is exactly the kind of format churn section 2's
+anti-NAK axis argues against for a structure scheme 4 is expected
+to replace outright.
+
+Scheme 4 (`UNIVERSAL_EXTENT`) makes the question moot rather than
+answering it: an extent-based layout has no fixed array of raw
+pointers to corrupt in this way. The residual is therefore scoped
+to scheme 2 and tracked as a reason favouring scheme 4, alongside
+the reasons already given in section 6, not as an open defect
+requiring its own fix within scheme 2.
+
 ## 7. Honest scope statement (cover letter, paper, Kconfig)
 
 Every public-facing artefact of v5.0 must declare the Family A vs
