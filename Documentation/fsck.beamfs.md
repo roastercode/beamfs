@@ -70,6 +70,22 @@ Walks the on-disk structure top-down without writing. Validates:
 - block 2 bitmap: RS(255,239)×16 over the 16 sub-blocks of 239 bytes;
 - block 5 first data block: scheme-dependent integrity walk
   (UNIVERSAL_INLINE = RS(255,239)×16 per block, parity tail-stored);
+- DATA_CSUM descriptor (RO_COMPAT bit 4, format-v6.md), when set:
+  `csum_type` and `csum` at tail-pad offsets 4080 and 4084, checked
+  against the RS-decoded payload the same way the kernel read path
+  does. A type outside {NONE, CRC32} is reported as a corrupted
+  descriptor, not silently accepted;
+- DATA_SELFID digest (RO_COMPAT bit 5, format-v6.md), when set: the
+  64-bit identity at tail-pad offset 4088, recomputed from
+  (inode, logical block) and compared to the stored value for every
+  data block visited during the inode-table walk (see pass 3 below);
+- indirection blocks (`i_indirect`, `i_dindirect`, `i_tindirect`, and
+  the L1/L2 levels beneath them): each pointer is checked against
+  `[s_data_start, s_data_start + s_nblocks)` and against the bitmap
+  walked in pass 2, mirroring `beamfs_check_intermediate_block()`
+  (kernel, 2026-08-24). fsck walks these off-line for every inode,
+  where the kernel only validates the levels a given read actually
+  traverses;
 - RS journal: 64 entries, per-entry CRC32, monotonic timestamps,
   block-number sentinel respected.
 
@@ -97,7 +113,21 @@ Same passes as check-only, but for each correctable region:
 - if the bitmap is found inconsistent with the inode-table walk
   (block referenced by an inode but not marked allocated, or marked
   allocated but unreferenced), the bitmap is regenerated from the
-  inode-table state, and the divergence is logged.
+  inode-table state, and the divergence is logged;
+- if a DATA_CSUM or DATA_SELFID descriptor mismatches a block whose
+  payload RS-decodes cleanly, the descriptor is restated from the
+  decoded payload and the divergence is logged as a descriptor
+  repair, distinct from a data repair. This is not hypothetical:
+  the 2026-08-23 allocation-stamp gap (beamfs.git fcd4009) produced
+  exactly this state -- RS-valid all-zero blocks with an unstamped
+  descriptor -- on volumes formatted before that fix;
+- an indirection-block pointer that is in range but points at a
+  block the bitmap (as rebuilt above) marks free is reported as an
+  unresolved indirection error; `--repair` does not guess a
+  replacement value, it clears the pointer and logs a data-loss
+  entry for the affected logical range, since no other on-disk
+  record identifies the intended target (the residual named in
+  `data-protection-design.md` section 6.1).
 
 ### 3.3 Force mode (`--force`)
 
