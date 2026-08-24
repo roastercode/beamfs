@@ -63,6 +63,10 @@ static void    beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 					    u64 ino, u64 iblock);
 static int     beamfs_inline_zero_tail_block(struct inode *inode,
 					     u64 b, u32 zero_offset);
+static int     beamfs_check_intermediate_block(struct super_block *sb,
+					       u64 block, ino_t ino,
+					       u64 iblock_logical,
+					       const char *label);
 
 /* ------------------------------------------------------------------------- */
 /* Block-mapping helpers (v2 INLINE)                                         */
@@ -84,6 +88,50 @@ static int     beamfs_inline_zero_tail_block(struct inode *inode,
 /*                                   -EOPNOTSUPP beyond v1 capacity,        */
 /*                                   -EINVAL on null phys_out)              */
 /* ------------------------------------------------------------------------- */
+/*
+ * beamfs_check_intermediate_block -- bounds and allocation check for a
+ * pointer-to-pointers block (indirect, dindirect, tindirect and their L1/L2
+ * levels) before it is read as 512 raw __le64 entries.
+ *
+ * The four existing call sites in this file check the terminal pointer --
+ * the one that addresses a leaf data block -- against both the
+ * [s_data_start, s_data_start + s_nblocks) range and the allocation bitmap.
+ * The intermediate blocks that hold indirection pointers had neither check:
+ * a bit flip on fi->i_indirect (or i_dindirect, i_tindirect, or an L1/L2
+ * entry) reaching a value inside the valid range but pointing at an
+ * unrelated or unallocated block was read via sb_bread and its raw bytes
+ * were reinterpreted as 512 pointers, with no signal. This closes that gap
+ * the same way DATA_SELFID and beamfs_block_is_allocated closed it for
+ * terminal pointers and file data: fail closed before the read rather than
+ * trusting whatever the corrupted pointer happens to reach.
+ */
+static int beamfs_check_intermediate_block(struct super_block *sb,
+					   u64 block, ino_t ino,
+					   u64 iblock_logical,
+					   const char *label)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	if (block < sbi->s_data_start ||
+	    block >= sbi->s_data_start + sbi->s_nblocks) {
+		pr_err_ratelimited("beamfs/inline: corrupted %s block ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+				   label, ino,
+				   (unsigned long long)iblock_logical,
+				   (unsigned long long)block,
+				   sbi->s_data_start,
+				   sbi->s_data_start + sbi->s_nblocks);
+		return -EUCLEAN;
+	}
+	if (!beamfs_block_is_allocated(sb, block)) {
+		pr_err_ratelimited("beamfs/inline: unallocated %s block ino=%lu iblock=%llu phys=%llu\n",
+				   label, ino,
+				   (unsigned long long)iblock_logical,
+				   (unsigned long long)block);
+		return -EUCLEAN;
+	}
+	return 0;
+}
+
 static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				     u64 *phys_out)
 {
@@ -94,6 +142,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 	u64                       indirect_blk;
 	u64                       indirect_slot;
 	u64                       phys;
+	int                       ret;
 
 	if (!phys_out)
 		return -EINVAL;
@@ -134,6 +183,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 		if (!indirect_blk)
 			return 0; /* HOLE: indirect block not yet allocated */
+
+		ret = beamfs_check_intermediate_block(sb, indirect_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "indirect");
+		if (ret)
+			return ret;
 
 		ibh = sb_bread(sb, indirect_blk);
 		if (!ibh) {
@@ -190,6 +246,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (!dindirect_blk)
 			return 0; /* HOLE: dindirect block not yet allocated */
 
+		ret = beamfs_check_intermediate_block(sb, dindirect_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "dindirect");
+		if (ret)
+			return ret;
+
 		ibh = sb_bread(sb, dindirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read dindirect block %llu\n",
@@ -202,6 +265,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 		if (!l1_blk)
 			return 0; /* HOLE: level-1 indirect not allocated */
+
+		ret = beamfs_check_intermediate_block(sb, l1_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "dindirect L1");
+		if (ret)
+			return ret;
 
 		l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
@@ -261,6 +331,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (!tindirect_blk)
 			return 0; /* HOLE: tindirect block not yet allocated */
 
+		ret = beamfs_check_intermediate_block(sb, tindirect_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "tindirect");
+		if (ret)
+			return ret;
+
 		ibh = sb_bread(sb, tindirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect block %llu\n",
@@ -274,6 +351,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (!l1_blk)
 			return 0; /* HOLE: level-1 not allocated */
 
+		ret = beamfs_check_intermediate_block(sb, l1_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "tindirect L1");
+		if (ret)
+			return ret;
+
 		l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
@@ -286,6 +370,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 		if (!l2_blk)
 			return 0; /* HOLE: level-2 not allocated */
+
+		ret = beamfs_check_intermediate_block(sb, l2_blk,
+						      inode->i_ino,
+						      iblock_logical,
+						      "tindirect L2");
+		if (ret)
+			return ret;
 
 		l2bh = sb_bread(sb, l2_blk);
 		if (!l2bh) {
