@@ -1162,7 +1162,15 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		 * unstamped block: fail closed instead of waving it through.
 		 */
 		if (ctype != BEAMFS_CSUM_CRC32) {
-			u32 xflags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
+			/*
+			 * UNCORRECTABLE is reserved: beamfs_log_rs_event_flagged
+			 * sets it itself for the positions == NULL, n_positions == 0
+			 * call shape used here (format-v4.md section 6.5). Passing it
+			 * in extra_flags trips the WARN_ON_ONCE reserved-mask guard at
+			 * super.c:523 and the journal entry is dropped, which is what
+			 * made the master node report RS_FAILED on 2026-08-24.
+			 */
+			u32 xflags = 0;
 
 			if (rmw_path)
 				xflags |= BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED;
@@ -1214,7 +1222,15 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		u64 got_id  = get_unaligned_le64(tmp + BEAMFS_DATA_SELFID_OFF);
 
 		if (want_id != got_id) {
-			u32 xflags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
+			/*
+			 * UNCORRECTABLE is reserved: beamfs_log_rs_event_flagged
+			 * sets it itself for the positions == NULL, n_positions == 0
+			 * call shape used here (format-v4.md section 6.5). Passing it
+			 * in extra_flags trips the WARN_ON_ONCE reserved-mask guard at
+			 * super.c:523 and the journal entry is dropped, which is what
+			 * made the master node report RS_FAILED on 2026-08-24.
+			 */
+			u32 xflags = 0;
 
 			if (rmw_path)
 				xflags |= BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED;
