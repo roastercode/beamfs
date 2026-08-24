@@ -485,6 +485,31 @@ struct beamfs_rs_event {
 #define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
 #define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
 #define BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY     (1ULL << 11)
+/*
+ * BEAMFS_FEATURE_INCOMPAT_ENCRYPT: reserved for a future at-rest
+ * encryption layer, not yet implemented. Declared now, alongside
+ * SHADOW_PARITY and LARGE_BLOCK above, so an on-disk bit position is
+ * fixed before any volume exists that could claim it by accident.
+ *
+ * Composition order, should this be implemented: encrypt -> RS encode
+ * -> DATA_CSUM / DATA_SELFID, mirrored in reverse on read (RS decode
+ * -> verify -> decrypt). Two consequences follow from that order:
+ *
+ *   - DATA_CSUM and DATA_SELFID would cover ciphertext, not plaintext.
+ *     A corrupted block still fails closed (the RS-decoded bytes no
+ *     longer match the stored digest), but decryption happening after
+ *     the check means garbage plaintext is never produced from a block
+ *     that already failed integrity, which matches the fail-closed
+ *     doctrine documented in format-v6.md section 3.3.
+ *
+ *   - Encrypting before RS means a single ciphertext bit flip can
+ *     alter more plaintext bits than the corresponding cleartext flip
+ *     would (block-cipher diffusion), which the RS correction budget
+ *     was not sized against. This is a design question for whoever
+ *     implements the bit, not an implementation detail to silently
+ *     inherit from the current cleartext path.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_ENCRYPT           (1ULL << 12)
 
 /* Flags supported by this kernel module.
  * PER_INODE_RS: per-inode RS(255,239) parity protection. The kernel
