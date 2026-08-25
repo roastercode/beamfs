@@ -1842,7 +1842,27 @@ static int beamfs_inline_writeback_folio(struct inode *inode,
 		 */
 		unlock_buffer(bh);
 		if (wbc && wbc->sync_mode == WB_SYNC_ALL) {
+			/* HANG INSTRUMENTATION 2026-08-25: the WB_SYNC_ALL path
+			 * hangs in sync_dirty_buffer -> wait_on_buffer with the
+			 * block layer showing the I/O completed. Log which block
+			 * and what state the bh is in on entry and exit so the
+			 * next hang identifies the buffer instead of leaving it
+			 * anonymous. Remove once diagnosed. */
+			pr_info("beamfs/hang: pre-sync ino=%lu b=%llu phys=%llu blocknr=%llu size=%zu mapped=%d dirty=%d locked=%d uptodate=%d count=%d\n",
+				inode->i_ino, (unsigned long long)b,
+				(unsigned long long)phys,
+				(unsigned long long)bh->b_blocknr,
+				bh->b_size,
+				buffer_mapped(bh) ? 1 : 0,
+				buffer_dirty(bh) ? 1 : 0,
+				buffer_locked(bh) ? 1 : 0,
+				buffer_uptodate(bh) ? 1 : 0,
+				atomic_read(&bh->b_count));
 			ret = sync_dirty_buffer(bh);
+			pr_info("beamfs/hang: post-sync ino=%lu b=%llu phys=%llu ret=%d uptodate=%d\n",
+				inode->i_ino, (unsigned long long)b,
+				(unsigned long long)phys, ret,
+				buffer_uptodate(bh) ? 1 : 0);
 			brelse(bh);
 			if (ret < 0)
 				goto fail_kunmap;
