@@ -363,6 +363,48 @@ static int rs_decode_internal(struct rs_codec *rs,
 	return num_corrected;
 }
 
+/*
+ * Port of the reference encoder (mkfs.beamfs.c::encode_rs_userspace,
+ * itself the userspace twin of the kernel's beamfs_rs_encode), adapted
+ * to read genpoly/alpha_to/index_of from an already-initialised
+ * struct rs_codec instead of static file-local tables. Structurally
+ * identical LFSR: an attempt to derive this from decode_rs.c's index
+ * conventions instead produced wrong parity on every test length
+ * (172/211/239), so this follows the known-correct encoder's shape
+ * exactly rather than re-deriving the arithmetic.
+ */
+void rs_encode_subblock(struct rs_codec *rs,
+			const uint8_t *data, size_t len,
+			uint8_t *parity)
+{
+	uint16_t *alpha_to = rs->alpha_to;
+	uint16_t *index_of = rs->index_of;
+	uint16_t *genpoly  = rs->genpoly;
+	uint16_t par[RS_NROOTS];
+	size_t i;
+
+	memset(par, 0, sizeof(par));
+
+	for (i = 0; i < len; i++) {
+		uint16_t feedback = index_of[data[i] ^ par[0]];
+		unsigned int j;
+
+		if (feedback != rs->nn) {
+			for (j = 0; j < (unsigned int)RS_NROOTS - 1; j++)
+				par[j] = par[j + 1] ^
+					alpha_to[rs_modnn(rs, feedback + genpoly[RS_NROOTS - 1 - j])];
+			par[RS_NROOTS - 1] = alpha_to[rs_modnn(rs, feedback + genpoly[0])];
+		} else {
+			for (j = 0; j < (unsigned int)RS_NROOTS - 1; j++)
+				par[j] = par[j + 1];
+			par[RS_NROOTS - 1] = 0;
+		}
+	}
+
+	for (i = 0; i < RS_NROOTS; i++)
+		parity[i] = (uint8_t)(par[i] & 0xff);
+}
+
 int rs_decode_subblock(struct rs_codec *rs,
 		       uint8_t *data, size_t len,
 		       uint8_t *parity,

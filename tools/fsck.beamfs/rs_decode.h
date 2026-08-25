@@ -71,4 +71,25 @@ int rs_decode_subblock(struct rs_codec *rs,
 		       uint8_t *parity,
 		       int *positions);
 
+/*
+ * rs_encode_subblock -- compute RS(255,239) parity for one shortened
+ * subblock, matching the kernel's beamfs_rs_encode() and mkfs.beamfs's
+ * encode_rs_userspace() byte-for-byte (same codec parameters, same
+ * generator-polynomial LFSR encoding).
+ *
+ * @rs:      codec handle from rs_init()
+ * @data:    data segment, len bytes, read-only
+ * @len:     data length (172 for inode, 211 for SB sub-block, 239 for
+ *           bitmap/data block)
+ * @parity:  output, 16 bytes
+ *
+ * Needed wherever a pass modifies bytes inside an RS-covered region and
+ * must re-encode before writing back (pass 5's journal repair modifies
+ * s_rs_journal[], which lives inside the superblock's RS-covered
+ * region B).
+ */
+void rs_encode_subblock(struct rs_codec *rs,
+			const uint8_t *data, size_t len,
+			uint8_t *parity);
+
 #endif /* FSCK_BEAMFS_RS_DECODE_H */
