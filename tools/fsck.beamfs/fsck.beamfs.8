@@ -1,0 +1,180 @@
+.\" SPDX-License-Identifier: GPL-2.0-only
+.\" Copyright (C) 2026 Aurelien Desbrieres <aurelien@hackers.camp>
+.TH FSCK.BEAMFS 8 "2026-08-27" "beamfs 1.5.1" "System Administration"
+.SH NAME
+fsck.beamfs \- check and repair a beamfs filesystem
+.SH SYNOPSIS
+.B fsck.beamfs
+.RI [ options ]
+.I device
+.SH DESCRIPTION
+.B fsck.beamfs
+checks the structural integrity of an unmounted beamfs filesystem and,
+when asked, repairs what it can.
+.PP
+beamfs corrects single\-event and multi\-bit upsets online, inside the
+kernel, on every read. This tool is the offline complement, for the
+cases the kernel cannot or should not handle: after a mount has been
+refused, before trusting a volume that has been stored or transported,
+or as a full inventory after a known electromagnetic event. It operates
+on the block device directly and never runs against a mounted
+filesystem.
+.PP
+Five passes run in order. Each depends on the previous one having
+established trustworthy on\-disk state.
+.TP
+.B Pass 1 \- superblock
+Reads block 0, RS\-decodes the thirteen shortened RS(255,239)
+subblocks covering the superblock, then verifies
+.IR s_crc32 .
+The magic number lives inside the RS\-covered region, so a corrupted
+magic is a candidate for correction rather than an immediate abort.
+.I s_crc32
+itself is deliberately outside RS coverage: a flip there can only
+produce a false mismatch against data RS has already proven correct,
+so a clean RS decode with a mismatching CRC is treated as a stale
+checksum and, under
+.BR \-\-repair ,
+restated from the computed value.
+.IP
+If this pass finds the superblock untrustworthy \- bad magic without
+.BR \-\-force ,
+or RS\-uncorrectable content \- passes 2 to 5 are skipped rather than
+run against block offsets derived from unvalidated fields.
+.TP
+.B Pass 2 \- block bitmap
+RS\-decodes each of the sixteen subblocks in every bitmap block. A
+subblock RS cannot correct means the roughly 15000 allocation bits it
+carries are untrustworthy in either direction; recovering from that is
+pass 4's job, not this one's.
+.TP
+.B Pass 3 \- inode table
+For every occupied inode, verifies CRC32 first and attempts RS
+correction only on mismatch, re\-verifying the CRC afterwards \- the
+same order the kernel uses on the read path. Direct pointers and the
+single, double and triple indirect trees are then walked and every
+pointer bounds\-checked, and checked against the allocation bitmap.
+.IP
+Indirection blocks carry no checksum of their own: 512 pointers occupy
+a full 4096\-byte block with no room for one. A corrupted pointer that
+lands on another allocated block in range is therefore
+indistinguishable from a legitimate one, here as in the kernel. See
+.B Documentation/data\-protection\-design.md
+section 6.1.
+.TP
+.B Pass 4 \- bitmap rebuild
+Builds a reference bitmap from every pointer reachable from the inode
+table and compares it against the on\-disk bitmap. Two divergences are
+reported: a block referenced by an inode but marked free, which risks
+silent data loss if that block is handed out again, and a block marked
+used but referenced by nothing, which is a leak. Under
+.BR \-\-repair ,
+the on\-disk bitmap is rewritten to match the inode table.
+.TP
+.B Pass 5 \- RS event journal
+Validates the 64\-entry journal: per\-entry CRC32, the two structural
+sentinel fields that must stay zero, and timestamp monotonicity in
+write order from the circular head. The journal is a forensic log, not
+redo state, so nothing is replayed. Under
+.BR \-\-repair ,
+an entry failing its own CRC32 is zeroed rather than guessed at; the
+superblock's CRC and RS parity are then re\-derived, since the journal
+lives inside the superblock's RS\-covered region.
+.SH OPTIONS
+.TP
+.BR \-n ", " \-\-check\-only
+Report only, modify nothing. This is the default. A correctable error
+found in this mode is reported as
+.BR 4 ,
+not
+.BR 0 :
+a correction computed in memory and never written back did not happen
+to the volume.
+.TP
+.BR \-p ", " \-\-repair
+Write corrections back to the device.
+.TP
+.BR \-f ", " \-\-force
+Continue past sanity checks that would otherwise abort early, such as a
+superblock whose magic number is wrong after RS correction. Intended
+for forensic recovery where the operator accepts the risk of operating
+on a volume that may not be beamfs at all.
+.TP
+.BR \-v ", " \-\-verbose
+Print per\-pass progress to standard output. Errors go to standard
+error regardless.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit.
+.SH EXIT STATUS
+Exit codes follow the
+.BR fsck (8)
+convention.
+.TP
+.B 0
+No errors.
+.TP
+.B 1
+Errors were found and corrected. Only possible under
+.BR \-\-repair .
+.TP
+.B 4
+Errors were found and left uncorrected. Either
+.B \-\-check\-only
+was in effect, or the damage exceeded what RS and the bitmap rebuild
+can recover.
+.TP
+.B 8
+Operational error: the device could not be opened or read.
+.TP
+.B 16
+Usage or syntax error.
+.TP
+.B 32
+Canceled by the operator.
+.TP
+.B 128
+Shared library error.
+.SH EXAMPLES
+Check a volume without touching it:
+.PP
+.RS 4
+.B fsck.beamfs \-n /dev/vdb
+.RE
+.PP
+Repair, with per\-pass progress:
+.PP
+.RS 4
+.B fsck.beamfs \-\-repair \-\-verbose /dev/vdb
+.RE
+.PP
+Attempt recovery on a volume whose superblock magic is wrong:
+.PP
+.RS 4
+.B fsck.beamfs \-\-repair \-\-force /dev/vdb
+.RE
+.SH NOTES
+The Reed\-Solomon decoder is a userland port of
+.B lib/reed_solomon/
+from the Linux kernel tree, so its correction behaviour matches the
+in\-kernel decoder byte for byte. The encoder used when rewriting
+parity is verified against the same reference.
+.PP
+This tool does not replace online RS correction, does not run as a
+daemon, does not repair a mounted filesystem, does not perform
+cryptographic verification, and does not replay a metadata journal \-
+beamfs has none. See
+.B Documentation/fsck.beamfs.md
+section 2.
+.SH SEE ALSO
+.BR fsck (8),
+.BR mkfs.beamfs (8),
+.BR e2fsck (8)
+.PP
+.B Documentation/fsck.beamfs.md
+in the beamfs source tree, for the full scope and design rationale.
+.SH AUTHOR
+Aurelien Desbrieres <aurelien@hackers.camp>

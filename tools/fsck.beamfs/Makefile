@@ -37,6 +37,8 @@ clean:
 install: $(BIN)
 	$(INSTALL) -d $(DESTDIR)$(SBINDIR)
 	$(INSTALL) -m 0755 $(BIN) $(DESTDIR)$(SBINDIR)/$(BIN)
+	$(INSTALL) -d $(DESTDIR)$(MANDIR)/man8
+	$(INSTALL) -m 0644 $(BIN).8 $(DESTDIR)$(MANDIR)/man8/$(BIN).8
 
 # Unit tests. 'make test' builds and runs tests/test_rs_vectors.
 # Exit 77 is the autotools 'skipped' convention; honoured here while
