@@ -120,9 +120,27 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 				   (unsigned long long)block,
 				   sbi->s_data_start,
 				   sbi->s_data_start + sbi->s_nblocks);
+		beamfs_log_rs_event_flagged(sb, block, NULL, 0,
+					    BEAMFS_SUBBLOCK_DATA, 0);
 		return -EUCLEAN;
 	}
 	if (!beamfs_block_is_allocated(sb, block)) {
+		/*
+		 * Journal it as uncorrectable, same as the DATA_CSUM and
+		 * DATA_SELFID fail-closed paths. An indirection pointer
+		 * corrupted beyond the RS correction radius is exactly what
+		 * the forensic journal exists to record; without an entry
+		 * the run reads as an unexplained failure, since dmesg
+		 * carries the pr_err but DMESG_UNCORRECTABLE stays 0. That
+		 * is how the 2026-08-27 multifs run scored RS_FAILED rather
+		 * than RS_FAIL_CLOSED. positions == NULL with
+		 * n_positions == 0 is the uncorrectable call shape; the flag
+		 * is reserved and set by beamfs_log_rs_event_flagged itself
+		 * (format-v4.md section 6.5) -- passing it in extra_flags
+		 * would trip the reserved-mask guard, as 66b8492 fixed.
+		 */
+		beamfs_log_rs_event_flagged(sb, block, NULL, 0,
+					    BEAMFS_SUBBLOCK_DATA, 0);
 		pr_err_ratelimited("beamfs/inline: unallocated %s block ino=%lu iblock=%llu phys=%llu\n",
 				   label, ino,
 				   (unsigned long long)iblock_logical,
@@ -1892,12 +1910,6 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 	struct folio_batch  fbatch;
 	pgoff_t             index, end;
 	int                 ret = 0;
-	/* HANG INSTRUMENTATION 2026-08-26: locate where WB_SYNC_ALL stalls
-	 * now that per-block waiting is gone. Remove once diagnosed.
-	 */
-	u64                 t_start = ktime_get_ns();
-	unsigned long       n_folios_total = 0;
-	unsigned long       n_batches = 0;
 
 	folio_batch_init(&fbatch);
 
@@ -1918,14 +1930,12 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 		if (nr_folios == 0)
 			break;
 
-		n_batches++;
 		for (i = 0; i < nr_folios; i++) {
 			struct folio *folio = fbatch.folios[i];
 
 			ret = beamfs_inline_writeback_folio(inode, sb, folio, wbc);
 			if (ret < 0)
 				goto out_release;
-			n_folios_total++;
 		}
 
 		folio_batch_release(&fbatch);
@@ -1940,28 +1950,12 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 	 * the wait entirely, as before.
 	 */
 	if (wbc->sync_mode == WB_SYNC_ALL) {
-		u64 t_wait = ktime_get_ns();
-		int werr;
-
-		pr_info("beamfs/wb: pre-wait ino=%lu folios=%lu batches=%lu submit_ms=%llu range=[%lld,%lld]\n",
-			inode->i_ino, n_folios_total, n_batches,
-			(t_wait - t_start) / 1000000,
-			wbc->range_start, wbc->range_end);
-
-		werr = filemap_fdatawait_range(mapping,
-					       wbc->range_start,
-					       wbc->range_end);
-
-		pr_info("beamfs/wb: post-wait ino=%lu wait_ms=%llu werr=%d\n",
-			inode->i_ino,
-			(ktime_get_ns() - t_wait) / 1000000, werr);
+		int werr = filemap_fdatawait_range(mapping,
+						   wbc->range_start,
+						   wbc->range_end);
 
 		if (werr)
 			ret = werr;
-	} else if (n_folios_total) {
-		pr_info("beamfs/wb: async-done ino=%lu folios=%lu ms=%llu\n",
-			inode->i_ino, n_folios_total,
-			(ktime_get_ns() - t_start) / 1000000);
 	}
 
 	return ret;
