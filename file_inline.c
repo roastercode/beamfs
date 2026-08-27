@@ -1892,6 +1892,12 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 	struct folio_batch  fbatch;
 	pgoff_t             index, end;
 	int                 ret = 0;
+	/* HANG INSTRUMENTATION 2026-08-26: locate where WB_SYNC_ALL stalls
+	 * now that per-block waiting is gone. Remove once diagnosed.
+	 */
+	u64                 t_start = ktime_get_ns();
+	unsigned long       n_folios_total = 0;
+	unsigned long       n_batches = 0;
 
 	folio_batch_init(&fbatch);
 
@@ -1912,12 +1918,14 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 		if (nr_folios == 0)
 			break;
 
+		n_batches++;
 		for (i = 0; i < nr_folios; i++) {
 			struct folio *folio = fbatch.folios[i];
 
 			ret = beamfs_inline_writeback_folio(inode, sb, folio, wbc);
 			if (ret < 0)
 				goto out_release;
+			n_folios_total++;
 		}
 
 		folio_batch_release(&fbatch);
@@ -1932,12 +1940,28 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 	 * the wait entirely, as before.
 	 */
 	if (wbc->sync_mode == WB_SYNC_ALL) {
-		int werr = filemap_fdatawait_range(mapping,
-						   wbc->range_start,
-						   wbc->range_end);
+		u64 t_wait = ktime_get_ns();
+		int werr;
+
+		pr_info("beamfs/wb: pre-wait ino=%lu folios=%lu batches=%lu submit_ms=%llu range=[%lld,%lld]\n",
+			inode->i_ino, n_folios_total, n_batches,
+			(t_wait - t_start) / 1000000,
+			wbc->range_start, wbc->range_end);
+
+		werr = filemap_fdatawait_range(mapping,
+					       wbc->range_start,
+					       wbc->range_end);
+
+		pr_info("beamfs/wb: post-wait ino=%lu wait_ms=%llu werr=%d\n",
+			inode->i_ino,
+			(ktime_get_ns() - t_wait) / 1000000, werr);
 
 		if (werr)
 			ret = werr;
+	} else if (n_folios_total) {
+		pr_info("beamfs/wb: async-done ino=%lu folios=%lu ms=%llu\n",
+			inode->i_ino, n_folios_total,
+			(ktime_get_ns() - t_start) / 1000000);
 	}
 
 	return ret;
