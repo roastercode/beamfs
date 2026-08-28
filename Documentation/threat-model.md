@@ -190,6 +190,56 @@ hardened system:
   scrubber with RT priority is on the roadmap; the current
   implementation corrects on read access.
 
+### 2.5 Non-electromagnetic physical failure modes
+
+The failure model in 2.1 and 2.2 is electromagnetic by construction,
+and emufi is an electromagnetic upset injector by design (see emufi
+ROADMAP section 1: "NOT particulate radiation hardening; NOT TID
+accumulation"). The physical environments beamfs targets -- spaceborne
+platforms, unmanned vehicles, industrial and nuclear sites -- subject a
+device to stresses that are not electromagnetic and that produce
+failure signatures Reed-Solomon cannot address, because they do not
+corrupt bytes: they remove them.
+
+These are out of scope for v1 and are recorded here as candidates for
+the post-publication roadmap. Each would require a distinct injector
+model, not a parameter change to emufi.
+
+- **Mechanical shock and vibration.** MIL-STD-810 method 516 (shock)
+  and 514 (vibration) govern transport, gunfire, airdrop and rotorcraft
+  environments. On rotating media these produce head mispositioning and
+  off-track writes; on flash and MRAM, solder-joint and package stress.
+  The resulting signature is an unreadable or misplaced sector, not a
+  flipped bit. RS corrects corrupted bytes within a codeword; it has
+  nothing to work with when the codeword does not come back at all.
+  Modelling this requires an injector able to fail a bio rather than
+  perturb its payload.
+
+- **Permanently unreadable blocks.** Distinct from the catastrophic
+  device failure excluded above: a single block returning -EIO on every
+  read while the rest of the device remains healthy. This is the
+  boundary case between correction and redundancy, and it is where the
+  single-device scope of beamfs binds hardest. Worth characterising
+  precisely, because the honest answer -- that recovery requires a
+  second copy the filesystem does not have -- is itself a result, and
+  one a reviewer will ask about.
+
+- **EM transient concurrent with power loss.** The crash-consistency
+  path (beamfs-bench Test B) and the electromagnetic path (emufi) are
+  exercised separately. Their conjunction is the realistic case for an
+  EMP event: bits perturbed in flight while the supply collapses, so
+  that a partially-written RS codeword is what survives the reboot.
+  Neither harness covers this today, and the interaction is not
+  obviously benign.
+
+- **Thermal stress as an independent axis.** Section 2.1 folds thermal
+  stress into the broadband EM family, which is defensible for its
+  effect on retention. It does not capture thermal cycling as a
+  mechanical fatigue mechanism, nor the temperature dependence of the
+  upset rate itself. emufi-physics already models altitude and
+  geomagnetic latitude as environmental axes (PHYSICS_MODELS.md,
+  module: environment); temperature would be the natural third.
+
 ---
 
 ## 3. Threat actor profile
