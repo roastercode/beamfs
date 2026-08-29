@@ -659,6 +659,14 @@ struct beamfs_inode_info {
 	__le64          i_tindirect;
 	__u32           i_flags;
 	struct mutex    i_alloc_mutex;  /* serialize lookup_or_alloc_phys */
+	/*
+	 * Metadata buffer_heads owned by this inode (bitmap blocks dirtied
+	 * on its behalf). The kernel replaced the old i_data.i_private_list
+	 * mechanism, along with mark_buffer_dirty_inode() and
+	 * invalidate_inode_buffers(), with this per-inode list and the
+	 * mmb_* helpers; ext2 carries the same field as i_metadata_bhs.
+	 */
+	struct mapping_metadata_bhs i_metadata_bhs;
 	struct inode    vfs_inode;  /* Must be last */
 };
 

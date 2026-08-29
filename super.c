@@ -34,6 +34,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 	fi->i_dindirect = 0;
 	fi->i_tindirect = 0;
 	fi->i_flags     = 0;
+	mmb_init(&fi->i_metadata_bhs, &fi->vfs_inode.i_data);
 	mutex_init(&fi->i_alloc_mutex);
 
 	return &fi->vfs_inode;
@@ -205,28 +206,31 @@ static void beamfs_evict_inode(struct inode *inode)
 		inode->i_mode = 0;
 		beamfs_write_inode_raw(inode);
 	}
-	invalidate_inode_buffers(inode);
+	mmb_invalidate(&BEAMFS_I(inode)->i_metadata_bhs);
 	clear_inode(inode);
 	/*
 	 * Ordering constraint: beamfs_free_inode_num() must run AFTER
-	 * clear_inode(). clear_inode() asserts that i_data.i_private_list
-	 * is empty (BUG_ON at fs/inode.c:801). beamfs_free_data_blocks()
-	 * above calls beamfs_free_block(sb, blk, NULL) -- the NULL owner
-	 * prevents mark_buffer_dirty_inode() from re-attaching bitmap
-	 * buffer_heads to the dying inode's i_private_list after
-	 * truncate_inode_pages_final() has cleared it. Additionally,
-	 * deferring the bitmap free of the inode number to after
-	 * clear_inode() avoids a window where a concurrent
-	 * beamfs_alloc_inode_num() could hand out the same ino before
-	 * the VFS has finished tearing down the old inode.
+	 * clear_inode(), which asserts the inode owns no metadata
+	 * buffer_heads. beamfs_free_data_blocks() above calls
+	 * beamfs_free_block(sb, blk, NULL) -- the NULL owner keeps
+	 * mmb_mark_buffer_dirty() from re-attaching bitmap buffer_heads
+	 * to a dying inode after its page cache has been torn down.
+	 * Deferring the inode-number free until after clear_inode() also
+	 * closes a window where a concurrent beamfs_alloc_inode_num()
+	 * could hand out the same ino before the VFS had finished.
 	 *
-	 * Root cause: beamfs_free_block() previously passed the evicted
-	 * inode as owner to mark_buffer_dirty_inode(), which appended
-	 * bitmap bh's to inode->i_data.i_private_list AFTER
-	 * truncate_inode_pages_final() had emptied it, triggering
-	 * clear_inode()'s BUG_ON(!list_empty(&i_data.i_private_list)).
-	 * Confirmed via ftrace/kprobe on beamfs_evict_inode + clear_inode
-	 * during `depmod -a` on the rootfs (renameat2 path, §3.10).
+	 * Root cause: beamfs_free_block() used to pass the evicted inode
+	 * as owner, appending bitmap bh's to its metadata list after
+	 * truncate_inode_pages_final() had emptied it, which tripped
+	 * clear_inode()'s assertion. Confirmed by ftrace/kprobe on
+	 * beamfs_evict_inode and clear_inode during `depmod -a` on the
+	 * rootfs (renameat2 path, section 3.10).
+	 *
+	 * The mechanism was i_data.i_private_list with
+	 * mark_buffer_dirty_inode() and invalidate_inode_buffers() until
+	 * the kernel replaced it with the per-inode mapping_metadata_bhs
+	 * list and the mmb_* helpers. The ordering requirement is
+	 * unchanged; only the names are.
 	 */
 	if (!inode->i_nlink)
 		beamfs_free_inode_num(inode->i_sb, (u64)inode->i_ino);
@@ -258,10 +262,11 @@ static void beamfs_evict_inode(struct inode *inode)
  * forces bitmap to disk BEFORE the inode-table buffer is even
  * submitted. This is the exact ordering required.
  *
- * Instrumentation: pr_info under pr_fmt "beamfs/sync310:" logs the
- * count of dirty bitmap buffers found and the time spent. ftrace
- * trace_printk emits the same data into the ring buffer for fine
- * post-mortem correlation against beamfs_alloc_block/evict events.
+ * Instrumentation: one pr_debug per call reports the number of dirty
+ * bitmap buffers found, how many were flushed, and the time spent.
+ * It is a pr_debug rather than a pr_info because sync_fs runs on every
+ * sync: under load that is a log line per second for data that is only
+ * of interest when investigating. Enable with dyndbg when needed.
  */
 static int beamfs_sync_fs(struct super_block *sb, int wait)
 {
@@ -277,7 +282,6 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 		return 0;
 
 	t0_ns = ktime_get_ns();
-	trace_printk("beamfs/sync310 enter wait=%d\n", wait);
 
 	/* Flush all dirty bitmap buffers synchronously. */
 	if (sbi->s_bitmap_blkhs) {
@@ -291,8 +295,6 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 				continue;
 			n_bitmap_dirty++;
 			rc = sync_dirty_buffer(bh);
-			trace_printk("beamfs/sync310 bitmap k=%u rc=%d\n",
-				     k, rc);
 			if (rc) {
 				if (!last_err)
 					last_err = rc;
@@ -306,7 +308,6 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 	if (sbi->s_sbh && buffer_dirty(sbi->s_sbh)) {
 		int rc = sync_dirty_buffer(sbi->s_sbh);
 
-		trace_printk("beamfs/sync310 sbh rc=%d\n", rc);
 		if (rc) {
 			if (!last_err)
 				last_err = rc;
@@ -316,11 +317,9 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 	}
 
 	t1_ns = ktime_get_ns();
-	pr_info("beamfs/sync310: wait=%d bitmap_dirty=%u bitmap_synced=%u sb_synced=%u err=%d dt_ns=%llu\n",
+	pr_debug("beamfs/sync310: wait=%d bitmap_dirty=%u bitmap_synced=%u sb_synced=%u err=%d dt_ns=%llu\n",
 		wait, n_bitmap_dirty, n_bitmap_synced, n_sb_synced,
 		last_err, (unsigned long long)(t1_ns - t0_ns));
-	trace_printk("beamfs/sync310 leave wait=%d dt_ns=%llu\n",
-		     wait, (unsigned long long)(t1_ns - t0_ns));
 
 	return last_err;
 }

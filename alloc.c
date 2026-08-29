@@ -340,9 +340,10 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	mark_buffer_dirty(bh);
 	/* Bind to owner inode so VFS writeback flushes this bitmap
 	 * block BEFORE the owner inode is marked clean. The VFS
-	 * runs sync_mapping_buffers in __writeback_single_inode
-	 * before write_inode, which establishes the bitmap-before-
-	 * inode ordering required to prevent the sec. 3.10 boot-time
+	 * flushes the inode's metadata buffer list in
+	 * __writeback_single_inode before write_inode, which
+	 * establishes the bitmap-before-inode ordering required to
+	 * prevent the sec. 3.10 boot-time
 	 * double_free symptom: without this, boot N could persist
 	 * an inode pointer without persisting the matching bitmap
 	 * clear, leaving boot N+1 to mount a bitmap declaring the
@@ -352,7 +353,7 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * synchronous sync_dirty_buffer.
 	 */
 	if (owner && !(inode_state_read_once(owner) & I_FREEING))
-		mark_buffer_dirty_inode(bh, owner);
+		mmb_mark_buffer_dirty(bh, &BEAMFS_I(owner)->i_metadata_bhs);
 
 	unlock_buffer(bh);
 	return 0;

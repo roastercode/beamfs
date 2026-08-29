@@ -1987,12 +1987,26 @@ const struct address_space_operations beamfs_inline_aops = {
 	.dirty_folio      = filemap_dirty_folio,
 };
 
+/*
+ * Same as the non-inline path: generic_file_fsync() went away with
+ * sync_mapping_buffers() and i_private_list. Metadata buffer_heads
+ * owned by the inode are flushed through mmb_fsync().
+ */
+static int beamfs_inline_fsync(struct file *file, loff_t start, loff_t end,
+			       int datasync)
+{
+	struct inode *inode = file->f_mapping->host;
+
+	return mmb_fsync(file, &BEAMFS_I(inode)->i_metadata_bhs,
+			 start, end, datasync != 0);
+}
+
 const struct file_operations beamfs_inline_file_operations = {
 	.llseek      = generic_file_llseek,
 	.read_iter   = generic_file_read_iter,
 	.write_iter  = beamfs_inline_file_write_iter,
 	.mmap        = generic_file_mmap,
-	.fsync       = generic_file_fsync,
+	.fsync       = beamfs_inline_fsync,
 	.splice_read = filemap_splice_read,
 };
 

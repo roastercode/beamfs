@@ -14,12 +14,27 @@
 /* Forward declaration - defined after iomap_ops */
 static ssize_t beamfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from);
 
+/*
+ * generic_file_fsync() was removed along with sync_mapping_buffers() and
+ * the i_private_list mechanism it drove. Metadata buffer_heads owned by
+ * an inode now live in a per-inode mapping_metadata_bhs list, flushed
+ * through mmb_fsync(); ext2_fsync() has the same shape.
+ */
+static int beamfs_fsync(struct file *file, loff_t start, loff_t end,
+			int datasync)
+{
+	struct inode *inode = file->f_mapping->host;
+
+	return mmb_fsync(file, &BEAMFS_I(inode)->i_metadata_bhs,
+			 start, end, datasync != 0);
+}
+
 const struct file_operations beamfs_file_operations = {
 	.llseek         = generic_file_llseek,
 	.read_iter      = generic_file_read_iter,
 	.write_iter     = beamfs_file_write_iter,
 	.mmap           = generic_file_mmap,
-	.fsync          = generic_file_fsync,
+	.fsync          = beamfs_fsync,
 	.splice_read    = filemap_splice_read,
 };
 
