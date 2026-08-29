@@ -101,8 +101,8 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 
 	if (block < sbi->s_data_start ||
 	    block >= sbi->s_data_start + sbi->s_nblocks) {
-		pr_err_ratelimited("beamfs/inline: corrupted %s block ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
-				   label, ino,
+		pr_err_ratelimited("beamfs/inline: corrupted %s block ino=%llu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+				   label, (unsigned long long)ino,
 				   (unsigned long long)iblock_logical,
 				   (unsigned long long)block,
 				   sbi->s_data_start,
@@ -128,8 +128,8 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 		 */
 		beamfs_log_rs_event_flagged(sb, block, NULL, 0,
 					    BEAMFS_SUBBLOCK_DATA, 0);
-		pr_err_ratelimited("beamfs/inline: unallocated %s block ino=%lu iblock=%llu phys=%llu\n",
-				   label, ino,
+		pr_err_ratelimited("beamfs/inline: unallocated %s block ino=%llu iblock=%llu phys=%llu\n",
+				   label, (unsigned long long)ino,
 				   (unsigned long long)iblock_logical,
 				   (unsigned long long)block);
 		return -EUCLEAN;
@@ -162,8 +162,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 			if (dphys < sbi->s_data_start ||
 			    dphys >= sbi->s_data_start + sbi->s_nblocks) {
-				pr_err_ratelimited("beamfs/inline: corrupted direct pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: corrupted direct pointer ino=%llu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)dphys,
 						   sbi->s_data_start,
@@ -171,8 +171,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EUCLEAN;
 			}
 			if (!beamfs_block_is_allocated(sb, phys)) {
-				pr_err_ratelimited("beamfs/inline: unallocated direct pointer ino=%lu iblock=%llu phys=%llu\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: unallocated direct pointer ino=%llu iblock=%llu phys=%llu\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys);
 				return -EUCLEAN;
@@ -190,7 +190,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: indirect block not yet allocated */
 
 		ret = beamfs_check_intermediate_block(sb, indirect_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "indirect");
 		if (ret)
@@ -211,8 +211,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 			if (phys < sbi->s_data_start ||
 			    phys >= sbi->s_data_start + sbi->s_nblocks) {
-				pr_err_ratelimited("beamfs/inline: corrupted indirect pointer ino=%lu iblock=%llu slot=%llu phys=%llu (out of [%lu, %lu))\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: corrupted indirect pointer ino=%llu iblock=%llu slot=%llu phys=%llu (out of [%lu, %lu))\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)indirect_slot,
 						   (unsigned long long)phys,
@@ -221,8 +221,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EUCLEAN;
 			}
 			if (!beamfs_block_is_allocated(sb, phys)) {
-				pr_err_ratelimited("beamfs/inline: unallocated indirect pointer ino=%lu iblock=%llu phys=%llu\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: unallocated indirect pointer ino=%llu iblock=%llu phys=%llu\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys);
 				return -EUCLEAN;
@@ -252,7 +252,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: dindirect block not yet allocated */
 
 		ret = beamfs_check_intermediate_block(sb, dindirect_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "dindirect");
 		if (ret)
@@ -272,7 +272,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: level-1 indirect not allocated */
 
 		ret = beamfs_check_intermediate_block(sb, l1_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "dindirect L1");
 		if (ret)
@@ -293,8 +293,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 			if (phys < sbi->s_data_start ||
 			    phys >= sbi->s_data_start + sbi->s_nblocks) {
-				pr_err_ratelimited("beamfs/inline: corrupted dindirect pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: corrupted dindirect pointer ino=%llu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
@@ -302,8 +302,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EUCLEAN;
 			}
 			if (!beamfs_block_is_allocated(sb, phys)) {
-				pr_err_ratelimited("beamfs/inline: unallocated dindirect pointer ino=%lu iblock=%llu phys=%llu\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: unallocated dindirect pointer ino=%llu iblock=%llu phys=%llu\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys);
 				return -EUCLEAN;
@@ -337,7 +337,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: tindirect block not yet allocated */
 
 		ret = beamfs_check_intermediate_block(sb, tindirect_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "tindirect");
 		if (ret)
@@ -357,7 +357,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: level-1 not allocated */
 
 		ret = beamfs_check_intermediate_block(sb, l1_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "tindirect L1");
 		if (ret)
@@ -377,7 +377,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return 0; /* HOLE: level-2 not allocated */
 
 		ret = beamfs_check_intermediate_block(sb, l2_blk,
-						      inode->i_ino,
+						      (unsigned long long)inode->i_ino,
 						      iblock_logical,
 						      "tindirect L2");
 		if (ret)
@@ -398,8 +398,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 
 			if (phys < sbi->s_data_start ||
 			    phys >= sbi->s_data_start + sbi->s_nblocks) {
-				pr_err_ratelimited("beamfs/inline: corrupted tindirect pointer ino=%lu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: corrupted tindirect pointer ino=%llu iblock=%llu phys=%llu (out of [%lu, %lu))\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys,
 						   sbi->s_data_start,
@@ -407,8 +407,8 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EUCLEAN;
 			}
 			if (!beamfs_block_is_allocated(sb, phys)) {
-				pr_err_ratelimited("beamfs/inline: unallocated tindirect pointer ino=%lu iblock=%llu phys=%llu\n",
-						   inode->i_ino,
+				pr_err_ratelimited("beamfs/inline: unallocated tindirect pointer ino=%llu iblock=%llu phys=%llu\n",
+						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
 						   (unsigned long long)phys);
 				return -EUCLEAN;
@@ -505,7 +505,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
 					     (const u8 *)dbh->b_data,
-					     inode->i_ino, iblock_logical);
+					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -595,7 +595,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
 					     (const u8 *)dbh->b_data,
-					     inode->i_ino, iblock_logical);
+					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -729,7 +729,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
 					     (const u8 *)dbh->b_data,
-					     inode->i_ino, iblock_logical);
+					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -895,7 +895,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)dbh->b_data,
 					     (const u8 *)dbh->b_data,
-					     inode->i_ino, iblock_logical);
+					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -1098,8 +1098,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 				NULL, 0,
 				BEAMFS_SUBBLOCK_DATA,
 				xflags);
-			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u uncorrectable%s\n",
-					   inode->i_ino,
+			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu subblock=%u uncorrectable%s\n",
+					   (unsigned long long)inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
 					   i,
 					   rmw_path ? " (rmw)" : "");
@@ -1113,8 +1113,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 
 			if (np > BEAMFS_RS_PARITY / 2)
 				np = BEAMFS_RS_PARITY / 2;
-			pr_warn_ratelimited("beamfs/inline: ino=%lu iblock=%llu subblock=%u: %d symbol(s) %s\n",
-					    inode->i_ino,
+			pr_warn_ratelimited("beamfs/inline: ino=%llu iblock=%llu subblock=%u: %d symbol(s) %s\n",
+					    (unsigned long long)inode->i_ino,
 					    (unsigned long long)iblock_logical_for_log,
 					    i, rc,
 					    rmw_path ? "neutralised" : "corrected");
@@ -1185,8 +1185,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 						    NULL, 0,
 						    BEAMFS_SUBBLOCK_DATA,
 						    xflags);
-			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_csum bad descriptor type=0x%02x (expected 0x%02x)%s\n",
-					   inode->i_ino,
+			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu data_csum bad descriptor type=0x%02x (expected 0x%02x)%s\n",
+					   (unsigned long long)inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
 					   ctype, BEAMFS_CSUM_CRC32,
 					   rmw_path ? " (rmw)" : "");
@@ -1200,8 +1200,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 				NULL, 0,
 				BEAMFS_SUBBLOCK_DATA,
 				rmw_path ? BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0);
-			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_csum mismatch want=0x%08x got=0x%08x%s\n",
-					   inode->i_ino,
+			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu data_csum mismatch want=0x%08x got=0x%08x%s\n",
+					   (unsigned long long)inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
 					   want, got,
 					   rmw_path ? " (rmw)" : "");
@@ -1245,8 +1245,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 						    NULL, 0,
 						    BEAMFS_SUBBLOCK_DATA,
 						    xflags);
-			pr_err_ratelimited("beamfs/inline: ino=%lu iblock=%llu data_selfid mismatch want=0x%016llx got=0x%016llx%s\n",
-					   inode->i_ino,
+			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu data_selfid mismatch want=0x%016llx got=0x%016llx%s\n",
+					   (unsigned long long)inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
 					   want_id, got_id,
 					   rmw_path ? " (rmw)" : "");
@@ -1352,58 +1352,6 @@ out_brelse:
 /* on 15 boundary cases (see commit message and INLINE-MULTIBLOCK-DESIGN.md  */
 /* section 1.4).                                                             */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_folio_coverage(struct inode *inode,
-					pgoff_t folio_index,
-					u64 *out_b_first,
-					u32 *out_k_first,
-					u64 *out_b_last,
-					u32 *out_len_in_b_last,
-					u32 *out_folio_user_bytes)
-{
-	loff_t i_size = i_size_read(inode);
-	u64    folio_start_byte = (u64)folio_index << PAGE_SHIFT;
-	u64    folio_end_byte;     /* exclusive */
-	u64    b_first, b_last;
-	u32    k_first, fub, lbl;
-
-	if (folio_start_byte >= (u64)i_size)
-		return -ERANGE;
-
-	folio_end_byte = folio_start_byte + PAGE_SIZE;
-	if (folio_end_byte > (u64)i_size)
-		folio_end_byte = (u64)i_size;
-
-	b_first = folio_start_byte / BEAMFS_DATA_INLINE_BYTES;
-	k_first = (u32)(folio_start_byte % BEAMFS_DATA_INLINE_BYTES);
-	b_last  = (folio_end_byte - 1) / BEAMFS_DATA_INLINE_BYTES;
-
-	fub = (u32)(folio_end_byte - folio_start_byte);
-
-	/*
-	 * lbl (len in b_last) is the number of user bytes the folio occupies
-	 * within b_last. For bi-block (b_last == b_first + 1), this is
-	 * fub - (INLINE_BYTES - k_first). For tri-block (b_last == b_first + 2,
-	 * which occurs when k_first > 2*INLINE_BYTES - PAGE_SIZE = 3552),
-	 * the b_first slice is (INLINE_BYTES - k_first), the intermediate is
-	 * INLINE_BYTES full, and lbl is fub - (INLINE_BYTES - k_first) - INLINE_BYTES.
-	 * General formula: lbl = fub - (INLINE_BYTES - k_first)
-	 *                            - (b_last - b_first - 1) * INLINE_BYTES
-	 */
-	if (b_last == b_first)
-		lbl = fub;
-	else
-		lbl = fub - (BEAMFS_DATA_INLINE_BYTES - k_first)
-			  - (u32)(b_last - b_first - 1) * BEAMFS_DATA_INLINE_BYTES;
-
-	*out_b_first         = b_first;
-	*out_k_first         = k_first;
-	*out_b_last          = b_last;
-	*out_len_in_b_last   = lbl;
-	*out_folio_user_bytes = fub;
-
-	return 0;
-}
-
 /* ------------------------------------------------------------------------- */
 /* read_folio (v2 INLINE) -- per-block RS(255,239) FEC, multi-block scope.   */
 /*                                                                           */
@@ -1455,8 +1403,6 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 {
 	loff_t i_size = i_size_read(inode);
 	u64 b = (u64)pos / BEAMFS_DATA_INLINE_BYTES;
-	u64 block_start = b * BEAMFS_DATA_INLINE_BYTES;
-	u64 block_end = block_start + BEAMFS_DATA_INLINE_BYTES;
 	u64 phys = 0;
 	int ret;
 
@@ -1572,7 +1518,7 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 	 * second iteration dereferenced the released folio.
 	 */
 	if (end > (u64)i_size) {
-		u64 eof = max(pos, (u64)i_size);
+		u64 eof = max_t(u64, pos, (u64)i_size);
 
 		folio_zero_range(folio, offset_in_folio(folio, eof),
 				 (size_t)(end - eof));
@@ -1718,7 +1664,7 @@ static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
 	int                 ret   = 0;
 
 	if (end > (u64)i_size) {
-		u64 eof = max(p, (u64)i_size);
+		u64 eof = max_t(u64, p, (u64)i_size);
 
 		folio_zero_range(folio, offset_in_folio(folio, eof),
 				 (size_t)(end - eof));
@@ -1925,7 +1871,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		 * this returns.
 		 */
 		if (p + slice_length >= end) {
-			wb = kmalloc(sizeof(*wb), GFP_NOFS);
+			wb = kmalloc_obj(*wb, GFP_NOFS);
 			if (!wb) {
 				unlock_buffer(bh);
 				brelse(bh);
@@ -2274,7 +2220,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 
 	beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
 				     (u8 *)bh->b_data, scratch,
-				     inode->i_ino, b);
+				     (unsigned long long)inode->i_ino, b);
 
 	mark_buffer_dirty(bh);
 	unlock_buffer(bh);
