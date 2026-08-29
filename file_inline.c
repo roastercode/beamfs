@@ -42,7 +42,6 @@ static int     beamfs_inline_writeback_folio(struct inode *inode,
 					     struct super_block *sb,
 					     struct folio *folio,
 					     struct writeback_control *wbc);
-static void    beamfs_inline_readahead(struct readahead_control *rac);
 static int     beamfs_inline_write_begin(const struct kiocb *iocb,
 					 struct address_space *mapping,
 					 loff_t pos, unsigned int len,
@@ -1467,40 +1466,79 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 				     struct iomap *iomap,
 				     struct iomap *srcmap)
 {
+	loff_t i_size = i_size_read(inode);
 	u64 b = (u64)pos / BEAMFS_DATA_INLINE_BYTES;
-	u32 off_in_block = (u32)((u64)pos % BEAMFS_DATA_INLINE_BYTES);
+	u64 block_start = b * BEAMFS_DATA_INLINE_BYTES;
+	u64 block_end = block_start + BEAMFS_DATA_INLINE_BYTES;
 	u64 phys = 0;
 	int ret;
+
+	iomap->flags = 0;
+	iomap->bdev = inode->i_sb->s_bdev;
+	iomap->addr = IOMAP_NULL_ADDR;
+
+	/*
+	 * Map the range the caller asked for, clamped to the end of the
+	 * INLINE block that backs it -- not a fixed 3824-byte window
+	 * starting at a block boundary. iomap tracks its position within
+	 * the folio against the mapping it was given, and readahead ends
+	 * a folio when offset_in_folio(folio, pos) reaches zero; handing
+	 * back a range that starts before the requested position leaves
+	 * that comparison never matching, and the iterator walks off a
+	 * folio it has already released.
+	 */
+	iomap->offset = pos;
+
+	/*
+	 * Past EOF the whole remaining range is a hole, in one mapping:
+	 * iomap zero-fills it without calling back. Splitting it into
+	 * INLINE-sized pieces would leave iomap iterating after
+	 * iomap_read_folio_iter() has released the folio, which
+	 * dereferences NULL on the next round.
+	 */
+	if (pos >= i_size) {
+		iomap->length = length;
+		iomap->type = IOMAP_HOLE;
+		return 0;
+	}
+
+	/*
+	 * One mapping covers the whole requested range, even where that
+	 * spans two or three INLINE blocks.
+	 *
+	 * iomap_read_folio_iter() releases the folio as soon as a call
+	 * returns with no iomap_folio_state attached -- which is always
+	 * the case here, folio size and block size both being 4096, so
+	 * ifs_alloc() has nothing to track. A mapping shorter than the
+	 * folio therefore leaves iomap iterating over a folio it has
+	 * already given up, and the next round dereferences NULL at
+	 * folio_size(). Verified by disassembly: iomap_read_folio_iter+0x7c
+	 * is mov (%r12),%rax with r12 = ctx->cur_folio.
+	 *
+	 * Spanning blocks is fine because read_folio_range does its own
+	 * reading: it walks the blocks the range covers and decodes each.
+	 * iomap->addr is reported to fiemap and tracing but nothing
+	 * derives an I/O sector from it.
+	 */
+	iomap->length = length;
 
 	ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	if (ret < 0)
 		return ret;
 
-	/*
-	 * One INLINE block per mapping. Merging blocks would require the
-	 * file-to-disk relation to stay affine across them, which it does
-	 * not: consecutive logical blocks are 3824 bytes apart in the file
-	 * and 4096 apart on disk.
-	 */
-	iomap->offset = (loff_t)b * BEAMFS_DATA_INLINE_BYTES;
-	iomap->length = BEAMFS_DATA_INLINE_BYTES;
-	iomap->bdev   = inode->i_sb->s_bdev;
-
 	if (phys == 0) {
 		iomap->type = IOMAP_HOLE;
-		iomap->addr = IOMAP_NULL_ADDR;
-	} else {
-		iomap->type = IOMAP_MAPPED;
-		/*
-		 * addr is the physical block start. It is not used to derive
-		 * a sector for I/O -- read_folio_range does its own reading --
-		 * but fiemap and tracing report it, so it must be right.
-		 */
-		iomap->addr = (u64)phys * BEAMFS_BLOCK_SIZE;
+		return 0;
 	}
 
-	(void)off_in_block;
-	(void)length;
+	iomap->type = IOMAP_MAPPED;
+	/*
+	 * Physical block start. Nothing derives a sector from it for I/O --
+	 * read_folio_range reads the block itself -- but fiemap and the
+	 * tracepoints report it, so it has to be the real address.
+	 */
+	iomap->addr = (u64)phys * BEAMFS_BLOCK_SIZE;
+
 	(void)flags;
 	(void)srcmap;
 	return 0;
@@ -1526,40 +1564,83 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 	struct inode       *inode = iter->inode;
 	struct super_block *sb    = inode->i_sb;
 	struct folio       *folio = ctx->cur_folio;
-	const struct iomap *iomap = &iter->iomap;
-	u64                 b     = (u64)iomap->offset / BEAMFS_DATA_INLINE_BYTES;
-	u32   slice_offset = (u32)((u64)iter->pos - (u64)iomap->offset);
-	size_t folio_off   = offset_in_folio(folio, iter->pos);
-	struct buffer_head *bh;
-	u8    *dst;
-	u64    phys;
-	int    ret = 0;
+	loff_t              i_size = i_size_read(inode);
+	u64                 pos   = (u64)iter->pos;
+	u64                 end   = pos + len;
+	size_t              done  = 0;
+	int                 ret   = 0;
 
-	if (iomap->type == IOMAP_HOLE) {
-		folio_zero_range(folio, folio_off, len);
-		iomap_finish_folio_read(folio, folio_off, len, 0);
-		return 0;
+	/*
+	 * The range can straddle INLINE blocks, so walk them: for each,
+	 * read the physical block, run its 16 RS codewords through the
+	 * decoder, and copy out the slice this folio wants.
+	 */
+	/*
+	 * Past EOF within this range: zero it here rather than returning a
+	 * second HOLE mapping. iomap releases the folio as soon as a call
+	 * returns without an iomap_folio_state attached -- always the case
+	 * at 4096-byte folios and blocks -- so a folio must be covered by
+	 * exactly one mapping. Traced on 2026-08-29: a 1000-byte file
+	 * produced MAPPED [0, 0x3e8) then HOLE [0x3e8, 0x1000), and the
+	 * second iteration dereferenced the released folio.
+	 */
+	if (end > (u64)i_size) {
+		u64 eof = max(pos, (u64)i_size);
+
+		folio_zero_range(folio, offset_in_folio(folio, eof),
+				 (size_t)(end - eof));
+		end = eof;
 	}
 
-	phys = iomap->addr / BEAMFS_BLOCK_SIZE;
-	bh = sb_bread(sb, phys);
-	if (!bh) {
-		pr_err_ratelimited("beamfs/inline: read_folio_range: sb_bread phys=%llu failed\n",
-				   (unsigned long long)phys);
-		iomap_finish_folio_read(folio, folio_off, len, -EIO);
-		return -EIO;
+	while (pos < end) {
+		u64    b            = pos / BEAMFS_DATA_INLINE_BYTES;
+		u32    slice_offset = (u32)(pos % BEAMFS_DATA_INLINE_BYTES);
+		u32    slice_length = (u32)min_t(u64, end - pos,
+						 BEAMFS_DATA_INLINE_BYTES -
+						 slice_offset);
+		size_t folio_off    = offset_in_folio(folio, pos);
+		struct buffer_head *bh;
+		u64    phys = 0;
+		u8    *dst;
+
+		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+		if (ret < 0)
+			break;
+
+		if (phys == 0) {
+			folio_zero_range(folio, folio_off, slice_length);
+			pos  += slice_length;
+			done += slice_length;
+			continue;
+		}
+
+		bh = sb_bread(sb, phys);
+		if (!bh) {
+			pr_err_ratelimited("beamfs/inline: read_folio_range: sb_bread phys=%llu failed\n",
+					   (unsigned long long)phys);
+			ret = -EIO;
+			break;
+		}
+
+		dst = kmap_local_folio(folio, folio_off);
+		lock_buffer(bh);
+		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode,
+							  b, dst,
+							  slice_offset,
+							  slice_length, false);
+		unlock_buffer(bh);
+		kunmap_local(dst);
+		brelse(bh);
+		if (ret < 0)
+			break;
+
+		pos  += slice_length;
+		done += slice_length;
 	}
 
-	dst = kmap_local_folio(folio, folio_off);
-	lock_buffer(bh);
-	ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
-						  dst, slice_offset,
-						  (u32)len, false);
-	unlock_buffer(bh);
-	kunmap_local(dst);
-	brelse(bh);
-
-	iomap_finish_folio_read(folio, folio_off, len, ret);
+	iomap_finish_folio_read(folio, offset_in_folio(folio, iter->pos),
+				len, ret);
+	(void)done;
 	return ret;
 }
 
@@ -1568,7 +1649,22 @@ static const struct iomap_read_ops beamfs_inline_read_ops = {
 };
 
 /*
- * read_folio / readahead: iomap resolves which INLINE block backs each
+ * No .readahead. iomap_readahead_iter() moves to the next folio only when
+ * offset_in_folio(cur_folio, iter->pos) reaches zero, so it assumes
+ * mappings line up with folio boundaries. INLINE mappings end on 3824-byte
+ * block boundaries and folios are 4096 bytes, so that comparison never
+ * matches at the right moment: iomap_read_folio_iter() clears cur_folio
+ * once the folio is full, the transition to the next folio does not fire,
+ * and the following iteration dereferences NULL. Confirmed twice on
+ * kernel 7.1.3.
+ *
+ * readahead is optional in address_space_operations. Aligning the format
+ * to folios would mean moving parity out of the data block, which is what
+ * lets a single read correct a flip without depending on a second block --
+ * the property the filesystem exists for. Sequential reads simply go one
+ * folio at a time through read_folio.
+ *
+ * read_folio: iomap resolves which INLINE block backs each
  * file range, then calls beamfs_inline_read_folio_range() to produce the
  * bytes. The folio locking, uptodate accounting and readahead batching
  * are iomap's; what stays here is the RS decode.
@@ -1589,14 +1685,6 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 /* ------------------------------------------------------------------------- */
 /* readahead -- per-folio loop on top of read_folio.                         */
 /* ------------------------------------------------------------------------- */
-static void beamfs_inline_readahead(struct readahead_control *rac)
-{
-	struct folio *folio;
-
-	while ((folio = readahead_folio(rac)))
-		beamfs_inline_read_folio(rac->file, folio);
-}
-
 /* ------------------------------------------------------------------------- */
 /* write_begin (v2 INLINE, multi-block scope)                                */
 /*                                                                           */
@@ -2020,10 +2108,15 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 const struct address_space_operations beamfs_inline_aops = {
 	.read_folio       = beamfs_inline_read_folio,
 	.writepages       = beamfs_inline_writepages,
-	.readahead        = beamfs_inline_readahead,
 	.write_begin      = beamfs_inline_write_begin,
 	.write_end        = beamfs_inline_write_end,
 	.dirty_folio      = filemap_dirty_folio,
+	/* Required once the folio state is iomap's: the kernel warns at
+	 * compaction time without it.
+	 */
+	.migrate_folio    = filemap_migrate_folio,
+	.release_folio    = iomap_release_folio,
+	.invalidate_folio = iomap_invalidate_folio,
 };
 
 /*
