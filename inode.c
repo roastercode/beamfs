@@ -118,7 +118,8 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 
 			/* Log the RS event with position list for entropy. nerr is
 			 * the total symbol count (data + parity); positions[] holds
-			 * only DATA positions used by the entropy estimator. */
+			 * only DATA positions used by the entropy estimator.
+			 */
 			if (nerr > 0) {
 				unsigned int np = (unsigned int)nerr;
 

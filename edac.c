@@ -118,17 +118,17 @@ void beamfs_rs_exit_tables(void)
  * The output between the SENTINEL markers below should match
  * byte-for-byte.
  */
-/* SENTINEL_LUT_BEGIN -- generator hash 1f5f8831e91b0318 */
+/* SENTINEL_LUT_BEGIN -- generator hash bf11b7d225cb6f13 */
 static const __u32 beamfs_rs_entropy_term_q16_16[9][9] = {
-    [0] = { 0, },    /* [0] unused */
-    [1] = {     0,     0,     0,     0,     0,     0,     0,     0,     0 },
-    [2] = {     0, 32768,     0,     0,     0,     0,     0,     0,     0 },
-    [3] = {     0, 34624, 25557,     0,     0,     0,     0,     0,     0 },
-    [4] = {     0, 32768, 32768, 20400,     0,     0,     0,     0,     0 },
-    [5] = {     0, 30434, 34654, 28979, 16878,     0,     0,     0,     0 },
-    [6] = {     0, 28235, 34624, 32768, 25557, 14365,     0,     0,     0 },
-    [7] = {     0, 26283, 33842, 34333, 30235, 22724, 12493,     0,     0 },
-    [8] = {     0, 24576, 32768, 34776, 32768, 27774, 20400, 11047,     0 },
+	[0] = { 0, },	/* [0] unused */
+	[1] = {     0,     0,     0,     0,     0,     0,     0,     0,     0 },
+	[2] = {     0, 32768,     0,     0,     0,     0,     0,     0,     0 },
+	[3] = {     0, 34624, 25557,     0,     0,     0,     0,     0,     0 },
+	[4] = {     0, 32768, 32768, 20400,     0,     0,     0,     0,     0 },
+	[5] = {     0, 30434, 34654, 28979, 16878,     0,     0,     0,     0 },
+	[6] = {     0, 28235, 34624, 32768, 25557, 14365,     0,     0,     0 },
+	[7] = {     0, 26283, 33842, 34333, 30235, 22724, 12493,     0,     0 },
+	[8] = {     0, 24576, 32768, 34776, 32768, 27774, 20400, 11047,     0 },
 };
 /* SENTINEL_LUT_END */
 
@@ -173,7 +173,8 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
 
 	for (i = 0; i < n_positions; i++) {
 		/* bin = pos * BINS / code_len. u32 product fits since
-		 * pos < 239 and BINS = 8, max product = 1912. */
+		 * pos < 239 and BINS = 8, max product = 1912.
+		 */
 		unsigned int idx = (unsigned int)positions[i];
 		unsigned int bin;
 
@@ -187,7 +188,8 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
 	}
 
 	/* H = sum over bins of LUT[N][k_bin]. Bins with k=0 contribute 0
-	 * by LUT convention. Total guaranteed < 3 * 65536. */
+	 * by LUT convention. Total guaranteed < 3 * 65536.
+	 */
 	for (b = 0; b < BEAMFS_RS_ENTROPY_BINS; b++)
 		h += beamfs_rs_entropy_term_q16_16[n_positions][bin_count[b]];
 
@@ -300,6 +302,7 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	{
 		struct rs_control **ctrl_p = get_cpu_ptr(beamfs_rs_ctrl_pcpu);
 		struct rs_control *ctrl = *ctrl_p;
+
 		if (!ctrl) {
 			put_cpu_ptr(beamfs_rs_ctrl_pcpu);
 			return -EINVAL;
@@ -317,7 +320,8 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 
 	/* Reconstruct DATA-side corrected positions by byte diff. nerr is
 	 * the total count (data + parity); n_data_corrected is the subset
-	 * relevant for the entropy estimator. */
+	 * relevant for the entropy estimator.
+	 */
 	if (positions && nerr > 0) {
 		for (i = 0; i < (int)len &&
 		     n_data_corrected < max_positions; i++) {
@@ -329,7 +333,8 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	/* The journal logs n_data_corrected as the entropy sample size,
 	 * even though nerr (total) is the value returned upward; callers
 	 * that need the entropy-aligned count must derive it from
-	 * compute_entropy on the positions buffer they passed in. */
+	 * compute_entropy on the positions buffer they passed in.
+	 */
 	return nerr;
 }
 

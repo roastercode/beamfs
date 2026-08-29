@@ -612,6 +612,70 @@ struct beamfs_pending_rs_event {
 /*
  * beamfs_fill_super - read superblock from disk and initialize VFS sb
  */
+/*
+ * beamfs_capture_sb_rs_events -- record which superblock subblocks RS
+ * repaired, for replay into the journal once sbi exists.
+ *
+ * The journal cannot be written yet: the superblock is being read, so
+ * sbi is not initialised. The corrections themselves are already on
+ * disk; what is deferred is only their forensic record, which is why a
+ * failed allocation here warns and returns 0 rather than failing the
+ * mount.
+ *
+ * @rs_results:   per-subblock symbol counts from beamfs_rs_decode_region,
+ *                positive where that subblock was corrected
+ * @rs_positions: flat array of corrected symbol positions,
+ *                BEAMFS_RS_PARITY / 2 slots per subblock
+ * @out:          receives the allocated event buffer, NULL if none
+ *
+ * Returns the number of events stored in *out.
+ */
+static unsigned int
+beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
+			    struct beamfs_pending_rs_event **out)
+{
+	struct beamfs_pending_rs_event *pending;
+	unsigned int i, k = 0, n_events = 0;
+
+	*out = NULL;
+
+	for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
+		if (rs_results[i] > 0)
+			n_events++;
+	}
+	if (!n_events)
+		return 0;
+
+	pending = kmalloc_array(n_events, sizeof(*pending), GFP_KERNEL);
+	if (!pending) {
+		pr_warn("beamfs: cannot allocate pending events buffer; %u SB recovery events not journalled\n",
+			n_events);
+		return 0;
+	}
+
+	for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
+		unsigned int np;
+		const int *src;
+
+		if (rs_results[i] <= 0)
+			continue;
+
+		np = (unsigned int)rs_results[i];
+		if (np > BEAMFS_RS_PARITY / 2)
+			np = BEAMFS_RS_PARITY / 2;
+
+		pending[k].block_no = BEAMFS_RS_BLOCK_NO_SB_MARKER | (u64)i;
+		pending[k].n_positions = np;
+		pending[k].code_len_bytes = BEAMFS_SB_RS_DATA_LEN;
+		src = rs_positions + i * (BEAMFS_RS_PARITY / 2);
+		memcpy(pending[k].positions, src, np * sizeof(int));
+		k++;
+	}
+
+	*out = pending;
+	return k;
+}
+
 int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct beamfs_sb_info     *sbi;
@@ -648,7 +712,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	/* Strict version check: this kernel mounts only BEAMFS_VERSION_CURRENT
 	 * images. Older v2/v3 images require offline migration via mkfs.beamfs
 	 * --migrate. Rationale: dual-format in-kernel parsing doubles the audit
-	 * surface (KASAN, syzkaller) for no operational benefit on a niche FS. */
+	 * surface (KASAN, syzkaller) for no operational benefit on a niche FS.
+	 */
 	if (le32_to_cpu(fsb->s_version) != BEAMFS_VERSION_CURRENT) {
 		errorf(fc, "beamfs: unsupported on-disk version %u (this kernel requires v%u)",
 		       le32_to_cpu(fsb->s_version), BEAMFS_VERSION_CURRENT);
@@ -716,55 +781,9 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 		pr_warn("beamfs: superblock corrected by RS FEC\n");
 
-		/* Capture per-subblock recovery events for deferred replay
-		 * into the journal once sbi is initialized. Allocation
-		 * failure here is non-fatal: the SB has already been
-		 * corrected on disk, only the journal record is lost. */
-		{
-			unsigned int i;
-			unsigned int n_events = 0;
-
-			for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
-				if (rs_results[i] > 0)
-					n_events++;
-			}
-
-			if (n_events > 0) {
-				pending = kmalloc_array(n_events,
-							sizeof(*pending),
-							GFP_KERNEL);
-				if (!pending) {
-					pr_warn("beamfs: cannot allocate pending events buffer; %u SB recovery events not journalled\n",
-						n_events);
-				} else {
-					unsigned int k = 0;
-
-					for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
-						unsigned int np;
-						int *src;
-
-						if (rs_results[i] <= 0)
-							continue;
-						np = (unsigned int)rs_results[i];
-						if (np > BEAMFS_RS_PARITY / 2)
-							np = BEAMFS_RS_PARITY / 2;
-						pending[k].block_no =
-							BEAMFS_RS_BLOCK_NO_SB_MARKER |
-							(u64)i;
-						pending[k].n_positions = np;
-						pending[k].code_len_bytes =
-							BEAMFS_SB_RS_DATA_LEN;
-						src = rs_positions +
-							i * (BEAMFS_RS_PARITY / 2);
-						memcpy(pending[k].positions,
-						       src,
-						       np * sizeof(int));
-						k++;
-					}
-					n_pending = k;
-				}
-			}
-		}
+		n_pending = beamfs_capture_sb_rs_events(rs_results,
+							rs_positions,
+							&pending);
 
 		/* Heap buffers consumed; free before continuing. */
 		kvfree(rs_results);
@@ -853,7 +872,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	/* Replay any SB RS recovery events captured before sbi was ready.
 	 * These are journalled before bitmap setup so the forensic order
-	 * (SB events first, then bitmap events) reflects mount sequence. */
+	 * (SB events first, then bitmap events) reflects mount sequence.
+	 */
 	if (pending) {
 		unsigned int i;
 
@@ -904,7 +924,8 @@ out_brelse:
 	/* Free any pending events buffer that survived to here. The replay
 	 * block sets pending = NULL after consumption, so kfree(NULL) is the
 	 * nominal no-op. Reaching here with pending != NULL means a failure
-	 * occurred between capture and replay; the events are dropped. */
+	 * occurred between capture and replay; the events are dropped.
+	 */
 	kfree(pending);
 	brelse(bh);
 	return ret;

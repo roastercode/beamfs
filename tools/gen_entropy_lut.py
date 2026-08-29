@@ -81,8 +81,8 @@ def emit_c_fragment() -> str:
 
     for N in range(0, N_MAX + 1):
         if N == 0:
-            comment = "    /* [0] unused */"
-            row = "    [0] = { 0, },"
+            comment = "\t/* [0] unused */"
+            row = "\t[0] = { 0, },"
             lines.append(row + comment)
             continue
 
@@ -96,9 +96,12 @@ def emit_c_fragment() -> str:
         while len(values) < N_MAX + 1:
             values.append(0)
 
+        # Tab-indented: checkpatch rejects leading spaces, and this
+        # table ships in the kernel module. Column alignment comes
+        # from the %5u width, so it survives the change.
         # Format: 8 values per line, 5-digit padded
         formatted = ", ".join("%5u" % v for v in values)
-        lines.append("    [%d] = { %s }," % (N, formatted))
+        lines.append("\t[%d] = { %s }," % (N, formatted))
 
     lines.append("};")
     lines.append("/* SENTINEL_LUT_END */")
