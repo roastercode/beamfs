@@ -38,19 +38,6 @@ static int     beamfs_inline_read_folio(struct file *file,
 					struct folio *folio);
 static int     beamfs_inline_writepages(struct address_space *mapping,
 					struct writeback_control *wbc);
-static int     beamfs_inline_writeback_folio(struct inode *inode,
-					     struct super_block *sb,
-					     struct folio *folio,
-					     struct writeback_control *wbc);
-static int     beamfs_inline_write_begin(const struct kiocb *iocb,
-					 struct address_space *mapping,
-					 loff_t pos, unsigned int len,
-					 struct folio **foliop, void **fsdata);
-static int     beamfs_inline_write_end(const struct kiocb *iocb,
-				       struct address_space *mapping,
-				       loff_t pos, unsigned int len,
-				       unsigned int copied,
-				       struct folio *folio, void *fsdata);
 static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from);
 static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
@@ -1702,46 +1689,322 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 /*   - Otherwise, look up the physical block. If allocated, read+decode      */
 /*     it via the existing read path. If HOLE, zero-fill the folio.          */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_write_begin(const struct kiocb *iocb,
-				     struct address_space *mapping,
-				     loff_t pos, unsigned int len,
-				     struct folio **foliop, void **fsdata)
+
+/* ------------------------------------------------------------------------- */
+/* iomap write path                                                          */
+/*                                                                           */
+/* Same shape as the read side. iomap owns the folio lifecycle -- locking,   */
+/* dirty accounting, writeback tagging -- and beamfs owns what the bytes     */
+/* look like on disk: the read-modify-write cycle that decodes a block,      */
+/* splices the folio's contribution in, re-encodes all 16 RS codewords and   */
+/* stamps the DATA_CSUM descriptor.                                          */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Fill a folio range for a partial write. iomap calls this when a write
+ * covers only part of a folio that is not uptodate, so the rest has to
+ * come off disk first. The contract requires a synchronous read, which
+ * is what the decode path does anyway.
+ */
+static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
+						struct folio *folio,
+						loff_t pos, size_t len)
 {
-	pgoff_t       index;
-	struct folio *folio;
-	int           ret;
+	struct inode       *inode = iter->inode;
+	struct super_block *sb    = inode->i_sb;
+	loff_t              i_size = i_size_read(inode);
+	u64                 p     = (u64)pos;
+	u64                 end   = p + len;
+	int                 ret   = 0;
 
-	/* multi-block scope: 1 or 2 underlying INLINE disk blocks. */
-	if (pos < 0 || len == 0)
-		return -EINVAL;
+	if (end > (u64)i_size) {
+		u64 eof = max(p, (u64)i_size);
 
-	index = pos >> PAGE_SHIFT;
-
-	folio = __filemap_get_folio(mapping, index,
-				   FGP_WRITEBEGIN | FGP_NOFS,
-				   mapping_gfp_mask(mapping));
-	if (IS_ERR(folio))
-		return PTR_ERR(folio);
-
-	/* If folio already has the data, nothing more to do. */
-	if (folio_test_uptodate(folio)) {
-		*foliop = folio;
-		return 0;
+		folio_zero_range(folio, offset_in_folio(folio, eof),
+				 (size_t)(end - eof));
+		end = eof;
 	}
 
-	/* Read the existing block (if allocated) to populate the folio. */
-	ret = beamfs_inline_read_folio(NULL, folio);
-	if (ret < 0) {
-		folio_unlock(folio);
-		folio_put(folio);
-		return ret;
+	while (p < end) {
+		u64    b            = p / BEAMFS_DATA_INLINE_BYTES;
+		u32    slice_offset = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
+		u32    slice_length = (u32)min_t(u64, end - p,
+						 BEAMFS_DATA_INLINE_BYTES -
+						 slice_offset);
+		size_t folio_off    = offset_in_folio(folio, p);
+		struct buffer_head *bh;
+		u64    phys = 0;
+		u8    *dst;
+
+		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+		if (ret < 0)
+			break;
+
+		if (phys == 0) {
+			folio_zero_range(folio, folio_off, slice_length);
+			p += slice_length;
+			continue;
+		}
+
+		bh = sb_bread(sb, phys);
+		if (!bh) {
+			ret = -EIO;
+			break;
+		}
+
+		dst = kmap_local_folio(folio, folio_off);
+		lock_buffer(bh);
+		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode,
+							  b, dst, slice_offset,
+							  slice_length, false);
+		unlock_buffer(bh);
+		kunmap_local(dst);
+		brelse(bh);
+		if (ret < 0)
+			break;
+
+		p += slice_length;
 	}
 
-	/* read_folio unlocked the folio on success; re-lock for the write. */
-	folio_lock(folio);
-	*foliop = folio;
-	return 0;
+	return ret;
 }
+
+static const struct iomap_write_ops beamfs_inline_write_ops = {
+	.read_folio_range = beamfs_inline_write_read_folio_range,
+};
+
+/*
+ * Writeback completion for one INLINE block.
+ *
+ * iomap_writeback_folio() ends the folio itself only when nothing was
+ * submitted; past that it waits for the filesystem to report completion.
+ * mark_buffer_dirty() and write_dirty_buffer() are asynchronous, so the
+ * folio cannot be finished when writeback_range returns -- the I/O is
+ * still in flight, and sync() would then wait on a completion that never
+ * arrives. The buffer's end_io callback is where the folio is released,
+ * once per block, with the folio held until the last one lands.
+ */
+struct beamfs_inline_wb_ctx {
+	struct inode  *inode;
+	struct folio  *folio;
+	size_t         len;
+	bh_end_io_t   *orig_end_io;
+	void          *orig_private;
+};
+
+static void beamfs_inline_wb_end_io(struct buffer_head *bh, int uptodate)
+{
+	struct beamfs_inline_wb_ctx *wb = bh->b_private;
+	struct inode *inode = wb->inode;
+	struct folio *folio = wb->folio;
+	size_t len = wb->len;
+
+	bh->b_end_io = wb->orig_end_io;
+	bh->b_private = wb->orig_private;
+	kfree(wb);
+
+	if (!uptodate)
+		mapping_set_error(inode->i_mapping, -EIO);
+
+	end_buffer_write_sync(bh, uptodate);
+	iomap_finish_folio_write(inode, folio, len);
+}
+
+/*
+ * Write back one range of a folio.
+ *
+ * For each INLINE block the range touches: decode what is on disk into
+ * scratch, splice this folio's bytes over it, re-encode all 16 codewords,
+ * stamp the descriptor, and hand the buffer to the block layer.
+ *
+ * The decode uses rmw_path=true so a flip found on disk here is journalled
+ * as RMW_NEUTRALISED: the encode below overwrites the damage from the
+ * in-RAM scratch before any reader can see it.
+ *
+ * The buffer_head lock is held across the whole decode-splice-encode
+ * transit. bh->b_data is shared through the block device page cache, and
+ * two writeback paths on the same physical block -- the bdi flusher and an
+ * fsync, or two folios sharing an intermediate block in the tri-block case
+ * -- would otherwise interleave their re-scatter and encode steps, leaving
+ * a corrupt codeword on disk while both page cache copies still look
+ * uptodate. That is the "hot sha == cold sha mismatch" signature.
+ */
+static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
+					     struct folio *folio, u64 pos,
+					     unsigned int len, u64 end_pos)
+{
+	struct inode             *inode = wpc->inode;
+	struct super_block       *sb    = inode->i_sb;
+	struct beamfs_inode_info *fi    = BEAMFS_I(inode);
+	u64      p    = pos;
+	u64      end  = pos + len;
+	u8      *scratch;
+	struct beamfs_inline_wb_ctx *wb = NULL;
+	struct buffer_head *last_bh = NULL;
+	ssize_t  done = 0;
+	int      ret  = 0;
+
+	/*
+	 * 3824 bytes will not fit on the aarch64 kernel stack given the
+	 * frame pressure this path already carries.
+	 */
+	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!scratch)
+		return -ENOMEM;
+
+	while (p < end) {
+		u64    b            = p / BEAMFS_DATA_INLINE_BYTES;
+		u32    slice_offset = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
+		u32    slice_length = (u32)min_t(u64, end - p,
+						 BEAMFS_DATA_INLINE_BYTES -
+						 slice_offset);
+		size_t folio_off    = offset_in_folio(folio, p);
+		struct buffer_head *bh;
+		unsigned int sb_idx;
+		u64    phys = 0;
+		u8    *src;
+
+		mutex_lock(&fi->i_alloc_mutex);
+		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+		mutex_unlock(&fi->i_alloc_mutex);
+		if (ret < 0)
+			break;
+
+		bh = sb_bread(sb, phys);
+		if (!bh) {
+			pr_err_ratelimited("beamfs/inline: writeback_range: sb_bread phys=%llu failed\n",
+					   (unsigned long long)phys);
+			ret = -EIO;
+			break;
+		}
+
+		lock_buffer(bh);
+
+		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
+							  scratch, 0,
+							  BEAMFS_DATA_INLINE_BYTES,
+							  true);
+		if (ret < 0) {
+			unlock_buffer(bh);
+			brelse(bh);
+			break;
+		}
+
+		src = kmap_local_folio(folio, folio_off);
+		memcpy(scratch + slice_offset, src, slice_length);
+		kunmap_local(src);
+
+		for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++)
+			memcpy((u8 *)bh->b_data +
+			       (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
+			       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
+			       BEAMFS_SUBBLOCK_DATA);
+
+		ret = beamfs_rs_encode_region((u8 *)bh->b_data,
+					      BEAMFS_SUBBLOCK_TOTAL,
+					      (u8 *)bh->b_data +
+					      BEAMFS_SUBBLOCK_DATA,
+					      BEAMFS_SUBBLOCK_TOTAL,
+					      BEAMFS_SUBBLOCK_DATA,
+					      BEAMFS_DATA_INLINE_SUBBLOCKS);
+		if (ret < 0) {
+			pr_err_ratelimited("beamfs/inline: writeback_range: rs_encode_region failed: %d\n",
+					   ret);
+			unlock_buffer(bh);
+			brelse(bh);
+			break;
+		}
+
+		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)bh->b_data,
+					     scratch, inode->i_ino, b);
+		mark_buffer_dirty(bh);
+
+		/*
+		 * The folio is finished from the completion of the last block
+		 * of the range, not here: the write is still in flight when
+		 * this returns.
+		 */
+		if (p + slice_length >= end) {
+			wb = kmalloc(sizeof(*wb), GFP_NOFS);
+			if (!wb) {
+				unlock_buffer(bh);
+				brelse(bh);
+				ret = -ENOMEM;
+				break;
+			}
+			wb->inode        = inode;
+			wb->folio        = folio;
+			wb->len          = len;
+			wb->orig_end_io  = bh->b_end_io;
+			wb->orig_private = bh->b_private;
+			bh->b_private = wb;
+			bh->b_end_io  = beamfs_inline_wb_end_io;
+			last_bh = bh;
+		}
+
+		unlock_buffer(bh);
+
+		/*
+		 * Queue rather than wait. Waiting per 4 KiB block measured at
+		 * roughly 55 blocks/s on the qemu-arm64 VirtIO rig, which made
+		 * any large writer appear hung in balance_dirty_pages behind a
+		 * flusher that was effectively single-block-synchronous. What
+		 * the block layer eventually writes is already a valid RS
+		 * codeword, so resilience does not depend on the wait.
+		 */
+		/*
+		 * Submit in both sync modes. Under iomap the folio's
+		 * writeback ends from the buffer's completion, so leaving
+		 * the buffer merely dirty for the flusher to pick up later
+		 * means the completion never fires and sync() waits on a
+		 * folio that stays in writeback forever. WB_SYNC_ALL only
+		 * changes the priority hint here; the wait itself is done
+		 * once for the whole range by the writepages caller.
+		 */
+		write_dirty_buffer(bh,
+				   (wpc->wbc &&
+				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
+				   REQ_SYNC : 0);
+		brelse(bh);
+
+		p    += slice_length;
+		done += slice_length;
+	}
+
+	kfree(scratch);
+
+	/*
+	 * The whole range counts as handled: iomap_writeback_range() loops
+	 * while rlen remains, and a short count would bring it back for a
+	 * folio already handed to the completion path.
+	 *
+	 * If no completion was armed -- an error before the last block --
+	 * finish the folio here, otherwise nothing ever would and sync()
+	 * would wait on it forever.
+	 */
+	if (!last_bh)
+		iomap_finish_folio_write(inode, folio, len);
+
+	(void)done;
+	(void)end_pos;
+	return ret < 0 ? ret : (ssize_t)len;
+}
+
+static int beamfs_inline_writeback_submit(struct iomap_writepage_ctx *wpc,
+					  int error)
+{
+	/*
+	 * Nothing is batched: writeback_range hands each buffer to the block
+	 * layer as it goes, so there is no context to submit here.
+	 */
+	(void)wpc;
+	return error;
+}
+
+static const struct iomap_writeback_ops beamfs_inline_writeback_ops = {
+	.writeback_range  = beamfs_inline_writeback_range,
+	.writeback_submit = beamfs_inline_writeback_submit,
+};
 
 /* ------------------------------------------------------------------------- */
 /* write_end (v2 INLINE)                                                     */
@@ -1750,50 +2013,6 @@ static int beamfs_inline_write_begin(const struct kiocb *iocb,
 /* update i_size if the write extended the file, then release the folio.    */
 /* The actual RS encode + disk write happens later in writepages.            */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_write_end(const struct kiocb *iocb,
-				   struct address_space *mapping,
-				   loff_t pos, unsigned int len,
-				   unsigned int copied,
-				   struct folio *folio, void *fsdata)
-{
-	struct inode *inode = mapping->host;
-	loff_t        new_i_size;
-
-	flush_dcache_folio(folio);
-
-	if (!folio_test_uptodate(folio))
-		folio_mark_uptodate(folio);
-	folio_mark_dirty(folio);
-
-	new_i_size = pos + copied;
-	if (new_i_size > i_size_read(inode))
-		i_size_write(inode, new_i_size);
-
-	/*
-	 * Mark the inode dirty on every successful copy, not only when
-	 * i_size grows. folio_mark_dirty() (and equivalently the underlying
-	 * filemap_dirty_folio() that it invokes via aops->dirty_folio)
-	 * marks the inode I_DIRTY_PAGES only on the clean->dirty transition
-	 * (folio_test_set_dirty() returning false). When a folio is
-	 * re-dirtied after the bdi writeback flusher has already cleared
-	 * I_DIRTY_PAGES on the inode, that path does not re-assert the
-	 * inode's dirty state, the inode never returns to wb->b_dirty,
-	 * the flusher never reschedules writepages() for it, dirty pages
-	 * accumulate, and any writer crossing the dirty_ratelimit
-	 * deadlocks indefinitely in balance_dirty_pages(). The reproducer
-	 * was 'depmod -a' writing ~100 MB of modules.dep* on a beamfs
-	 * rootfs after the first writeback pass had drained the inode.
-	 * ext4 follows the same pattern in ext4_write_inline_data_end():
-	 * unconditional mark_inode_dirty() after a successful copy.
-	 */
-	if (likely(copied))
-		mark_inode_dirty(inode);
-
-	folio_unlock(folio);
-	folio_put(folio);
-	return copied;
-}
-
 /* ------------------------------------------------------------------------- */
 /* writepages (v2 INLINE, multi-block scope)                                 */
 /*                                                                           */
@@ -1805,291 +2024,16 @@ static int beamfs_inline_write_end(const struct kiocb *iocb,
 /* i_alloc_mutex to keep the i_direct[]/i_indirect tree consistent under     */
 /* concurrent writeback of distinct folios on the same inode.                */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_writeback_folio(struct inode *inode,
-					 struct super_block *sb,
-					 struct folio *folio,
-					 struct writeback_control *wbc)
-{
-	struct beamfs_inode_info *fi = BEAMFS_I(inode);
-	u64           b_first, b_last, b;
-	u32           k_first, len_in_b_last, fub;
-	u32           folio_offset = 0;
-	u8           *folio_buf = NULL;
-	u8           *scratch;
-	unsigned int  sb_idx;
-	int           ret;
-
-	/* RMW scratch must be heap-allocated: 3824 bytes is too large for the
-	 * kernel stack on aarch64 (8K) given existing frame pressure in super.c.
-	 */
-	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
-	if (!scratch)
-		return -ENOMEM;
-
-	folio_lock(folio);
-
-	if (!folio_test_dirty(folio) || folio->mapping == NULL) {
-		folio_unlock(folio);
-		kfree(scratch);
-		return 0;
-	}
-
-	ret = beamfs_inline_folio_coverage(inode, folio->index,
-					   &b_first, &k_first,
-					   &b_last, &len_in_b_last,
-					   &fub);
-	if (ret == -ERANGE) {
-		/* Folio at or beyond i_size: nothing to writeback. */
-		folio_clear_dirty_for_io(folio);
-		folio_unlock(folio);
-		kfree(scratch);
-		return 0;
-	}
-	if (ret < 0) {
-		folio_unlock(folio);
-		kfree(scratch);
-		return ret;
-	}
-
-	folio_clear_dirty_for_io(folio);
-	folio_start_writeback(folio);
-
-	folio_buf = kmap_local_folio(folio, 0);
-
-	for (b = b_first; b <= b_last; b++) {
-		u32                 slice_offset_in_block;
-		u32                 slice_length;
-		u64                 phys = 0;
-		struct buffer_head *bh;
-
-		if (b == b_first) {
-			slice_offset_in_block = k_first;
-			slice_length = (b == b_last)
-				? len_in_b_last
-				: (BEAMFS_DATA_INLINE_BYTES - k_first);
-		} else if (b == b_last) {
-			slice_offset_in_block = 0;
-			slice_length = len_in_b_last;
-		} else {
-			/* Intermediate block (tri-block case): full INLINE block */
-			slice_offset_in_block = 0;
-			slice_length = BEAMFS_DATA_INLINE_BYTES;
-		}
-
-		/* Serialize block allocation against concurrent writeback. */
-		mutex_lock(&fi->i_alloc_mutex);
-		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
-		mutex_unlock(&fi->i_alloc_mutex);
-		if (ret < 0)
-			goto fail_kunmap;
-
-		bh = sb_bread(sb, phys);
-		if (!bh) {
-			pr_err_ratelimited("beamfs/inline: writeback_folio: sb_bread phys=%llu failed\n",
-					  (unsigned long long)phys);
-			ret = -EIO;
-			goto fail_kunmap;
-		}
-
-		/*
-		 * Lock the bh for the full RMW transit (decode -> splice ->
-		 * encode -> mark_dirty). bh->b_data is shared via the block-
-		 * device page cache; without this lock, two concurrent
-		 * writeback_folio paths on the same phys (e.g. bdi flusher +
-		 * fsync, or distinct folios sharing an intermediate INLINE
-		 * disk block in the tri-block coverage case) interleave their
-		 * re-scatter and rs_encode steps. The result is a corrupted
-		 * on-disk codeword while each folio's page-cache copy stays
-		 * uptodate -- the canonical "hot sha == cold sha mismatch"
-		 * symptom under multi-process load.
-		 */
-		lock_buffer(bh);
-
-		/* RMW: decode existing block contents into scratch. A freshly
-		 * allocated block is zero-init'd by lookup_or_alloc_phys, which
-		 * decodes as 16 zero subblocks (RS-trivial valid codeword).
-		 *
-		 * rmw_path=true here so any flip detected on disk during this
-		 * decode is journalled with RMW_NEUTRALISED: the encode below
-		 * will overwrite the on-disk damage from the in-RAM scratch
-		 * buffer before any consumer can read it.
-		 */
-		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
-							  scratch, 0,
-							  BEAMFS_DATA_INLINE_BYTES,
-							  true);
-		if (ret < 0) {
-			unlock_buffer(bh);
-			brelse(bh);
-			goto fail_kunmap;
-		}
-
-		/* Splice the folio's contribution into scratch at the right offset. */
-		memcpy(scratch + slice_offset_in_block,
-		       folio_buf + folio_offset, slice_length);
-
-		/* Re-scatter scratch into bh: 16 segments of 239 bytes. */
-		for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++) {
-			memcpy((u8 *)bh->b_data + (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
-			       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
-			       BEAMFS_SUBBLOCK_DATA);
-		}
-
-		/* RS encode all 16 subblocks. */
-		ret = beamfs_rs_encode_region(
-			(u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-			(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-			BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS);
-		if (ret < 0) {
-			pr_err_ratelimited("beamfs/inline: writeback_folio: rs_encode_region failed: %d\n",
-					  ret);
-			unlock_buffer(bh);
-			brelse(bh);
-			goto fail_kunmap;
-		}
-
-		/* Stamp DATA_CSUM descriptor and zero pad (format-v6). */
-		beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
-					     (u8 *)bh->b_data, scratch,
-					     inode->i_ino, b);
-
-		mark_buffer_dirty(bh);
-
-		/*
-		 * Synchronous flush only when the writeback path explicitly
-		 * requests data integrity (fsync/sync/umount -> WB_SYNC_ALL).
-		 * In the common WB_SYNC_NONE case (periodic bdi flusher),
-		 * mark_buffer_dirty() is sufficient: the buffer carries the
-		 * RS-encoded payload, stays pinned via the page-cache reference,
-		 * and the kernel writeback machinery will submit it
-		 * asynchronously, parallelising the disk I/O across multiple
-		 * buffers in flight. The previous unconditional
-		 * sync_dirty_buffer() serialised every per-block writeback
-		 * into a wait-on-I/O round trip and capped the per-bdi
-		 * writeback bandwidth at the disk single-shot latency
-		 * (~28 KB/s on the qemu-arm64 + VirtIO test rig), which made
-		 * any writer crossing the dirty_ratelimit
-		 * (e.g. 'depmod -a' writing 100 MB of modules.dep on a
-		 * beamfs rootfs) deadlock in balance_dirty_pages() waiting
-		 * for a flusher that was effectively single-block-synchronous.
-		 * EM-resilience is preserved across the asynchronous path:
-		 * the RS encode happens above this point, so whatever data
-		 * the writeback eventually flushes is already a valid
-		 * Reed-Solomon codeword.
-		 */
-		/*
-		 * Release the bh lock before handing the buffer to the block
-		 * layer: write_dirty_buffer() takes lock_buffer internally, so
-		 * holding it here would deadlock. Between unlock_buffer and the
-		 * submission the bh is dirty + RS-encoded; any concurrent reader
-		 * takes lock_buffer, sees the valid codeword, and proceeds. Any
-		 * concurrent writer blocks on lock_buffer behind the in-flight
-		 * write, preserving exclusion.
-		 */
-		unlock_buffer(bh);
-		if (wbc && wbc->sync_mode == WB_SYNC_ALL) {
-			/*
-			 * Submit asynchronously rather than waiting per
-			 * block. sync_dirty_buffer() here made every 4 KiB
-			 * block a full submit-and-wait round trip: measured
-			 * at ~55 blocks/s (about 220 KB/s) on the qemu-arm64
-			 * VirtIO rig, so a 128 MiB file took minutes and any
-			 * sync(1) behind it appeared hung (see yocto-beamfs
-			 * 8bc0b0d, where the flusher was found parked in
-			 * wait_on_buffer while the block layer showed no
-			 * backlog -- it was latency, not a lost completion).
-			 *
-			 * write_dirty_buffer() queues the I/O and returns;
-			 * beamfs_inline_writepages() waits once for the whole
-			 * range via filemap_fdatawait_range(), which is the
-			 * standard kernel pattern and preserves the
-			 * WB_SYNC_ALL contract: by the time writepages
-			 * returns, everything it submitted is on disk.
-			 */
-			write_dirty_buffer(bh, REQ_SYNC);
-			brelse(bh);
-		} else {
-			brelse(bh);
-		}
-
-		folio_offset += slice_length;
-	}
-
-	kunmap_local(folio_buf);
-	folio_end_writeback(folio);
-	folio_unlock(folio);
-	kfree(scratch);
-	return 0;
-
-fail_kunmap:
-	kunmap_local(folio_buf);
-	folio_end_writeback(folio);
-	folio_unlock(folio);
-	kfree(scratch);
-	return ret;
-}
-
 static int beamfs_inline_writepages(struct address_space *mapping,
 				    struct writeback_control *wbc)
 {
-	struct inode       *inode = mapping->host;
-	struct super_block *sb    = inode->i_sb;
-	struct folio_batch  fbatch;
-	pgoff_t             index, end;
-	int                 ret = 0;
+	struct iomap_writepage_ctx wpc = {
+		.inode = mapping->host,
+		.wbc   = wbc,
+		.ops   = &beamfs_inline_writeback_ops,
+	};
 
-	folio_batch_init(&fbatch);
-
-	/* VFS-standard pgoff_t range from writeback_control. */
-	index = wbc->range_start >> PAGE_SHIFT;
-	if (wbc->range_end == LLONG_MAX)
-		end = ULONG_MAX;
-	else
-		end = wbc->range_end >> PAGE_SHIFT;
-
-	while (index <= end) {
-		unsigned int nr_folios;
-		unsigned int i;
-
-		nr_folios = filemap_get_folios_tag(mapping, &index, end,
-						   PAGECACHE_TAG_DIRTY,
-						   &fbatch);
-		if (nr_folios == 0)
-			break;
-
-		for (i = 0; i < nr_folios; i++) {
-			struct folio *folio = fbatch.folios[i];
-
-			ret = beamfs_inline_writeback_folio(inode, sb, folio, wbc);
-			if (ret < 0)
-				goto out_release;
-		}
-
-		folio_batch_release(&fbatch);
-	}
-
-	/*
-	 * Single wait for the whole submitted range. writeback_folio()
-	 * queues each block with write_dirty_buffer() and does not block,
-	 * so this is where WB_SYNC_ALL's data-integrity guarantee is
-	 * honoured -- once here, every buffer this call submitted has
-	 * completed. WB_SYNC_NONE callers (the periodic bdi flusher) skip
-	 * the wait entirely, as before.
-	 */
-	if (wbc->sync_mode == WB_SYNC_ALL) {
-		int werr = filemap_fdatawait_range(mapping,
-						   wbc->range_start,
-						   wbc->range_end);
-
-		if (werr)
-			ret = werr;
-	}
-
-	return ret;
-
-out_release:
-	folio_batch_release(&fbatch);
-	return ret;
+	return iomap_writepages(&wpc);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2098,7 +2042,8 @@ out_release:
 static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from)
 {
-	return generic_perform_write(iocb, from);
+	return iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
+					 &beamfs_inline_write_ops, NULL);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2108,8 +2053,6 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 const struct address_space_operations beamfs_inline_aops = {
 	.read_folio       = beamfs_inline_read_folio,
 	.writepages       = beamfs_inline_writepages,
-	.write_begin      = beamfs_inline_write_begin,
-	.write_end        = beamfs_inline_write_end,
 	.dirty_folio      = filemap_dirty_folio,
 	/* Required once the folio state is iomap's: the kernel warns at
 	 * compaction time without it.
