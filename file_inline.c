@@ -28,6 +28,7 @@
 #include <linux/crc32.h>
 #include <linux/unaligned.h>
 #include "beamfs.h"
+#include <linux/iomap.h>
 
 /* ------------------------------------------------------------------------- */
 /* Forward declarations of v2 ops (stubs, populated in subsequent stages)    */
@@ -1444,108 +1445,146 @@ static int beamfs_inline_folio_coverage(struct inode *inode,
 /* single-bit and multi-byte payload corruption injected at submit_bio,      */
 /* across multi-block files (the v2.x WOW-factor target).                    */
 /* ------------------------------------------------------------------------- */
-static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
-{
-	struct inode       *inode = folio->mapping->host;
-	struct super_block *sb    = inode->i_sb;
-	u64                 b_first, b_last, b;
-	u32                 k_first, len_in_b_last, fub;
-	u32                 folio_offset = 0;  /* current write offset in folio */
-	u8                 *dst;
-	int                 ret;
 
-	/* Single-page folios are guaranteed by mapping_set_folio_order_range. */
-	if (WARN_ON_ONCE(folio_size(folio) != BEAMFS_BLOCK_SIZE)) {
-		ret = -EIO;
-		goto out_unlock;
+/* ------------------------------------------------------------------------- */
+/* iomap read path                                                           */
+/*                                                                           */
+/* The INLINE format interleaves data and parity inside every 4096-byte      */
+/* block: 16 RS(255,239) subblocks of [239 data][16 parity]. 3824 logical    */
+/* bytes therefore occupy 4096 physical bytes, and file offset is not disk   */
+/* offset plus a constant -- which is what iomap_sector() assumes.           */
+/*                                                                           */
+/* Two consequences shape this code. iomap_begin maps one INLINE block per   */
+/* iteration (length = BEAMFS_DATA_INLINE_BYTES) so the affine assumption    */
+/* holds within a mapping; iomap iterates over the rest. And the read is     */
+/* done by beamfs_inline_read_folio_range() rather than by                   */
+/* iomap_bio_read_ops, because the bytes that reach the page cache are not   */
+/* the bytes on disk: they are what RS decoding produces from them.          */
+/* ------------------------------------------------------------------------- */
+
+static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
+				     loff_t length, unsigned int flags,
+				     struct iomap *iomap,
+				     struct iomap *srcmap)
+{
+	u64 b = (u64)pos / BEAMFS_DATA_INLINE_BYTES;
+	u32 off_in_block = (u32)((u64)pos % BEAMFS_DATA_INLINE_BYTES);
+	u64 phys = 0;
+	int ret;
+
+	ret = beamfs_inline_lookup_phys(inode, b, &phys);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * One INLINE block per mapping. Merging blocks would require the
+	 * file-to-disk relation to stay affine across them, which it does
+	 * not: consecutive logical blocks are 3824 bytes apart in the file
+	 * and 4096 apart on disk.
+	 */
+	iomap->offset = (loff_t)b * BEAMFS_DATA_INLINE_BYTES;
+	iomap->length = BEAMFS_DATA_INLINE_BYTES;
+	iomap->bdev   = inode->i_sb->s_bdev;
+
+	if (phys == 0) {
+		iomap->type = IOMAP_HOLE;
+		iomap->addr = IOMAP_NULL_ADDR;
+	} else {
+		iomap->type = IOMAP_MAPPED;
+		/*
+		 * addr is the physical block start. It is not used to derive
+		 * a sector for I/O -- read_folio_range does its own reading --
+		 * but fiemap and tracing report it, so it must be right.
+		 */
+		iomap->addr = (u64)phys * BEAMFS_BLOCK_SIZE;
 	}
 
-	ret = beamfs_inline_folio_coverage(inode, folio->index,
-					   &b_first, &k_first,
-					   &b_last, &len_in_b_last,
-					   &fub);
-	if (ret == -ERANGE) {
-		/* Folio at or beyond i_size: zero-fill per VFS convention. */
-		dst = kmap_local_folio(folio, 0);
-		memset(dst, 0, BEAMFS_BLOCK_SIZE);
-		flush_dcache_folio(folio);
-		kunmap_local(dst);
-		folio_end_read(folio, true);
+	(void)off_in_block;
+	(void)length;
+	(void)flags;
+	(void)srcmap;
+	return 0;
+}
+
+static const struct iomap_ops beamfs_inline_iomap_ops = {
+	.iomap_begin = beamfs_inline_iomap_begin,
+};
+
+/*
+ * Read one mapped range into the folio, decoding it on the way.
+ *
+ * iomap has already resolved which INLINE block backs this file range;
+ * what is left is to fetch the physical block, run the 16 RS codewords
+ * through the decoder, and copy out the slice the folio asked for. The
+ * read is synchronous, as iomap_bio_read_folio_range_sync() shows is
+ * expected, so iomap_finish_folio_read() is called before returning.
+ */
+static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
+					  struct iomap_read_folio_ctx *ctx,
+					  size_t len)
+{
+	struct inode       *inode = iter->inode;
+	struct super_block *sb    = inode->i_sb;
+	struct folio       *folio = ctx->cur_folio;
+	const struct iomap *iomap = &iter->iomap;
+	u64                 b     = (u64)iomap->offset / BEAMFS_DATA_INLINE_BYTES;
+	u32   slice_offset = (u32)((u64)iter->pos - (u64)iomap->offset);
+	size_t folio_off   = offset_in_folio(folio, iter->pos);
+	struct buffer_head *bh;
+	u8    *dst;
+	u64    phys;
+	int    ret = 0;
+
+	if (iomap->type == IOMAP_HOLE) {
+		folio_zero_range(folio, folio_off, len);
+		iomap_finish_folio_read(folio, folio_off, len, 0);
 		return 0;
 	}
-	if (ret < 0)
-		goto out_unlock;
 
-	dst = kmap_local_folio(folio, 0);
-
-	for (b = b_first; b <= b_last; b++) {
-		u32 slice_offset_in_block;
-		u32 slice_length;
-		u64 phys = 0;
-
-		if (b == b_first) {
-			slice_offset_in_block = k_first;
-			slice_length = (b == b_last)
-				? len_in_b_last
-				: (BEAMFS_DATA_INLINE_BYTES - k_first);
-		} else if (b == b_last) {
-			slice_offset_in_block = 0;
-			slice_length = len_in_b_last;
-		} else {
-			/* Intermediate block (tri-block case): full INLINE block */
-			slice_offset_in_block = 0;
-			slice_length = BEAMFS_DATA_INLINE_BYTES;
-		}
-
-		ret = beamfs_inline_lookup_phys(inode, b, &phys);
-		if (ret < 0) {
-			kunmap_local(dst);
-			goto out_unlock;
-		}
-
-		if (phys == 0) {
-			/* HOLE: zero the slice for this block. */
-			memset(dst + folio_offset, 0, slice_length);
-		} else {
-			struct buffer_head *rbh = sb_bread(sb, phys);
-
-			if (!rbh) {
-				pr_err_ratelimited("beamfs/inline: read_folio: sb_bread phys=%llu failed\n",
-						   (unsigned long long)phys);
-				ret = -EIO;
-				kunmap_local(dst);
-				goto out_unlock;
-			}
-			lock_buffer(rbh);
-			ret = beamfs_inline_decode_block_into_buf(
-				sb, rbh, phys, inode, b,
-				dst + folio_offset,
-				slice_offset_in_block, slice_length,
-				false);
-			unlock_buffer(rbh);
-			brelse(rbh);
-			if (ret < 0) {
-				kunmap_local(dst);
-				goto out_unlock;
-			}
-		}
-
-		folio_offset += slice_length;
+	phys = iomap->addr / BEAMFS_BLOCK_SIZE;
+	bh = sb_bread(sb, phys);
+	if (!bh) {
+		pr_err_ratelimited("beamfs/inline: read_folio_range: sb_bread phys=%llu failed\n",
+				   (unsigned long long)phys);
+		iomap_finish_folio_read(folio, folio_off, len, -EIO);
+		return -EIO;
 	}
 
-	/* Zero the trailing portion [fub, BEAMFS_BLOCK_SIZE). */
-	if (fub < BEAMFS_BLOCK_SIZE)
-		memset(dst + fub, 0, BEAMFS_BLOCK_SIZE - fub);
-	flush_dcache_folio(folio);
+	dst = kmap_local_folio(folio, folio_off);
+	lock_buffer(bh);
+	ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
+						  dst, slice_offset,
+						  (u32)len, false);
+	unlock_buffer(bh);
 	kunmap_local(dst);
+	brelse(bh);
 
-	folio_end_read(folio, true);
-	return 0;
-
-out_unlock:
-	folio_unlock(folio);
+	iomap_finish_folio_read(folio, folio_off, len, ret);
 	return ret;
 }
+
+static const struct iomap_read_ops beamfs_inline_read_ops = {
+	.read_folio_range = beamfs_inline_read_folio_range,
+};
+
+/*
+ * read_folio / readahead: iomap resolves which INLINE block backs each
+ * file range, then calls beamfs_inline_read_folio_range() to produce the
+ * bytes. The folio locking, uptodate accounting and readahead batching
+ * are iomap's; what stays here is the RS decode.
+ */
+static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
+{
+	struct iomap_read_folio_ctx ctx = {
+		.ops       = &beamfs_inline_read_ops,
+		.cur_folio = folio,
+	};
+
+	iomap_read_folio(&beamfs_inline_iomap_ops, &ctx, NULL);
+	return 0;
+}
+
+
 
 /* ------------------------------------------------------------------------- */
 /* readahead -- per-folio loop on top of read_folio.                         */
