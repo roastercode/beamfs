@@ -548,6 +548,18 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 			inode_dirty = 1;
 		}
 
+		/*
+		 * Fast symlinks keep their target in i_direct[] as raw bytes,
+		 * up to 96 of them, not as block pointers. Reading those bytes
+		 * as blocks yields whatever the path spelt -- fsstress names
+		 * gave 0x7830783078307830, "0x0x0x0x" -- and 277 phantom
+		 * out-of-range errors on a sound volume. super.c says the same
+		 * where it refuses to free them: fast symlinks own no on-disk
+		 * data blocks.
+		 */
+		if ((raw.i_mode & 0xF000) == 0xA000)
+			continue;
+
 		for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
 			uint64_t phys = raw.i_direct[i];
 
@@ -718,6 +730,18 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 			return FSCK_ERROR;
 		}
 		if (raw.i_mode == 0)
+			continue;
+
+		/*
+		 * Fast symlinks keep their target in i_direct[] as raw bytes,
+		 * up to 96 of them, not as block pointers. Reading those bytes
+		 * as blocks yields whatever the path spelt -- fsstress names
+		 * gave 0x7830783078307830, "0x0x0x0x" -- and 277 phantom
+		 * out-of-range errors on a sound volume. super.c says the same
+		 * where it refuses to free them: fast symlinks own no on-disk
+		 * data blocks.
+		 */
+		if ((raw.i_mode & 0xF000) == 0xA000)
 			continue;
 
 		for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {

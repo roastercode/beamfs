@@ -144,89 +144,107 @@ static bool beamfs_free_one_block(struct super_block *sb, u64 blk)
 }
 
 /*
- * beamfs_free_indirect_tree -- free an indirection subtree.
+ * beamfs_free_ind_range -- free part or all of an indirection subtree.
  *
  * @blk:    the indirect block itself
  * @depth:  1 = its pointers are data blocks
  *          2 = its pointers are single-indirect blocks
  *          3 = its pointers are double-indirect blocks
- * @skip:   how many data blocks to leave alone at the start of the
- *          subtree, for truncate; 0 frees everything
+ * @base:   logical index of the first data block this subtree covers
+ * @first:  logical index from which to free; everything below survives
  *
- * Returns the number of data blocks the subtree covered, so a caller
- * walking siblings can decrement @skip correctly whether or not the
- * subtree was actually visited.
+ * Returns true when the subtree is now empty and @blk itself has been
+ * freed, false when something in it survived and @blk was kept.
  *
- * The recursion is bounded at depth 3 by the format, so the stack cost
- * is three frames plus one buffer_head reference each. The previous
- * approach -- a flat 'seen' array of every freed block -- cannot scale
- * here: a triple-indirect file reaches 134 million blocks, and the
- * linear scan was quadratic besides. Aliasing is caught per block by
- * beamfs_free_one_block() instead, which is stronger: it catches a
- * duplicate pointer wherever it lives, not only within one indirect
- * block.
+ * Absolute indices rather than a running countdown. The countdown
+ * version shared one mutable counter across the whole recursion, mixing
+ * "how much to preserve" with "how far we have got", so no call could
+ * reason about its own range without knowing what its siblings had
+ * consumed. It freed indirect blocks that still held live pointers;
+ * the allocator handed them out as data blocks; a later lookup read
+ * file contents as pointers. xfstests generic/013 found it as
+ * phys=6148914691236517205 -- 0x5555... , fsstress payload.
+ *
+ * Here every subtree knows its own range by construction: child j of a
+ * block at @base covers [base + j*span, base + (j+1)*span). Whether it
+ * is wholly above @first, wholly below, or straddling follows from
+ * arithmetic, with no state to get out of step.
+ *
+ * Holes are why survivors counts pointers rather than blocks: beamfs
+ * allocates on demand, so a subtree can be sparsely populated and a
+ * count derived from logical indices would not match what is actually
+ * there.
  */
-u64 beamfs_free_indirect_tree(struct super_block *sb, u64 blk,
-			      unsigned int depth, u64 *skip)
+bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
+			   unsigned int depth, u64 base, u64 first)
 {
 	u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
-	u64 span = nptrs;
+	u64 child_span = 1;
 	struct buffer_head *ibh;
 	unsigned int j;
-
-	for (j = 1; j < depth; j++)
-		span *= nptrs;
+	u64 survivors = 0;
+	bool dirtied = false;
 
 	if (!blk)
-		return span;
+		return true;
 
-	/* Whole subtree is below the truncation point: nothing to do. */
-	if (*skip >= span) {
-		*skip -= span;
-		return span;
-	}
+	for (j = 1; j < depth; j++)
+		child_span *= nptrs;
+
+	/* Wholly below the cut: nothing here is going away. */
+	if (base + child_span * nptrs <= first)
+		return false;
 
 	ibh = sb_bread(sb, blk);
 	if (!ibh) {
-		pr_err_ratelimited("beamfs: cannot read indirect block %llu, subtree leaked\n",
+		pr_err_ratelimited("beamfs: cannot read indirect block %llu, subtree left allocated\n",
 				   (unsigned long long)blk);
-		return span;
+		return false;
 	}
 
 	for (j = 0; j < nptrs; j++) {
 		__le64 *ptrs = (__le64 *)ibh->b_data;
 		u64 child = le64_to_cpu(ptrs[j]);
+		u64 child_base = base + (u64)j * child_span;
+
+		if (!child)
+			continue;
 
 		if (depth > 1) {
-			beamfs_free_indirect_tree(sb, child, depth - 1, skip);
-			if (*skip == 0)
+			if (beamfs_free_ind_range(sb, child, depth - 1,
+						  child_base, first)) {
 				ptrs[j] = 0;
+				dirtied = true;
+			} else {
+				survivors++;
+			}
 			continue;
 		}
 
-		if (*skip > 0) {
-			(*skip)--;
+		if (child_base < first) {
+			survivors++;
 			continue;
 		}
+
 		beamfs_free_one_block(sb, child);
 		ptrs[j] = 0;
+		dirtied = true;
 	}
 
-	if (*skip == 0) {
-		/*
-		 * Every pointer is cleared, so the indirect block carries
-		 * nothing: free it too. Partial truncate keeps it, with its
-		 * surviving pointers, and the caller writes it back.
-		 */
+	if (dirtied)
 		mark_buffer_dirty(ibh);
-		brelse(ibh);
-		beamfs_free_one_block(sb, blk);
-		return span;
-	}
-
-	mark_buffer_dirty(ibh);
 	brelse(ibh);
-	return span;
+
+	/*
+	 * Free the block only once nothing points out of it. A block with
+	 * one surviving pointer is still load-bearing, and freeing it is
+	 * the mistake this rewrite exists to prevent.
+	 */
+	if (survivors == 0) {
+		beamfs_free_one_block(sb, blk);
+		return true;
+	}
+	return false;
 }
 
 /*
@@ -293,25 +311,24 @@ static void beamfs_free_data_blocks(struct inode *inode)
 	 * file held past 2 MiB -- permanently, since nothing else ever
 	 * clears those bits.
 	 */
+	/*
+	 * first = 0: the inode is going away, so nothing survives.
+	 * base is the logical index the level starts at, which is what
+	 * lets each subtree place itself without a shared counter.
+	 */
 	if (fi->i_indirect) {
-		u64 skip = 0;
-
-		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_indirect),
-					  1, &skip);
+		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_indirect), 1,
+				      BEAMFS_MAX_IBLOCK_DIRECT, 0);
 		fi->i_indirect = 0;
 	}
 	if (fi->i_dindirect) {
-		u64 skip = 0;
-
-		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_dindirect),
-					  2, &skip);
+		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_dindirect), 2,
+				      BEAMFS_MAX_IBLOCK_INDIRECT, 0);
 		fi->i_dindirect = 0;
 	}
 	if (fi->i_tindirect) {
-		u64 skip = 0;
-
-		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_tindirect),
-					  3, &skip);
+		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_tindirect), 3,
+				      BEAMFS_MAX_IBLOCK_DINDIRECT, 0);
 		fi->i_tindirect = 0;
 	}
 

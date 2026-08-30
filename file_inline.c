@@ -2320,24 +2320,22 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 	 * offset into it. A subtree entirely below the point is skipped
 	 * whole, which is why the walk returns its span.
 	 */
-	if (fi->i_dindirect) {
-		u64 skip = b_first_freed > BEAMFS_MAX_IBLOCK_INDIRECT ?
-			   b_first_freed - BEAMFS_MAX_IBLOCK_INDIRECT : 0;
+	/*
+	 * The truncation point goes in as an absolute logical index, and
+	 * the pointer is cleared only if the walk reports the whole
+	 * subtree gone. Deriving that from the truncation point instead
+	 * was how a partially freed subtree ended up with a null parent
+	 * pointer and its surviving blocks orphaned.
+	 */
+	if (fi->i_dindirect &&
+	    beamfs_free_ind_range(sb, le64_to_cpu(fi->i_dindirect), 2,
+				  BEAMFS_MAX_IBLOCK_INDIRECT, b_first_freed))
+		fi->i_dindirect = 0;
 
-		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_dindirect),
-					  2, &skip);
-		if (b_first_freed <= BEAMFS_MAX_IBLOCK_INDIRECT)
-			fi->i_dindirect = 0;
-	}
-	if (fi->i_tindirect) {
-		u64 skip = b_first_freed > BEAMFS_MAX_IBLOCK_DINDIRECT ?
-			   b_first_freed - BEAMFS_MAX_IBLOCK_DINDIRECT : 0;
-
-		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_tindirect),
-					  3, &skip);
-		if (b_first_freed <= BEAMFS_MAX_IBLOCK_DINDIRECT)
-			fi->i_tindirect = 0;
-	}
+	if (fi->i_tindirect &&
+	    beamfs_free_ind_range(sb, le64_to_cpu(fi->i_tindirect), 3,
+				  BEAMFS_MAX_IBLOCK_DINDIRECT, b_first_freed))
+		fi->i_tindirect = 0;
 
 	mark_inode_dirty(inode);
 }
