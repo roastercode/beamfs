@@ -107,6 +107,127 @@ static bool seen_block(const u64 *seen, unsigned int n, u64 blk)
 }
 
 /*
+ * beamfs_free_one_block -- free a data block, refusing a second free.
+ *
+ * A block that is already clear in the bitmap when we come to free it
+ * means two pointers reached it: either a genuine aliasing bug or, more
+ * likely here, a pointer flipped by a particle so that two slots name
+ * the same physical block. Freeing it twice would clear a bit that a
+ * live file now owns, turning a read error into silent cross-file
+ * corruption -- which is the failure mode this filesystem exists to
+ * prevent.
+ *
+ * The event is journalled rather than merely logged: an aliased pointer
+ * discovered during teardown is exactly the forensic record the RS
+ * journal is for, and dmesg alone leaves the run reading as an
+ * unexplained space discrepancy.
+ *
+ * Returns true if the block was freed.
+ */
+static bool beamfs_free_one_block(struct super_block *sb, u64 blk)
+{
+	if (!blk)
+		return false;
+
+	if (!beamfs_block_is_allocated(sb, blk)) {
+		pr_err_ratelimited("beamfs: refusing double free of block %llu\n",
+				   (unsigned long long)blk);
+		beamfs_log_rs_event_flagged(sb, blk, NULL, 0,
+					    BEAMFS_SUBBLOCK_DATA, 0);
+		return false;
+	}
+
+	beamfs_free_block(sb, blk, NULL);
+	return true;
+}
+
+/*
+ * beamfs_free_indirect_tree -- free an indirection subtree.
+ *
+ * @blk:    the indirect block itself
+ * @depth:  1 = its pointers are data blocks
+ *          2 = its pointers are single-indirect blocks
+ *          3 = its pointers are double-indirect blocks
+ * @skip:   how many data blocks to leave alone at the start of the
+ *          subtree, for truncate; 0 frees everything
+ *
+ * Returns the number of data blocks the subtree covered, so a caller
+ * walking siblings can decrement @skip correctly whether or not the
+ * subtree was actually visited.
+ *
+ * The recursion is bounded at depth 3 by the format, so the stack cost
+ * is three frames plus one buffer_head reference each. The previous
+ * approach -- a flat 'seen' array of every freed block -- cannot scale
+ * here: a triple-indirect file reaches 134 million blocks, and the
+ * linear scan was quadratic besides. Aliasing is caught per block by
+ * beamfs_free_one_block() instead, which is stronger: it catches a
+ * duplicate pointer wherever it lives, not only within one indirect
+ * block.
+ */
+u64 beamfs_free_indirect_tree(struct super_block *sb, u64 blk,
+			      unsigned int depth, u64 *skip)
+{
+	u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
+	u64 span = nptrs;
+	struct buffer_head *ibh;
+	unsigned int j;
+
+	for (j = 1; j < depth; j++)
+		span *= nptrs;
+
+	if (!blk)
+		return span;
+
+	/* Whole subtree is below the truncation point: nothing to do. */
+	if (*skip >= span) {
+		*skip -= span;
+		return span;
+	}
+
+	ibh = sb_bread(sb, blk);
+	if (!ibh) {
+		pr_err_ratelimited("beamfs: cannot read indirect block %llu, subtree leaked\n",
+				   (unsigned long long)blk);
+		return span;
+	}
+
+	for (j = 0; j < nptrs; j++) {
+		__le64 *ptrs = (__le64 *)ibh->b_data;
+		u64 child = le64_to_cpu(ptrs[j]);
+
+		if (depth > 1) {
+			beamfs_free_indirect_tree(sb, child, depth - 1, skip);
+			if (*skip == 0)
+				ptrs[j] = 0;
+			continue;
+		}
+
+		if (*skip > 0) {
+			(*skip)--;
+			continue;
+		}
+		beamfs_free_one_block(sb, child);
+		ptrs[j] = 0;
+	}
+
+	if (*skip == 0) {
+		/*
+		 * Every pointer is cleared, so the indirect block carries
+		 * nothing: free it too. Partial truncate keeps it, with its
+		 * surviving pointers, and the caller writes it back.
+		 */
+		mark_buffer_dirty(ibh);
+		brelse(ibh);
+		beamfs_free_one_block(sb, blk);
+		return span;
+	}
+
+	mark_buffer_dirty(ibh);
+	brelse(ibh);
+	return span;
+}
+
+/*
  * beamfs_free_data_blocks -- release all data blocks of a deleted inode.
  *
  * Frees direct blocks and the single indirect block (and all blocks
@@ -164,29 +285,32 @@ static void beamfs_free_data_blocks(struct inode *inode)
 		fi->i_direct[i] = 0;
 	}
 
-	/* Free single indirect block and all blocks it points to */
+	/*
+	 * Indirection levels. All three are walked: the allocator reaches
+	 * triple indirect, so anything shallower here leaks every block a
+	 * file held past 2 MiB -- permanently, since nothing else ever
+	 * clears those bits.
+	 */
 	if (fi->i_indirect) {
-		u64 indirect_blk = le64_to_cpu(fi->i_indirect);
-		struct buffer_head *ibh = sb_bread(sb, indirect_blk);
+		u64 skip = 0;
 
-		if (ibh) {
-			__le64 *ptrs = (__le64 *)ibh->b_data;
-			u64 j;
-
-			for (j = 0; j < nptrs; j++) {
-				u64 blk = le64_to_cpu(ptrs[j]);
-
-				if (blk && (!seen || !seen_block(seen, n_seen, blk))) {
-					beamfs_free_block(sb, blk, NULL);
-					if (seen)
-						seen[n_seen++] = blk;
-				}
-			}
-			brelse(ibh);
-		}
-		if (!seen || !seen_block(seen, n_seen, indirect_blk))
-			beamfs_free_block(sb, indirect_blk, NULL);
+		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_indirect),
+					  1, &skip);
 		fi->i_indirect = 0;
+	}
+	if (fi->i_dindirect) {
+		u64 skip = 0;
+
+		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_dindirect),
+					  2, &skip);
+		fi->i_dindirect = 0;
+	}
+	if (fi->i_tindirect) {
+		u64 skip = 0;
+
+		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_tindirect),
+					  3, &skip);
+		fi->i_tindirect = 0;
 	}
 
 	kfree(seen);

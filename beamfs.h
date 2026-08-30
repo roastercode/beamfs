@@ -888,6 +888,20 @@ void beamfs_destroy_bitmap(struct super_block *sb);
 u64  beamfs_alloc_block(struct super_block *sb, struct inode *owner);
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner);
 bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
+/*
+ * beamfs_free_indirect_tree -- free an indirection subtree.
+ *
+ * @depth: 1 = pointers are data blocks, 2 = single-indirect blocks,
+ *         3 = double-indirect blocks.
+ * @skip:  data blocks to leave alone at the start of the subtree, for
+ *         truncate; 0 frees everything. Decremented as the walk
+ *         consumes it.
+ *
+ * Returns the number of data blocks the subtree spans, so a caller
+ * walking siblings can account for a subtree it skipped entirely.
+ */
+u64  beamfs_free_indirect_tree(struct super_block *sb, u64 blk,
+			       unsigned int depth, u64 *skip);
 u64  beamfs_alloc_inode_num(struct super_block *sb);
 void beamfs_free_inode_num(struct super_block *sb, u64 ino);
 

@@ -2148,6 +2148,35 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		}
 	}
 
+	/*
+	 * Double and triple indirect. The allocator reaches both, so a
+	 * truncate stopping at single indirect leaves every block a file
+	 * held past 2 MiB allocated with nothing left pointing at it.
+	 *
+	 * skip counts data blocks to preserve within each subtree: zero
+	 * once the truncation point is below the level, otherwise the
+	 * offset into it. A subtree entirely below the point is skipped
+	 * whole, which is why the walk returns its span.
+	 */
+	if (fi->i_dindirect) {
+		u64 skip = b_first_freed > BEAMFS_MAX_IBLOCK_INDIRECT ?
+			   b_first_freed - BEAMFS_MAX_IBLOCK_INDIRECT : 0;
+
+		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_dindirect),
+					  2, &skip);
+		if (b_first_freed <= BEAMFS_MAX_IBLOCK_INDIRECT)
+			fi->i_dindirect = 0;
+	}
+	if (fi->i_tindirect) {
+		u64 skip = b_first_freed > BEAMFS_MAX_IBLOCK_DINDIRECT ?
+			   b_first_freed - BEAMFS_MAX_IBLOCK_DINDIRECT : 0;
+
+		beamfs_free_indirect_tree(sb, le64_to_cpu(fi->i_tindirect),
+					  3, &skip);
+		if (b_first_freed <= BEAMFS_MAX_IBLOCK_DINDIRECT)
+			fi->i_tindirect = 0;
+	}
+
 	mark_inode_dirty(inode);
 }
 
