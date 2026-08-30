@@ -77,6 +77,8 @@ static void beamfs_put_super(struct super_block *sb)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
 	if (sbi) {
+		/* Stop the sweep before the structures it reads go away. */
+		beamfs_scrub_exit(sb);
 		beamfs_destroy_bitmap(sb);
 		brelse(sbi->s_sbh);
 		kfree(sbi->s_beamfs_sb);
@@ -1040,6 +1042,25 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		le64_to_cpu(fsb->s_feat_compat),
 		le64_to_cpu(fsb->s_feat_incompat),
 		le64_to_cpu(fsb->s_feat_ro_compat));
+
+	/*
+	 * Start the scrubber last, once the volume is fully usable: it
+	 * reads blocks and journals what it finds, so it has no business
+	 * running against a superblock still being assembled.
+	 *
+	 * A failure to start is not a failure to mount. The filesystem
+	 * still corrects on read; what is lost is the sweep that would
+	 * have found the drift before a reader did. Refusing the mount
+	 * over it would trade a degraded guarantee for no filesystem at
+	 * all, which is the worse outcome on a device that has no second
+	 * copy.
+	 */
+	ret = beamfs_scrub_init(sb);
+	if (ret) {
+		pr_warn("beamfs: scrubber did not start (%d); correction on read is unaffected\n",
+			ret);
+		ret = 0;
+	}
 
 	return 0;
 

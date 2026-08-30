@@ -647,6 +647,34 @@ struct beamfs_sb_info {
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
 	bool                      s_data_selfid;    /* DATA_SELFID active, cached at mount */
+
+	/*
+	 * Background scrubber.
+	 *
+	 * Correction happens on read, so a block nobody reads accumulates
+	 * upsets until it passes the eight-symbol radius and becomes
+	 * unrecoverable. Cold data is exactly the case this filesystem
+	 * exists for -- an archive on a spacecraft is written once and
+	 * read years later -- so waiting for a reader is waiting for the
+	 * failure.
+	 *
+	 * The thread walks allocated blocks at a bounded rate, decodes
+	 * each, and journals what it finds. It does not write back:
+	 * rewriting cold data turns a read into a read-modify-write with
+	 * a power-loss window, and the correction the decode produced is
+	 * already what a subsequent reader would get. Detection is the
+	 * point -- an operator who knows a volume is drifting can act
+	 * while the drift is still correctable.
+	 */
+	struct task_struct       *s_scrub_thread;
+	unsigned int              s_scrub_interval_ms; /* between blocks; 0 = idle */
+	u64                       s_scrub_cursor;      /* next block to visit */
+	u64                       s_scrub_passes;      /* completed sweeps */
+	u64                       s_scrub_blocks;      /* blocks checked */
+	u64                       s_scrub_corrected;   /* blocks with corrections */
+	u64                       s_scrub_uncorrectable;
+	struct kobject            s_kobj;
+	struct completion         s_kobj_unregister;
 };
 
 /*
@@ -683,6 +711,12 @@ static inline struct beamfs_sb_info *BEAMFS_SB(struct super_block *sb)
 /* Function prototypes */
 /* super.c */
 int beamfs_fill_super(struct super_block *sb, struct fs_context *fc);
+
+/* scrub.c */
+int  beamfs_scrub_init(struct super_block *sb);
+void beamfs_scrub_exit(struct super_block *sb);
+int  beamfs_scrub_check_block(struct super_block *sb, u64 phys,
+			      unsigned int *corrected);
 /*
  * beamfs_log_rs_event -- record a Reed-Solomon correction event in the
  *                       persistent superblock journal.

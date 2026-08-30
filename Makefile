@@ -10,6 +10,7 @@ beamfs-y := super.o      \
             dir.o        \
             file.o       \
             file_inline.o \
+            scrub.o      \
             edac.o       \
             alloc.o      \
             namei.o
