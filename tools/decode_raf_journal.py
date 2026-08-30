@@ -36,7 +36,12 @@ from pathlib import Path
 # ====================================================================
 
 BEAMFS_MAGIC                  = 0x4245414D  # "FRTF" little-endian
-BEAMFS_VERSION_V1             = 4
+# Versions this decoder reads. The superblock layout up to and
+# including s_rs_journal is unchanged across them, so one decoder
+# serves both; mount policy is strict equality with the current
+# version, but a forensic tool has to read what is on the disk in
+# front of it, including a volume made by an older mkfs.
+BEAMFS_VERSIONS_SUPPORTED     = (4, 5)
 BEAMFS_SB_SIZE                = 4096
 BEAMFS_RS_JOURNAL_SIZE        = 64
 BEAMFS_RS_EVENT_SIZE          = 40
@@ -152,9 +157,10 @@ def assert_sb_sane(hdr: dict) -> list:
     if hdr["magic"] != BEAMFS_MAGIC:
         raise ValueError(
             f"bad magic 0x{hdr['magic']:08x}, expected 0x{BEAMFS_MAGIC:08x}")
-    if hdr["version"] != BEAMFS_VERSION_V1:
+    if hdr["version"] not in BEAMFS_VERSIONS_SUPPORTED:
         raise ValueError(
-            f"bad version {hdr['version']}, expected {BEAMFS_VERSION_V1}")
+            f"bad version {hdr['version']}, expected one of "
+            f"{BEAMFS_VERSIONS_SUPPORTED}")
     if hdr["rs_journal_head"] >= BEAMFS_RS_JOURNAL_SIZE:
         warnings.append(
             f"head index {hdr['rs_journal_head']} >= journal size "
@@ -304,7 +310,7 @@ def fmt_summary_text(hdr: dict, events: list, warnings: list) -> str:
     lines.append(f"  magic            : 0x{hdr['magic']:08x}"
                  f" ({'FRTF' if hdr['magic'] == BEAMFS_MAGIC else 'BAD'})")
     lines.append(f"  version          : {hdr['version']}"
-                 f" ({'v4' if hdr['version'] == BEAMFS_VERSION_V1 else 'NOT v4'})")
+                 f" ({'supported' if hdr['version'] in BEAMFS_VERSIONS_SUPPORTED else 'UNSUPPORTED'})")
     lines.append(f"  block_size       : {hdr['block_size']}")
     lines.append(f"  block_count      : {hdr['block_count']}")
     lines.append(f"  free_blocks      : {hdr['free_blocks']}")

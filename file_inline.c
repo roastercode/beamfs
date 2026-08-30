@@ -1571,10 +1571,33 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 		done += slice_length;
 	}
 
+	/*
+	 * On failure, return without finishing the folio.
+	 * iomap_read_folio_iter() propagates a non-zero return before
+	 * counting the range as submitted, and iomap_read_folio() then
+	 * ends the folio itself through iomap_read_end(). Calling
+	 * iomap_finish_folio_read() here as well runs folio_end_read()
+	 * on a folio iomap still owns -- with no iomap_folio_state
+	 * attached, which is always the case at 4096-byte folios and
+	 * blocks, that call is unconditional -- and the second end
+	 * leaves any waiter parked in folio_wait_bit_common() forever.
+	 *
+	 * Observed on 2026-08-30 by the saturation protocol: a block with
+	 * nine symbol errors in one subblock was correctly detected and
+	 * journalled, but the read never returned EIO -- cat sat in
+	 * uninterruptible sleep instead. The fail-closed half of the
+	 * saturation contract was the casualty, not the detection half.
+	 *
+	 * iomap_bio_read_folio_range_sync() has the same shape: it
+	 * returns the error and finishes nothing.
+	 */
+	if (ret < 0)
+		return ret;
+
 	iomap_finish_folio_read(folio, offset_in_folio(folio, iter->pos),
-				len, ret);
+				len, 0);
 	(void)done;
-	return ret;
+	return 0;
 }
 
 static const struct iomap_read_ops beamfs_inline_read_ops = {

@@ -556,7 +556,7 @@ struct beamfs_super_block {
 	__le32  s_crc32;            /* CRC32 of this superblock */
 	__u8    s_uuid[16];         /* UUID */
 	__u8    s_label[32];        /* Volume label */
-	 struct beamfs_rs_event s_rs_journal[BEAMFS_RS_JOURNAL_SIZE]; /* 1536 bytes */
+	 struct beamfs_rs_event s_rs_journal[BEAMFS_RS_JOURNAL_SIZE]; /* 2560 bytes */
 	__u8    s_rs_journal_head;  /* next write index (ring buffer) */
 	__le64  s_bitmap_blk;       /* On-disk block bitmap block number */
 	__le64  s_feat_compat;      /* Compatible feature flags (informational) */

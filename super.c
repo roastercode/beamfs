@@ -579,8 +579,8 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
  *                       an RS event with no extra context flag. Equivalent
  *                       to beamfs_log_rs_event_flagged(..., 0). Kept as
  *                       the idiomatic call from sites that do not need
- *                       to discriminate caller context (alloc.c bitmap,
- *                       inode.c, super.c SB load path).
+ *                       to discriminate caller context: bitmap
+ *                       allocation, inode read, and superblock load.
  */
 void beamfs_log_rs_event(struct super_block *sb,
 			u64 block_no,
@@ -648,8 +648,15 @@ beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
 
 	pending = kmalloc_array(n_events, sizeof(*pending), GFP_KERNEL);
 	if (!pending) {
-		pr_warn("beamfs: cannot allocate pending events buffer; %u SB recovery events not journalled\n",
-			n_events);
+		/*
+		 * The kernel already reports the allocation failure itself,
+		 * so this says only what it does not: how many recovery
+		 * events go unrecorded as a result. Debug level because the
+		 * superblock is corrected on disk either way -- what is lost
+		 * is the forensic trace, not the data.
+		 */
+		pr_debug("beamfs: %u SB recovery events not journalled\n",
+			 n_events);
 		return 0;
 	}
 
