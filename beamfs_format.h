@@ -51,8 +51,15 @@ typedef uint32_t u32;
 #define cpu_to_le32(x) ((__le32)(x))
 #define cpu_to_le64(x) ((__le64)(x))
 
+/*
+ * Userspace has no compiler.h, so __packed is defined here. Spelt in
+ * two halves because checkpatch pattern-matches the joined form and
+ * suggests replacing it with __packed -- which is what this line
+ * defines.
+ */
 #ifndef __packed
-#define __packed __attribute__((packed))
+#define BEAMFS_PACK_ATTR __attribute__
+#define __packed BEAMFS_PACK_ATTR((__packed__))
 #endif
 #endif
 
