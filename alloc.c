@@ -24,6 +24,7 @@
 #include <linux/buffer_head.h>
 #include <linux/bitmap.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include "beamfs.h"
 
 /* ------------------------------------------------------------------ */
@@ -77,7 +78,22 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	sbi->s_nblocks    = total_blocks - data_start;
 	sbi->s_data_start = data_start;
 
-	sbi->s_block_bitmap = bitmap_zalloc(sbi->s_nblocks, GFP_KERNEL);
+	/*
+	 * kvmalloc rather than bitmap_zalloc: one bit per data block means
+	 * a 931 GiB volume asks for 29 MiB in one piece, and the page
+	 * allocator has no run of contiguous pages that long once the
+	 * machine has been up a while. The mount failed with ENOMEM on a
+	 * VM with 1.7 GiB free -- not for want of memory, but for want of
+	 * it in one stretch.
+	 *
+	 * vmalloc backing costs an extra page-table walk per access, which
+	 * for a bitmap consulted under a spinlock is not measurable
+	 * against the block I/O it guards. ext4 makes the same trade for
+	 * its larger structures.
+	 */
+	sbi->s_block_bitmap = kvzalloc_objs(*sbi->s_block_bitmap,
+					    BITS_TO_LONGS(sbi->s_nblocks),
+					    GFP_KERNEL);
 	if (!sbi->s_block_bitmap)
 		return -ENOMEM;
 
@@ -93,7 +109,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	sbi->s_bitmap_blkhs = kcalloc(sbi->s_bitmap_blocks_count,
 				      sizeof(*sbi->s_bitmap_blkhs), GFP_KERNEL);
 	if (!sbi->s_bitmap_blkhs) {
-		bitmap_free(sbi->s_block_bitmap);
+		kvfree(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
 		return -ENOMEM;
 	}
@@ -123,7 +139,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 				}
 				kfree(sbi->s_bitmap_blkhs);
 				sbi->s_bitmap_blkhs = NULL;
-				bitmap_free(sbi->s_block_bitmap);
+				kvfree(sbi->s_block_bitmap);
 				sbi->s_block_bitmap = NULL;
 				return -EIO;
 			}
@@ -198,7 +214,9 @@ int beamfs_setup_bitmap(struct super_block *sb)
 
 	sbi->s_ninodes = total_inodes;
 
-	sbi->s_inode_bitmap = bitmap_zalloc(total_inodes + 1, GFP_KERNEL);
+	sbi->s_inode_bitmap = kvzalloc_objs(*sbi->s_inode_bitmap,
+					    BITS_TO_LONGS(total_inodes + 1),
+					    GFP_KERNEL);
 	if (!sbi->s_inode_bitmap) {
 		u32 k;
 
@@ -208,7 +226,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 		}
 		kfree(sbi->s_bitmap_blkhs);
 		sbi->s_bitmap_blkhs = NULL;
-		bitmap_free(sbi->s_block_bitmap);
+		kvfree(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
 		return -ENOMEM;
 	}
@@ -379,11 +397,11 @@ void beamfs_destroy_bitmap(struct super_block *sb)
 		sbi->s_bitmap_blkhs = NULL;
 	}
 	if (sbi->s_block_bitmap) {
-		bitmap_free(sbi->s_block_bitmap);
+		kvfree(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
 	}
 	if (sbi->s_inode_bitmap) {
-		bitmap_free(sbi->s_inode_bitmap);
+		kvfree(sbi->s_inode_bitmap);
 		sbi->s_inode_bitmap = NULL;
 	}
 }

@@ -283,6 +283,7 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 				brelse(bh);
 				inode_set_mtime_to_ts(dir,
 					current_time(dir));
+				inode_set_ctime_to_ts(dir, current_time(dir));
 				mark_inode_dirty(dir);
 				return 0;
 			}
@@ -320,6 +321,8 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 	brelse(bh);
 
 	inode_set_mtime_to_ts(dir, current_time(dir));
+
+	inode_set_ctime_to_ts(dir, current_time(dir));
 	mark_inode_dirty(dir);
 
 	return 0;
@@ -368,6 +371,7 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 				brelse(bh);
 				inode_set_mtime_to_ts(dir,
 					current_time(dir));
+				inode_set_ctime_to_ts(dir, current_time(dir));
 				mark_inode_dirty(dir);
 				return 0;
 			}
@@ -562,37 +566,34 @@ static int beamfs_unlink(struct inode *dir, struct dentry *dentry)
 /* rmdir - remove an empty directory                                   */
 /* ------------------------------------------------------------------ */
 
-static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
+/*
+ * beamfs_dir_is_empty -- does @inode hold anything but . and .. ?
+ *
+ * i_nlink is not the answer. A regular file does not bump its parent's
+ * link count, so a directory full of files still reads nlink == 2 and
+ * the obvious test says empty. rmdir made that mistake and could never
+ * remove anything; rename made the mirror image of it and silently
+ * destroyed the target's contents -- caught by xfstests generic/023,
+ * where "dire/tree -> Directory not empty" came back as success.
+ *
+ * The blocks have to be walked. Holes are skipped rather than treated
+ * as the end: a directory with a freed slot followed by live entries
+ * is not empty, and stopping at the first hole would say it was.
+ */
+static int beamfs_dir_is_empty(struct inode *inode)
 {
-	struct inode            *inode = d_inode(dentry);
-	struct super_block      *sb    = inode->i_sb;
-	struct buffer_head      *bh;
-	struct beamfs_dir_entry  *de;
-	u64                      block_no;
-	unsigned int             offset;
-	unsigned int             i;
-	int                      ret;
+	struct super_block *sb = inode->i_sb;
+	struct buffer_head *bh;
+	struct beamfs_dir_entry *de;
+	u64 block_no;
+	unsigned int offset, i;
+	int ret;
 
-	/*
-	 * Verify the directory is empty: scan all direct blocks and check
-	 * that no entries other than '.' and '..' exist. Testing i_nlink > 2
-	 * is insufficient - regular files do not increment nlink on the parent,
-	 * so a directory with only files can have nlink == 2 but still be
-	 * non-empty.
-	 */
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		/*
-		 * inode, not dir: the blocks that matter belong to the
-		 * directory being removed. Scanning the parent instead
-		 * found the victim's own entry there and called it
-		 * non-empty, so rmdir could never succeed on anything --
-		 * caught by xfstests generic/001, whose cleanup could not
-		 * remove the tree it had just emptied.
-		 */
 		ret = beamfs_dir_get_block(inode, i, false, &block_no);
-
 		if (ret)
 			return ret;
+
 		if (!block_no)
 			break;
 
@@ -604,15 +605,10 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
 			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
 
-			/*
-			 * Skip free slots (d_ino == 0). A directory with a
-			 * hole followed by live entries must NOT be reported
-			 * empty: keep scanning past holes.
-			 */
 			if (de->d_ino &&
 			    !(de->d_name_len == 1 && de->d_name[0] == '.') &&
-			    !(de->d_name_len == 2 && de->d_name[0] == '.'
-			      && de->d_name[1] == '.')) {
+			    !(de->d_name_len == 2 && de->d_name[0] == '.' &&
+			      de->d_name[1] == '.')) {
 				brelse(bh);
 				return -ENOTEMPTY;
 			}
@@ -620,6 +616,18 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 		}
 		brelse(bh);
 	}
+	return 0;
+}
+
+static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
+{
+	struct inode            *inode = d_inode(dentry);
+	int                      ret;
+
+	/* Same walk rename needs; one implementation for both. */
+	ret = beamfs_dir_is_empty(inode);
+	if (ret)
+		return ret;
 
 	ret = beamfs_del_dirent(dir, &dentry->d_name);
 	if (ret)
@@ -782,8 +790,9 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 	 */
 	if (new_inode) {
 		if (is_dir) {
-			if (new_inode->i_nlink > 2)
-				return -ENOTEMPTY;
+			ret = beamfs_dir_is_empty(new_inode);
+			if (ret)
+				return ret;
 		}
 
 		ret = beamfs_del_dirent(new_dir, &new_dentry->d_name);
