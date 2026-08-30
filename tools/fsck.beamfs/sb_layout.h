@@ -29,12 +29,22 @@
 #define BEAMFS_RS_JOURNAL_SIZE     64
 
 /* SB Reed-Solomon protection geometry (kernel beamfs.h) */
-#define BEAMFS_SB_RS_COVERAGE_BYTES  2709
-#define BEAMFS_SB_RS_DATA_LEN        211
+/*
+ * Inodes the format reserves: 1 is the root directory, 2 the canary.
+ * mkfs places their blocks below data_start, so pointer checks have to
+ * know about them. Mirrors beamfs_ino_is_reserved() in beamfs.h.
+ */
+static inline int beamfs_ino_is_reserved(uint64_t ino)
+{
+	return ino == 1 || ino == 2;
+}
+
+#define BEAMFS_SB_RS_COVERAGE_BYTES  2725
+#define BEAMFS_SB_RS_DATA_LEN        210
 #define BEAMFS_SB_RS_SUBBLOCKS       13
 #define BEAMFS_SB_RS_PARITY_BYTES    208
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888
-#define BEAMFS_SB_RS_STAGING_BYTES   2743   /* 13 * BEAMFS_SB_RS_DATA_LEN */
+#define BEAMFS_SB_RS_STAGING_BYTES   2730   /* 13 * BEAMFS_SB_RS_DATA_LEN */
 
 /* Block bitmap geometry (kernel beamfs.h) */
 #define BEAMFS_RS_PARITY             16
@@ -102,7 +112,16 @@ struct beamfs_super_block {
 	uint64_t s_feat_incompat;
 	uint64_t s_feat_ro_compat;
 	uint32_t s_data_protection_scheme;
-	uint8_t  s_pad[1383];        /* padding to 4096; trailing 208 = SB RS parity */
+	/*
+	 * Indirection parity region. Must match struct beamfs_super_block
+	 * in beamfs.h byte for byte -- these sit inside the RS-covered
+	 * range, so a stale copy here shifts every later offset and turns
+	 * a healthy volume into a wall of phantom errors.
+	 */
+	uint64_t s_ind_parity_blk;
+	uint32_t s_ind_parity_len;
+	uint32_t s_ind_parity_mode;
+	uint8_t  s_pad[1367];        /* padding to 4096; trailing 208 = SB RS parity */
 } __attribute__((packed));
 static_assert(sizeof(struct beamfs_super_block) == BEAMFS_BLOCK_SIZE,
 	      "beamfs_super_block must be 4096 bytes");

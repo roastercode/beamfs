@@ -581,7 +581,15 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 	 * non-empty.
 	 */
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		ret = beamfs_dir_get_block(dir, i, false, &block_no);
+		/*
+		 * inode, not dir: the blocks that matter belong to the
+		 * directory being removed. Scanning the parent instead
+		 * found the victim's own entry there and called it
+		 * non-empty, so rmdir could never succeed on anything --
+		 * caught by xfstests generic/001, whose cleanup could not
+		 * remove the tree it had just emptied.
+		 */
+		ret = beamfs_dir_get_block(inode, i, false, &block_no);
 
 		if (ret)
 			return ret;

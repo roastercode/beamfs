@@ -553,6 +553,23 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 
 			if (phys == 0)
 				continue;
+			/*
+			 * Inodes 1 and 2 are the root directory and the
+			 * canary, and mkfs puts their blocks below
+			 * data_start -- reserved, like the superblock and
+			 * the bitmap, and outside what the allocator can
+			 * ever hand out. The kernel accommodates this
+			 * (beamfs_free_block silently drops anything below
+			 * s_data_start); fsck did not, and reported two
+			 * phantom errors on every freshly formatted volume.
+			 *
+			 * Only a pointer into the reserved area is excused,
+			 * and only for those two inodes. Anything else below
+			 * data_start is still a corrupted pointer.
+			 */
+			if (beamfs_ino_is_reserved(ino) && phys < data_start)
+				continue;
+
 			if (phys < data_start || phys >= data_start + nblocks) {
 				bad_pointer_inodes++;
 				fprintf(stderr, "fsck.beamfs: pass 3: inode %llu i_direct[%d]=%llu out of [%llu, %llu)\n",
