@@ -68,6 +68,8 @@ SB_OFF_FEAT_COMPAT           = 2685
 SB_OFF_FEAT_INCOMPAT         = 2693
 SB_OFF_FEAT_RO_COMPAT        = 2701
 SB_OFF_DATA_PROTECTION       = 2709
+SB_OFF_IND_PARITY_BLK        = 2713
+SB_OFF_IND_PARITY_LEN        = 2721
 SB_OFF_PAD                   = 2713  # 1383 bytes to 4096
 
 # RS event field offsets within the 40-byte struct

@@ -202,6 +202,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 					   (unsigned long long)indirect_blk);
 			return -EIO;
 		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
+		}
 		ptrs = (__le64 *)ibh->b_data;
 		phys = le64_to_cpu(ptrs[indirect_slot]);
 		brelse(ibh);
@@ -264,6 +275,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 					   (unsigned long long)dindirect_blk);
 			return -EIO;
 		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
+		}
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
 		brelse(ibh);
@@ -283,6 +305,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			pr_err_ratelimited("beamfs/inline: failed to read dindirect L1 block %llu\n",
 					   (unsigned long long)l1_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l1bh)) {
+			brelse(l1bh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l1bh->b_data;
 		phys = le64_to_cpu(ptrs[l2_slot]);
@@ -349,6 +382,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 					   (unsigned long long)tindirect_blk);
 			return -EIO;
 		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
+		}
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
 		brelse(ibh);
@@ -369,6 +413,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 					   (unsigned long long)l1_blk);
 			return -EIO;
 		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l1bh)) {
+			brelse(l1bh);
+			return -EUCLEAN;
+		}
 		ptrs = (__le64 *)l1bh->b_data;
 		l2_blk = le64_to_cpu(ptrs[l2_slot]);
 		brelse(l1bh);
@@ -388,6 +443,17 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
 					   (unsigned long long)l2_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l2bh)) {
+			brelse(l2bh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l2bh->b_data;
 		phys = le64_to_cpu(ptrs[l3_slot]);
@@ -508,6 +574,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
+		beamfs_ind_parity_update(sb, dbh);
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
@@ -539,6 +606,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
+			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
 			brelse(ibh);
 
@@ -552,6 +620,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
 					  (unsigned long long)indirect_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
 		phys = le64_to_cpu(ptrs[indirect_slot]);
@@ -598,10 +677,12 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
+		beamfs_ind_parity_update(sb, dbh);
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
+		beamfs_ind_parity_update(sb, ibh);
 		mark_buffer_dirty(ibh);
 		brelse(ibh);
 
@@ -643,6 +724,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
+			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
 			brelse(ibh);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
@@ -655,6 +737,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read dindirect block %llu\n",
 					   (unsigned long long)dindirect_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
@@ -675,9 +768,11 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
+			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
 		}
 		brelse(ibh);
@@ -688,6 +783,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read L1 indirect block %llu\n",
 					   (unsigned long long)l1_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l1bh)) {
+			brelse(l1bh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l1bh->b_data;
 		phys = le64_to_cpu(ptrs[l2_slot]);
@@ -732,10 +838,12 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
+		beamfs_ind_parity_update(sb, dbh);
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
 		ptrs[l2_slot] = cpu_to_le64(new_block);
+		beamfs_ind_parity_update(sb, l1bh);
 		mark_buffer_dirty(l1bh);
 		brelse(l1bh);
 
@@ -776,6 +884,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
+			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
 			brelse(ibh);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
@@ -788,6 +897,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect block %llu\n",
 					   (unsigned long long)tindirect_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
@@ -808,9 +928,11 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
+			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
+			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
 		}
 		brelse(ibh);
@@ -821,6 +943,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
 					   (unsigned long long)l1_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l1bh)) {
+			brelse(l1bh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l1bh->b_data;
 		l2_blk = le64_to_cpu(ptrs[l2_slot]);
@@ -841,9 +974,11 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l2bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l2bh);
 			unlock_buffer(l2bh);
+			beamfs_ind_parity_update(sb, l2bh);
 			mark_buffer_dirty(l2bh);
 			brelse(l2bh);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
+			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
 		}
 		brelse(l1bh);
@@ -854,6 +989,17 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
 					   (unsigned long long)l2_blk);
 			return -EIO;
+		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, l2bh)) {
+			brelse(l2bh);
+			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l2bh->b_data;
 		phys = le64_to_cpu(ptrs[l3_slot]);
@@ -898,10 +1044,12 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
+		beamfs_ind_parity_update(sb, dbh);
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
 		ptrs[l3_slot] = cpu_to_le64(new_block);
+		beamfs_ind_parity_update(sb, l2bh);
 		mark_buffer_dirty(l2bh);
 		brelse(l2bh);
 
@@ -2120,6 +2268,19 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 					   (unsigned long long)indirect_blk);
 			return;
 		}
+		/*
+		 * Verify before trusting the pointers. Under CRC this turns a
+		 * flipped pointer that lands in range and on an allocated block
+		 * -- the residual left open by the bounds check above -- into a
+		 * clean failure instead of someone else's data. Under RS it is
+		 * corrected in place and the read continues.
+		 */
+		if (beamfs_ind_parity_verify(sb, ibh)) {
+			brelse(ibh);
+			pr_err_ratelimited("beamfs/inline: truncate: indirect block %llu failed parity, subtree left allocated\n",
+						   (unsigned long long)indirect_blk);
+			return;
+		}
 		ptrs = (__le64 *)ibh->b_data;
 
 		if (b_first_freed >= BEAMFS_DIRECT_BLOCKS)
@@ -2136,6 +2297,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 			}
 		}
 
+		beamfs_ind_parity_update(sb, ibh);
 		mark_buffer_dirty(ibh);
 		brelse(ibh);
 

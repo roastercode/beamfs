@@ -1027,6 +1027,21 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	sbi->s_scheme = le32_to_cpu(fsb->s_data_protection_scheme);
+
+	/*
+	 * Indirection parity. Zero on volumes formatted without it, which
+	 * is what turns every call in indparity.c into a no-op -- the
+	 * feature costs nothing on a volume that did not ask for it.
+	 */
+	sbi->s_ind_parity_blk  = le64_to_cpu(fsb->s_ind_parity_blk);
+	sbi->s_ind_parity_len  = le32_to_cpu(fsb->s_ind_parity_len);
+	sbi->s_ind_parity_mode = le32_to_cpu(fsb->s_ind_parity_mode);
+	if (sbi->s_ind_parity_mode >= BEAMFS_IND_PARITY__MAX) {
+		errorf(fc, "beamfs: unknown indirect parity mode %u",
+		       sbi->s_ind_parity_mode);
+		ret = -EINVAL;
+		goto out_free_fsb;
+	}
 	sbi->s_feat_incompat = le64_to_cpu(fsb->s_feat_incompat);
 	sbi->s_data_csum = !!(le64_to_cpu(fsb->s_feat_ro_compat) &
 			      BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM);

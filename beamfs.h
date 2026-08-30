@@ -207,14 +207,21 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
  * to v4 (2709 cov / 13 subblocks / 208 parity / s_pad[1383]) accounts
  * for the 1024-byte enlargement of s_rs_journal[] driven by the
  * 24 -> 40 byte expansion of struct beamfs_rs_event (item 4).
+ *
+ * v5 adds s_ind_parity_blk and s_ind_parity_len, 16 bytes, so coverage
+ * grows to 2725 and the shortened data_len drops 211 -> 210. Subblock
+ * count, parity size and parity offset are unchanged, so correction
+ * capacity stays at 8 symbols per subblock and 104 across the block.
+ * The BUILD_BUG_ON in beamfs_sb_to_rs_staging catches exactly this
+ * class of change, which is why it is there.
  */
-#define BEAMFS_SB_RS_COVERAGE_BYTES  2709   /* logical bytes (CRC32 range) */
-#define BEAMFS_SB_RS_STAGING_BYTES   2743   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
-#define BEAMFS_SB_RS_DATA_LEN        211    /* per shortened subblock      */
+#define BEAMFS_SB_RS_COVERAGE_BYTES  2725   /* logical bytes (CRC32 range) */
+#define BEAMFS_SB_RS_STAGING_BYTES   2730   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
+#define BEAMFS_SB_RS_DATA_LEN        210    /* per shortened subblock      */
 #define BEAMFS_SB_RS_SUBBLOCKS       13     /* total subblocks             */
 #define BEAMFS_SB_RS_PARITY_BYTES    208    /* 13 * BEAMFS_RS_PARITY        */
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888   /* end - parity bytes          */
-#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2713)
+#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2729)
 					  /* index in s_pad[]: 1175     */
 #define BEAMFS_BITMAP_MAX_BLOCKS (BEAMFS_BITMAP_DATA_BYTES * 8) /* 30592 */
 
@@ -510,6 +517,80 @@ struct beamfs_rs_event {
  *     inherit from the current cleartext path.
  */
 #define BEAMFS_FEATURE_INCOMPAT_ENCRYPT           (1ULL << 12)
+/*
+ * INDIRECT_PARITY -- RS parity for indirection blocks, held out of band.
+ *
+ * An indirect block is 512 raw __le64 pointers filling the whole 4096
+ * bytes, with no room for a checksum. data-protection-design.md section
+ * 6.1 closes the dominant failure mode -- a pointer landing outside the
+ * data range or on a block the bitmap says is free -- and leaves one
+ * open: a flipped pointer that happens to land on a block that is both
+ * in range and allocated passes every check there is.
+ *
+ * The asymmetry is what makes this worth closing. A data block has
+ * eight correctable symbols per 255-byte subblock. A double-indirect
+ * pointer has none, and losing it costs 262144 blocks.
+ *
+ * Parity lives in a region of its own rather than in the block, so
+ * BEAMFS_INDIRECT_PTRS stays 512 and no BEAMFS_MAX_IBLOCK_* moves --
+ * the format churn section 6.1 argues against does not happen. The
+ * region is sized for the worst case, every data block being indirect,
+ * because a table mapping blocks to parity slots would itself be
+ * metadata needing protection. Sixteen bytes per block is 0.4% of the
+ * volume, fixed, with the slot computed directly from the block number.
+ *
+ * INCOMPAT rather than RO_COMPAT: a kernel that does not know about the
+ * region would allocate indirect blocks without writing their parity,
+ * leaving the volume looking protected while it is not.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY   (1ULL << 13)
+
+/*
+ * How much an indirect block costs to protect, chosen at mkfs time.
+ *
+ * The right answer depends on the deployment, which is why it is a
+ * choice rather than a constant. A CubeSat with 8 GiB of MRAM at
+ * several hundred euro per gigabyte will not spend 6% of it; a server
+ * with spare terabytes will, and gets correction for the price.
+ *
+ * NONE  no protection. The section 6.1 residual stands: a flipped
+ *       pointer landing in range and on an allocated block is
+ *       indistinguishable from a valid one.
+ *
+ * CRC   one CRC32 per subblock, 64 bytes per block, ~1.5% of the
+ *       volume. Detects without correcting, which turns the residual
+ *       from silent corruption into a clean fail-closed error -- the
+ *       contract beamfs states everywhere else.
+ *
+ * RS    full RS(255,239), 256 bytes per block, ~6% of the volume.
+ *       Corrects up to 8 symbols per subblock, so a hit pointer is
+ *       repaired and the file survives.
+ *
+ * The region is sized for the worst case in every mode: any data block
+ * can become an indirect block, and a table mapping blocks to slots
+ * would itself be metadata needing protection.
+ */
+enum beamfs_ind_parity_mode {
+	BEAMFS_IND_PARITY_NONE = 0,
+	BEAMFS_IND_PARITY_CRC  = 1,
+	BEAMFS_IND_PARITY_RS   = 2,
+	BEAMFS_IND_PARITY__MAX
+};
+
+/* Bytes of parity per indirect block, by mode. */
+#define BEAMFS_IND_PARITY_CRC_BYTES  (BEAMFS_DATA_INLINE_SUBBLOCKS * sizeof(__le32))
+#define BEAMFS_IND_PARITY_RS_BYTES   (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY)
+
+/* Parity bytes per indirect block: one RS(255,239) codeword's worth. */
+#define BEAMFS_IND_PARITY_BYTES   BEAMFS_RS_PARITY
+/*
+ * An indirect block is 4096 bytes, past the 255-byte RS codeword, so it
+ * is split like a data block: 16 subblocks of 239 data bytes, with one
+ * 16-byte parity set per subblock. That is 256 parity bytes per block.
+ */
+#define BEAMFS_IND_PARITY_PER_BLOCK  (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY)
+/* Parity slots that fit in one 4096-byte region block. */
+#define BEAMFS_IND_PARITY_PER_REGION_BLOCK  (BEAMFS_BLOCK_SIZE / BEAMFS_IND_PARITY_PER_BLOCK)
 
 /* Flags supported by this kernel module.
  * PER_INODE_RS: per-inode RS(255,239) parity protection. The kernel
@@ -520,7 +601,8 @@ struct beamfs_rs_event {
 #define BEAMFS_FEAT_COMPAT_SUPP    0ULL
 #define BEAMFS_FEAT_RO_COMPAT_SUPP (BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM | \
 				    BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID)
-#define BEAMFS_FEAT_INCOMPAT_SUPP  BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS
+#define BEAMFS_FEAT_INCOMPAT_SUPP  (BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS | \
+				    BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY)
 
 /*
  * On-disk superblock - block 0
@@ -563,7 +645,18 @@ struct beamfs_super_block {
 	__le64  s_feat_incompat;    /* Incompatible features: refuse mount if unknown bit set */
 	__le64  s_feat_ro_compat;   /* RO-compat features: force RO mount if unknown bit set */
 	__le32  s_data_protection_scheme; /* enum BEAMFS_DATA_PROTECTION_* */
-	__u8    s_pad[1383];        /* Padding to 4096 bytes (v4 layout) */
+	/*
+	 * Indirection parity region, valid when INCOMPAT_INDIRECT_PARITY
+	 * is set. Zero on volumes without the feature.
+	 *
+	 * Placed before the superblock's own parity zone, as the comment
+	 * on BEAMFS_SB_RS_S_PAD_INDEX requires: new fields go into s_pad
+	 * ahead of it, and the index recomputes from offsetof.
+	 */
+	__le64  s_ind_parity_blk;   /* first block of the parity region */
+	__le32  s_ind_parity_len;   /* length of the region, in blocks */
+	__le32  s_ind_parity_mode;  /* enum beamfs_ind_parity_mode */
+	__u8    s_pad[1367];        /* Padding to 4096 bytes */
 } __packed;
 
 /*
@@ -647,6 +740,11 @@ struct beamfs_sb_info {
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
 	bool                      s_data_selfid;    /* DATA_SELFID active, cached at mount */
+
+	/* Indirection parity, cached from the on-disk superblock. */
+	u64                       s_ind_parity_blk;
+	u32                       s_ind_parity_len;
+	u32                       s_ind_parity_mode;
 
 	/*
 	 * Background scrubber.
@@ -934,6 +1032,10 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
  * Returns the number of data blocks the subtree spans, so a caller
  * walking siblings can account for a subtree it skipped entirely.
  */
+/* indparity.c */
+void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
+int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
 u64  beamfs_free_indirect_tree(struct super_block *sb, u64 blk,
 			       unsigned int depth, u64 *skip);
 u64  beamfs_alloc_inode_num(struct super_block *sb);
