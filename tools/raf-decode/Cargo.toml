@@ -1,0 +1,16 @@
+[package]
+name = "raf-decode"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+authors = ["Aurelien Desbrieres <aurelien@hackers.camp>"]
+description = "Forensic decoder for the beamfs radiation event journal"
+
+[[bin]]
+name = "raf-decode"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+overflow-checks = true

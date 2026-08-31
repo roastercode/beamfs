@@ -2159,8 +2159,39 @@ static int beamfs_inline_writepages(struct address_space *mapping,
 static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from)
 {
-	return iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
-					 &beamfs_inline_write_ops, NULL);
+	struct inode *inode = file_inode(iocb->ki_filp);
+	loff_t before = i_size_read(inode);
+	ssize_t ret;
+
+	ret = iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
+					&beamfs_inline_write_ops, NULL);
+	if (ret <= 0)
+		return ret;
+
+	/*
+	 * iomap_write_iter() states the division of labour outright:
+	 * "Update the in-memory inode size after copying the data into the
+	 * page cache. It's up to the file system to write the updated size
+	 * to disk." It grows i_size and raises IOMAP_F_SIZE_CHANGED; the
+	 * inode does not reach the medium unless someone here says so.
+	 *
+	 * Returning its result directly meant a write that extended a file
+	 * without a following fsync had the new size in stat and the old
+	 * one on disk. xfstests generic/169: write 5 bytes, fsync, write 5
+	 * more, unmount -- the file comes back 5 bytes long. The first
+	 * half of that test passes only because every write there is
+	 * fsynced.
+	 *
+	 * generic_write_sync last, as fuse does: it honours O_SYNC and
+	 * O_DSYNC on the kiocb, so a caller that asked for durability gets
+	 * it, and one that did not pays nothing.
+	 */
+	if (i_size_read(inode) != before)
+		inode_set_ctime_current(inode);
+	inode_set_mtime_to_ts(inode, current_time(inode));
+	mark_inode_dirty(inode);
+
+	return generic_write_sync(iocb, ret);
 }
 
 /* ------------------------------------------------------------------------- */
