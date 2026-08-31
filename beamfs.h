@@ -62,6 +62,11 @@ struct beamfs_sb_info {
 	 */
 	struct super_block       *s_sb;
 
+	/* Clock anchor, cached and refreshed by the scrubber. */
+	u64                       s_anchor_mono;
+	u64                       s_anchor_real;
+	u32                       s_anchor_quality;
+
 	/*
 	 * Background scrubber.
 	 *
@@ -353,6 +358,10 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+/* clock.c -- anchoring the journal's monotonic stamps to a date */
+void beamfs_clock_anchor(struct super_block *sb);
+u64  beamfs_clock_to_real(struct beamfs_sb_info *sbi, u64 mono);
 
 /* budget.c -- per-block correction margin */
 void beamfs_budget_record(struct super_block *sb, u64 phys,

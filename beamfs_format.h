@@ -268,13 +268,13 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
  * The BUILD_BUG_ON in beamfs_sb_to_rs_staging catches exactly this
  * class of change, which is why it is there.
  */
-#define BEAMFS_SB_RS_COVERAGE_BYTES  2741   /* logical bytes (CRC32 range) */
-#define BEAMFS_SB_RS_STAGING_BYTES   2743   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
-#define BEAMFS_SB_RS_DATA_LEN        211    /* per shortened subblock      */
+#define BEAMFS_SB_RS_COVERAGE_BYTES  2765   /* logical bytes (CRC32 range) */
+#define BEAMFS_SB_RS_STAGING_BYTES   2769   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
+#define BEAMFS_SB_RS_DATA_LEN        213    /* per shortened subblock      */
 #define BEAMFS_SB_RS_SUBBLOCKS       13     /* total subblocks             */
 #define BEAMFS_SB_RS_PARITY_BYTES    208    /* 13 * BEAMFS_RS_PARITY        */
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888   /* end - parity bytes          */
-#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2745)
+#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2769)
 					  /* index in s_pad[]: 1175     */
 #define BEAMFS_BITMAP_MAX_BLOCKS (BEAMFS_BITMAP_DATA_BYTES * 8) /* 30592 */
 
@@ -661,6 +661,29 @@ enum beamfs_ind_parity_mode {
  */
 #define BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET      (1ULL << 14)
 
+/*
+ * What the wall clock was worth when the anchor was taken.
+ *
+ * Not a measurement of the clock, a statement about it: the kernel
+ * knows whether NTP considers itself synchronised, and nothing more.
+ * A reader converting an entry to a date should carry this alongside
+ * the date rather than dropping it.
+ */
+enum beamfs_clock_quality {
+	/* No basis for the wall clock: no RTC, no sync. Dates from this
+	 * anchor are ordering information wearing a timestamp's clothes.
+	 */
+	BEAMFS_CLOCK_UNKNOWN = 0,
+	/* An RTC was read but nothing disciplines it. Seconds, maybe. */
+	BEAMFS_CLOCK_RTC = 1,
+	/* NTP reports itself synchronised. Milliseconds, typically. */
+	BEAMFS_CLOCK_NTP = 2,
+	/* A hardware-timestamped source: PTP, GPS. Microseconds or
+	 * better, and the only case where fine dating is defensible.
+	 */
+	BEAMFS_CLOCK_HARDWARE = 3,
+};
+
 /* Symbols correctable per subblock; the budget saturates here. */
 #define BEAMFS_ERROR_BUDGET_MAX   (BEAMFS_RS_PARITY / 2)
 
@@ -747,7 +770,40 @@ struct beamfs_super_block {
 	__le64  s_budget_blk;       /* first block of the budget region */
 	__le32  s_budget_len;       /* length of the region, in blocks */
 	__le32  s_budget_pad;       /* zero */
-	__u8    s_pad[1351];        /* Padding to 4096 bytes */
+
+	/*
+	 * Clock anchor: what the two clocks read at the same instant.
+	 *
+	 * re_timestamp in a journal entry is ktime_get_ns() -- monotonic
+	 * since boot, which orders events exactly and dates none of them.
+	 * That is the right clock for the entry: it cannot jump, so the
+	 * interval between two corrections is trustworthy to the timer's
+	 * resolution, and a burst of forty upsets in three milliseconds
+	 * reads as exactly that.
+	 *
+	 * What it cannot say is when. The anchor supplies the missing
+	 * half: at the instant s_anchor_mono was sampled, the wall clock
+	 * read s_anchor_real. Any entry converts to a date by adding the
+	 * difference, and the conversion is only as good as the wall
+	 * clock was -- which is why s_anchor_quality records what that
+	 * clock was worth.
+	 *
+	 * Declaring the uncertainty rather than implying a precision is
+	 * the point. A journal that claims nanosecond dating on an NTP
+	 * machine is claiming something it cannot support, and an auditor
+	 * who notices has reason to doubt the rest of it. Instrumentation
+	 * practice is to state the source and its error; this follows it.
+	 *
+	 * Refreshed periodically by the scrubber, so drift is bounded by
+	 * the refresh interval rather than accumulating from mount. A
+	 * volume mounted for six months is otherwise dated by a clock
+	 * reading six months stale.
+	 */
+	__le64  s_anchor_mono;      /* ktime_get_ns() at the anchor */
+	__le64  s_anchor_real;      /* ktime_get_real_ns() at the same instant */
+	__le32  s_anchor_quality;   /* enum beamfs_clock_quality */
+	__le32  s_anchor_pad;       /* zero */
+	__u8    s_pad[1327];        /* Padding to 4096 bytes */
 } __packed;
 
 /*

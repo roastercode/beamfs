@@ -294,6 +294,19 @@ static int beamfs_scrub_thread(void *data)
 			sbi->s_scrub_cursor = 0;
 			sbi->s_scrub_passes++;
 			/*
+			 * Re-anchor once per sweep, so the wall-clock
+			 * reference is at most one sweep old rather than as
+			 * old as the mount. A volume left mounted for six
+			 * months would otherwise date its events by a
+			 * reading taken six months earlier.
+			 *
+			 * Once per sweep rather than on a timer: a sweep is
+			 * already the unit in which this thread thinks, and
+			 * a superblock write per sweep is nothing against
+			 * the reads the sweep just did.
+			 */
+			beamfs_clock_anchor(sb);
+			/*
 			 * A pass over an idle volume costs one inode-table
 			 * read per inode and nothing else. Pause between
 			 * sweeps so an empty filesystem does not spin.
@@ -398,6 +411,28 @@ static ssize_t error_budget_show(struct beamfs_sb_info *sbi, char *buf)
 	return len;
 }
 
+/*
+ * clock_anchor -- what the two clocks read at the same instant.
+ *
+ * Three fields: the monotonic stamp, the wall time it corresponded to,
+ * and what that wall time was worth. A reader converting a journal
+ * entry to a date needs all three, and dropping the third turns a
+ * qualified statement into an unqualified one.
+ */
+static ssize_t clock_anchor_show(struct beamfs_sb_info *sbi, char *buf)
+{
+	static const char * const q[] = {
+		"unknown", "rtc", "ntp", "hardware"
+	};
+	u32 i = sbi->s_anchor_quality;
+
+	if (i >= ARRAY_SIZE(q))
+		i = 0;
+
+	return sysfs_emit(buf, "mono %llu\nreal %llu\nquality %s\n",
+			  sbi->s_anchor_mono, sbi->s_anchor_real, q[i]);
+}
+
 #define BEAMFS_SCRUB_RO(_name) \
 	static struct beamfs_scrub_attr beamfs_scrub_attr_##_name = { \
 		.attr = { .name = __stringify(_name), .mode = 0444 }, \
@@ -417,6 +452,7 @@ BEAMFS_SCRUB_RO(blocks);
 BEAMFS_SCRUB_RO(corrected);
 BEAMFS_SCRUB_RO(uncorrectable);
 BEAMFS_SCRUB_RO(error_budget);
+BEAMFS_SCRUB_RO(clock_anchor);
 
 static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_interval.attr,
@@ -426,6 +462,7 @@ static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_corrected.attr,
 	&beamfs_scrub_attr_uncorrectable.attr,
 	&beamfs_scrub_attr_error_budget.attr,
+	&beamfs_scrub_attr_clock_anchor.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(beamfs_scrub);

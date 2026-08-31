@@ -1090,6 +1090,13 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 * all, which is the worse outcome on a device that has no second
 	 * copy.
 	 */
+	/*
+	 * Anchor before the scrubber starts: the first sweep may journal
+	 * an event, and an entry with no anchor to convert against is
+	 * ordering information wearing a timestamp's clothes.
+	 */
+	beamfs_clock_anchor(sb);
+
 	ret = beamfs_scrub_init(sb);
 	if (ret) {
 		pr_warn("beamfs: scrubber did not start (%d); correction on read is unaffected\n",
