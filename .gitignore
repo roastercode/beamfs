@@ -62,3 +62,6 @@ context/*
 # Bitbake transient artefacts (do not commit)
 pn-buildlist
 task-depends.dot
+
+# Rust build artefacts
+tools/raf-decode/target/
