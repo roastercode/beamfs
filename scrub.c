@@ -105,6 +105,13 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
 				BEAMFS_SUBBLOCK_DATA);
+			/*
+			 * The sweep is where the budget earns its keep: it
+			 * visits blocks nobody reads, which are the ones
+			 * that drift unobserved.
+			 */
+			beamfs_budget_record(sb, phys,
+					     (unsigned int)results[i]);
 		} else if (results[i] < 0) {
 			/*
 			 * Past the radius. Journalled with the same shape
@@ -357,6 +364,40 @@ static ssize_t uncorrectable_show(struct beamfs_sb_info *sbi, char *buf)
 	return sysfs_emit(buf, "%llu\n", sbi->s_scrub_uncorrectable);
 }
 
+/*
+ * error_budget -- how much correction capacity the volume has left.
+ *
+ * One line per wear level: the number of blocks whose worst subblock
+ * has needed that many corrections. Level 0 is untouched, level
+ * BEAMFS_ERROR_BUDGET_MAX is blocks with no margin at all -- the next
+ * upset in the wrong subblock takes them out.
+ *
+ * Reading walks the whole region, 244 MiB on a 931 GiB volume, so this
+ * is a deliberate cost paid on request rather than a counter kept in
+ * memory. A counter would have to be rebuilt at mount and would drift
+ * against the medium in between; the medium is the record.
+ */
+static ssize_t error_budget_show(struct beamfs_sb_info *sbi, char *buf)
+{
+	u64 hist[BEAMFS_ERROR_BUDGET_MAX + 1];
+	struct super_block *sb = sbi->s_sb;
+	unsigned int i;
+	int len = 0;
+
+	if (!sb)
+		return sysfs_emit(buf, "unavailable\n");
+
+	if (!sbi->s_budget_blk)
+		return sysfs_emit(buf, "disabled\n");
+
+	beamfs_budget_histogram(sb, hist);
+
+	for (i = 0; i <= BEAMFS_ERROR_BUDGET_MAX; i++)
+		len += sysfs_emit_at(buf, len, "%u %llu\n", i, hist[i]);
+
+	return len;
+}
+
 #define BEAMFS_SCRUB_RO(_name) \
 	static struct beamfs_scrub_attr beamfs_scrub_attr_##_name = { \
 		.attr = { .name = __stringify(_name), .mode = 0444 }, \
@@ -375,6 +416,7 @@ BEAMFS_SCRUB_RO(passes);
 BEAMFS_SCRUB_RO(blocks);
 BEAMFS_SCRUB_RO(corrected);
 BEAMFS_SCRUB_RO(uncorrectable);
+BEAMFS_SCRUB_RO(error_budget);
 
 static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_interval.attr,
@@ -383,6 +425,7 @@ static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_blocks.attr,
 	&beamfs_scrub_attr_corrected.attr,
 	&beamfs_scrub_attr_uncorrectable.attr,
+	&beamfs_scrub_attr_error_budget.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(beamfs_scrub);

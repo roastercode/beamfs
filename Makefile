@@ -13,6 +13,7 @@ beamfs-y := super.o      \
             scrub.o      \
             indparity.o  \
             rsbench.o    \
+            budget.o     \
             edac.o       \
             alloc.o      \
             namei.o

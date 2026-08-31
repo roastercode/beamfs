@@ -1271,6 +1271,15 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 				pos, np,
 				BEAMFS_SUBBLOCK_DATA,
 				xflags);
+			/*
+			 * The journal says this happened; the budget says
+			 * how close the block now is to having nothing left.
+			 * A high-water mark, so the byte reports the worst
+			 * any subblock of this block has been rather than
+			 * the most recent, since the worst is what will
+			 * saturate first.
+			 */
+			beamfs_budget_record(sb, phys, np);
 			corrected = true;
 		}
 	}

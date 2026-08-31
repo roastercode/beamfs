@@ -1053,6 +1053,9 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_ind_parity_blk  = le64_to_cpu(fsb->s_ind_parity_blk);
 	sbi->s_ind_parity_len  = le32_to_cpu(fsb->s_ind_parity_len);
 	sbi->s_ind_parity_mode = le32_to_cpu(fsb->s_ind_parity_mode);
+	sbi->s_sb = sb;
+	sbi->s_budget_blk = le64_to_cpu(fsb->s_budget_blk);
+	sbi->s_budget_len = le32_to_cpu(fsb->s_budget_len);
 	if (sbi->s_ind_parity_mode >= BEAMFS_IND_PARITY__MAX) {
 		errorf(fc, "beamfs: unknown indirect parity mode %u",
 		       sbi->s_ind_parity_mode);

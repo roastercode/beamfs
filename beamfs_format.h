@@ -258,20 +258,23 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
  * for the 1024-byte enlargement of s_rs_journal[] driven by the
  * 24 -> 40 byte expansion of struct beamfs_rs_event (item 4).
  *
- * v5 adds s_ind_parity_blk and s_ind_parity_len, 16 bytes, so coverage
- * grows to 2725 and the shortened data_len drops 211 -> 210. Subblock
+ * v5 adds the three s_ind_parity fields (16 bytes, coverage 2725,
+ * data_len 210) and then the three s_budget fields (16 more, coverage
+ * 2741, data_len back to 211). The two additions cancel in the
+ * shortened length, which is coincidence and not something to rely on:
+ * the BUILD_BUG_ON is what keeps the geometry honest. Subblock
  * count, parity size and parity offset are unchanged, so correction
  * capacity stays at 8 symbols per subblock and 104 across the block.
  * The BUILD_BUG_ON in beamfs_sb_to_rs_staging catches exactly this
  * class of change, which is why it is there.
  */
-#define BEAMFS_SB_RS_COVERAGE_BYTES  2725   /* logical bytes (CRC32 range) */
-#define BEAMFS_SB_RS_STAGING_BYTES   2730   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
-#define BEAMFS_SB_RS_DATA_LEN        210    /* per shortened subblock      */
+#define BEAMFS_SB_RS_COVERAGE_BYTES  2741   /* logical bytes (CRC32 range) */
+#define BEAMFS_SB_RS_STAGING_BYTES   2743   /* 13 * BEAMFS_SB_RS_DATA_LEN   */
+#define BEAMFS_SB_RS_DATA_LEN        211    /* per shortened subblock      */
 #define BEAMFS_SB_RS_SUBBLOCKS       13     /* total subblocks             */
 #define BEAMFS_SB_RS_PARITY_BYTES    208    /* 13 * BEAMFS_RS_PARITY        */
 #define BEAMFS_SB_RS_PARITY_OFFSET   3888   /* end - parity bytes          */
-#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2729)
+#define BEAMFS_SB_RS_S_PAD_INDEX     (BEAMFS_SB_RS_PARITY_OFFSET - 2745)
 					  /* index in s_pad[]: 1175     */
 #define BEAMFS_BITMAP_MAX_BLOCKS (BEAMFS_BITMAP_DATA_BYTES * 8) /* 30592 */
 
@@ -631,6 +634,36 @@ enum beamfs_ind_parity_mode {
 #define BEAMFS_IND_PARITY_CRC_BYTES  (BEAMFS_DATA_INLINE_SUBBLOCKS * sizeof(__le32))
 #define BEAMFS_IND_PARITY_RS_BYTES   (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY)
 
+/*
+ * ERROR_BUDGET -- per-block record of how close a block has come to
+ * saturation.
+ *
+ * The RS journal keeps the last 64 events, which answers "what
+ * happened recently" and nothing about the state of the volume. A
+ * block that has quietly accumulated seven of its eight correctable
+ * symbols reads back perfectly and is one upset from unrecoverable,
+ * and there is no way to know until it is too late.
+ *
+ * One byte per data block holds the worst subblock's corrected-symbol
+ * count, saturating at BEAMFS_RS_PARITY/2. An operator can then ask
+ * how much correction capacity a volume has left rather than how many
+ * corrections it has done -- the difference between a fuel gauge and
+ * an odometer.
+ *
+ * Nothing else does this. btrfs and ZFS count corrections; neither
+ * reports remaining margin, because with redundancy elsewhere there is
+ * no margin to report. On a single device there is, and it is finite.
+ *
+ * One byte per block is 0.025% of the volume: 244 MiB on 931 GiB. The
+ * slot is computed from the block number the same way the indirection
+ * parity region does it, for the same reason -- a lookup table would
+ * be metadata needing its own protection.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET      (1ULL << 14)
+
+/* Symbols correctable per subblock; the budget saturates here. */
+#define BEAMFS_ERROR_BUDGET_MAX   (BEAMFS_RS_PARITY / 2)
+
 /* Parity bytes per indirect block: one RS(255,239) codeword's worth. */
 #define BEAMFS_IND_PARITY_BYTES   BEAMFS_RS_PARITY
 /*
@@ -652,7 +685,8 @@ enum beamfs_ind_parity_mode {
 #define BEAMFS_FEAT_RO_COMPAT_SUPP (BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM | \
 				    BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID)
 #define BEAMFS_FEAT_INCOMPAT_SUPP  (BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS | \
-				    BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY)
+				    BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY | \
+				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET)
 
 /*
  * On-disk superblock - block 0
@@ -706,7 +740,14 @@ struct beamfs_super_block {
 	__le64  s_ind_parity_blk;   /* first block of the parity region */
 	__le32  s_ind_parity_len;   /* length of the region, in blocks */
 	__le32  s_ind_parity_mode;  /* enum beamfs_ind_parity_mode */
-	__u8    s_pad[1367];        /* Padding to 4096 bytes */
+	/*
+	 * Error budget region, valid when INCOMPAT_ERROR_BUDGET is set.
+	 * Zero on volumes formatted without it.
+	 */
+	__le64  s_budget_blk;       /* first block of the budget region */
+	__le32  s_budget_len;       /* length of the region, in blocks */
+	__le32  s_budget_pad;       /* zero */
+	__u8    s_pad[1351];        /* Padding to 4096 bytes */
 } __packed;
 
 /*

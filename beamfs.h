@@ -47,6 +47,21 @@ struct beamfs_sb_info {
 	u32                       s_ind_parity_len;
 	u32                       s_ind_parity_mode;
 
+	/* Error budget region, cached from the superblock. */
+	u64                       s_budget_blk;
+	u32                       s_budget_len;
+
+	/*
+	 * Back-pointer to the VFS superblock.
+	 *
+	 * The sysfs attributes are handed an sb_info and need a
+	 * super_block to read the medium. bd_super used to serve; it was
+	 * removed from struct block_device, and reaching for it through
+	 * the buffer_head was always the long way round for something
+	 * this object could simply hold.
+	 */
+	struct super_block       *s_sb;
+
 	/*
 	 * Background scrubber.
 	 *
@@ -338,6 +353,12 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+/* budget.c -- per-block correction margin */
+void beamfs_budget_record(struct super_block *sb, u64 phys,
+			  unsigned int symbols);
+u8   beamfs_budget_read(struct super_block *sb, u64 phys);
+void beamfs_budget_histogram(struct super_block *sb, u64 *hist);
 
 /* rsbench.c -- codec cost, no block layer underneath */
 void beamfs_debugfs_init(void);
