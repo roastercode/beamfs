@@ -130,7 +130,26 @@ fn main() {
         ("SB_OFF_CRC32", 4),
         ("SB_OFF_UUID", 16),
         ("SB_OFF_LABEL", 32),
-        ("SB_OFF_RS_JOURNAL", 0),
+        // The journal is BEAMFS_RS_JOURNAL_SIZE * EV_SIZE bytes plus a
+        // one-byte head index; the fields after it are placed from
+        // there rather than restated, so adding one to the header
+        // moves them here too.
+        ("SB_OFF_RS_JOURNAL", 64 * 40 + 1),
+        ("SB_OFF_BITMAP_BLK", 8),
+        ("SB_OFF_FEAT_COMPAT", 8),
+        ("SB_OFF_FEAT_INCOMPAT", 8),
+        ("SB_OFF_FEAT_RO_COMPAT", 8),
+        ("SB_OFF_DATA_PROTECTION", 4),
+        ("SB_OFF_IND_PARITY_BLK", 8),
+        ("SB_OFF_IND_PARITY_LEN", 4),
+        ("SB_OFF_IND_PARITY_MODE", 4),
+        ("SB_OFF_BUDGET_BLK", 8),
+        ("SB_OFF_BUDGET_LEN", 4),
+        ("SB_OFF_BUDGET_PAD", 4),
+        ("SB_OFF_ANCHOR_MONO", 8),
+        ("SB_OFF_ANCHOR_REAL", 8),
+        ("SB_OFF_ANCHOR_QUALITY", 4),
+        ("SB_OFF_ANCHOR_PAD", 4),
     ];
     let mut off = 0i64;
     out.push('\n');

@@ -52,6 +52,67 @@ struct Superblock {
     block_count: u64,
     free_blocks: u64,
     journal_head: u8,
+    data_start: u64,
+    budget_blk: u64,
+    budget_len: u32,
+    anchor_mono: u64,
+    anchor_real: u64,
+    anchor_quality: u32,
+}
+
+impl Superblock {
+    fn quality_name(&self) -> &'static str {
+        match self.anchor_quality {
+            1 => "rtc",
+            2 => "ntp",
+            3 => "hardware",
+            _ => "unknown",
+        }
+    }
+
+    /// Convert a journal timestamp to a wall-clock nanosecond value.
+    ///
+    /// Returns None when there is no anchor, which means the entry can
+    /// be ordered but not dated -- a distinction the caller has to
+    /// keep, because a date printed without it is a claim nobody made.
+    fn to_real(&self, mono: u64) -> Option<u64> {
+        if self.anchor_real == 0 {
+            return None;
+        }
+        Some(if mono >= self.anchor_mono {
+            self.anchor_real + (mono - self.anchor_mono)
+        } else {
+            self.anchor_real - (self.anchor_mono - mono)
+        })
+    }
+}
+
+/// Format a nanosecond wall time as a date.
+///
+/// Civil-time conversion from first principles rather than a crate:
+/// one dependency for one function, in a tool whose whole argument is
+/// that it does not restate things it can derive.
+fn format_utc(ns: u64) -> String {
+    let secs = (ns / 1_000_000_000) as i64;
+    let sub_ms = (ns % 1_000_000_000) / 1_000_000;
+
+    let days = secs.div_euclid(86400);
+    let tod = secs.rem_euclid(86400);
+    let (h, m, sec) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{sec:02}.{sub_ms:03}Z")
 }
 
 #[derive(Debug)]
@@ -115,6 +176,12 @@ fn read_superblock(buf: &[u8]) -> Superblock {
         block_count: le64(buf, format::SB_OFF_BLOCK_COUNT),
         free_blocks: le64(buf, format::SB_OFF_FREE_BLOCKS),
         journal_head: buf[jbase + jsize],
+        data_start: le64(buf, format::SB_OFF_DATA_START_BLK),
+        budget_blk: le64(buf, format::SB_OFF_BUDGET_BLK),
+        budget_len: le32(buf, format::SB_OFF_BUDGET_LEN),
+        anchor_mono: le64(buf, format::SB_OFF_ANCHOR_MONO),
+        anchor_real: le64(buf, format::SB_OFF_ANCHOR_REAL),
+        anchor_quality: le32(buf, format::SB_OFF_ANCHOR_QUALITY),
     }
 }
 
@@ -231,9 +298,132 @@ fn print_json(sb: &Superblock, events: &[Event]) {
     println!("}}");
 }
 
+/// Read the error budget region and count blocks per wear level.
+///
+/// Returns None when the volume has no budget region, which is not the
+/// same as a volume with no wear: one has nothing recorded, the other
+/// has nothing to record. Conflating them would report a healthy
+/// volume where there is only an absent feature.
+fn read_budget(f: &mut File, sb: &Superblock) -> Option<Vec<u64>> {
+    if sb.budget_blk == 0 || sb.budget_len == 0 {
+        return None;
+    }
+
+    #[allow(clippy::cast_sign_loss)]
+    let bs = format::BEAMFS_BLOCK_SIZE as usize;
+    #[allow(clippy::cast_sign_loss)]
+    let max = (format::BEAMFS_RS_PARITY / 2) as usize;
+    let mut hist = vec![0u64; max + 1];
+    let mut buf = vec![0u8; bs];
+    let total = sb.block_count.saturating_sub(sb.data_start);
+    let mut seen: u64 = 0;
+
+    for i in 0..sb.budget_len as u64 {
+        let off = (sb.budget_blk + i) * bs as u64;
+        if f.seek(SeekFrom::Start(off)).is_err() || f.read_exact(&mut buf).is_err() {
+            break;
+        }
+        for b in &buf {
+            if seen >= total {
+                break;
+            }
+            seen += 1;
+            let v = usize::from(*b).min(max);
+            hist[v] += 1;
+        }
+    }
+    Some(hist)
+}
+
+/// The report: what the volume has been through, in one place.
+///
+/// Three sources that only mean something together. The journal says
+/// what happened and where. The budget says how much margin is left,
+/// which the journal cannot know since it holds only the last 64
+/// events. The anchor turns monotonic stamps into dates, and says what
+/// those dates are worth.
+///
+/// Deliberately not what the kernel's uevent carries. That says a line
+/// was crossed and stops; this says what the volume looks like. A
+/// notification that carried its own diagnosis would duplicate this
+/// and then drift from it.
+fn print_report(f: &mut File, sb: &Superblock, events: &[Event]) {
+    let live: Vec<&Event> = events.iter().filter(|e| !e.empty).collect();
+
+    println!("beamfs volume report");
+    println!();
+    println!("  version        {}", sb.version);
+    println!("  blocks         {}", sb.block_count);
+    println!("  free           {}", sb.free_blocks);
+    println!();
+
+    println!("clock");
+    if sb.anchor_real == 0 {
+        println!("  no anchor: events can be ordered, not dated");
+    } else {
+        println!("  anchored at    {}", format_utc(sb.anchor_real));
+        println!("  source         {}", sb.quality_name());
+        if sb.anchor_quality < 2 {
+            println!("  NOTE: dates below are approximate; the wall clock");
+            println!("        was not disciplined when the anchor was taken");
+        }
+    }
+    println!();
+
+    println!("journal: {} of {} slots used", live.len(), events.len());
+    if !live.is_empty() {
+        println!();
+        let unc = live.iter().filter(|e| e.uncorrectable()).count();
+        println!("  corrected      {}", live.len() - unc);
+        println!("  uncorrectable  {unc}");
+        println!();
+        for e in &live {
+            let (blk, sub) = e.coordinates();
+            let when = sb
+                .to_real(e.timestamp)
+                .map_or_else(|| format!("+{} ns", e.timestamp), format_utc);
+            println!(
+                "  {when}  block {blk} subblock {sub}  {}",
+                if e.uncorrectable() {
+                    "unrecoverable".to_string()
+                } else {
+                    format!("{} symbol(s) corrected", e.symbols)
+                }
+            );
+        }
+    }
+    println!();
+
+    println!("error budget");
+    match read_budget(f, sb) {
+        None => println!("  not enabled on this volume"),
+        Some(hist) => {
+            let max = hist.len() - 1;
+            let worn: u64 = hist[1..].iter().sum();
+            println!("  intact         {}", hist[0]);
+            println!("  worn           {worn}");
+            println!("  no margin      {}", hist[max]);
+            println!();
+            for (level, n) in hist.iter().enumerate() {
+                if *n == 0 {
+                    continue;
+                }
+                let left = max - level;
+                println!("  {level} symbol(s) used, {left} left   {n} block(s)");
+            }
+            if hist[max] > 0 {
+                println!();
+                println!("  {} block(s) have no correction capacity left.", hist[max]);
+                println!("  They read correctly today. The next upset in the");
+                println!("  wrong subblock of one of them does not.");
+            }
+        }
+    }
+}
+
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: raf-decode [--json] <device-or-image>\n\
+        "usage: raf-decode [--json|--report] <device-or-image>\n\
          \n\
          Prints the radiation event journal from a beamfs superblock.\n\
          Layout is taken from beamfs_format.h at build time, so this\n\
@@ -245,6 +435,7 @@ fn usage() -> ExitCode {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let json = args.iter().any(|a| a == "--json");
+    let report = args.iter().any(|a| a == "--report");
     let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
         return usage();
     };
@@ -281,6 +472,8 @@ fn main() -> ExitCode {
 
     if json {
         print_json(&sb, &events);
+    } else if report {
+        print_report(&mut f, &sb, &events);
     } else {
         print_text(&sb, &events);
     }
