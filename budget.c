@@ -89,6 +89,13 @@ void beamfs_budget_record(struct super_block *sb, u64 phys,
 		((u8 *)bh->b_data)[offset] = capped;
 		unlock_buffer(bh);
 		mark_buffer_dirty(bh);
+
+		/*
+		 * Only on the transition. A block already at the limit
+		 * that gets corrected again has not crossed anything, and
+		 * notifying every time would say the same thing forever.
+		 */
+		beamfs_alert_margin(sb, phys, capped);
 	}
 	brelse(bh);
 }

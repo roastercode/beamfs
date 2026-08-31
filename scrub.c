@@ -306,6 +306,7 @@ static int beamfs_scrub_thread(void *data)
 			 * the reads the sweep just did.
 			 */
 			beamfs_clock_anchor(sb);
+			beamfs_alert_check_rate(sb);
 			/*
 			 * A pass over an idle volume costs one inode-table
 			 * read per inode and nothing else. Pause between
@@ -411,6 +412,30 @@ static ssize_t error_budget_show(struct beamfs_sb_info *sbi, char *buf)
 	return len;
 }
 
+static ssize_t alert_rate_limit_show(struct beamfs_sb_info *sbi, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", sbi->s_alert_rate_limit);
+}
+
+/*
+ * How many blocks may be corrected in one sweep before it is worth
+ * telling somebody.
+ *
+ * Zero disables the check and is the default: the right number depends
+ * entirely on where the machine sits, and a value invented here would
+ * either cry wolf on a spacecraft or stay silent in a hospital.
+ */
+static ssize_t alert_rate_limit_store(struct beamfs_sb_info *sbi,
+				      const char *buf, size_t len)
+{
+	u32 v;
+
+	if (kstrtouint(buf, 10, &v))
+		return -EINVAL;
+	sbi->s_alert_rate_limit = v;
+	return len;
+}
+
 /*
  * clock_anchor -- what the two clocks read at the same instant.
  *
@@ -453,6 +478,7 @@ BEAMFS_SCRUB_RO(corrected);
 BEAMFS_SCRUB_RO(uncorrectable);
 BEAMFS_SCRUB_RO(error_budget);
 BEAMFS_SCRUB_RO(clock_anchor);
+BEAMFS_SCRUB_RW(alert_rate_limit);
 
 static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_interval.attr,
@@ -463,6 +489,7 @@ static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_uncorrectable.attr,
 	&beamfs_scrub_attr_error_budget.attr,
 	&beamfs_scrub_attr_clock_anchor.attr,
+	&beamfs_scrub_attr_alert_rate_limit.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(beamfs_scrub);

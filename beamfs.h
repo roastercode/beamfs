@@ -67,6 +67,11 @@ struct beamfs_sb_info {
 	u64                       s_anchor_real;
 	u32                       s_anchor_quality;
 
+	/* Alert rate limiting, one slot per event class. */
+	unsigned long             s_alert_last[3];
+	u64                       s_alert_last_corrected;
+	u32                       s_alert_rate_limit;
+
 	/*
 	 * Background scrubber.
 	 *
@@ -358,6 +363,17 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+/* alert.c -- uevent on threshold crossing */
+enum {
+	BEAMFS_ALERT_UNCORRECTABLE = 0,
+	BEAMFS_ALERT_MARGIN,
+	BEAMFS_ALERT_RATE,
+	BEAMFS_ALERT_CLASSES
+};
+void beamfs_alert_uncorrectable(struct super_block *sb, u64 phys);
+void beamfs_alert_margin(struct super_block *sb, u64 phys, unsigned int used);
+void beamfs_alert_check_rate(struct super_block *sb);
 
 /* clock.c -- anchoring the journal's monotonic stamps to a date */
 void beamfs_clock_anchor(struct super_block *sb);

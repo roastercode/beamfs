@@ -1251,6 +1251,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					   (unsigned long long)iblock_logical_for_log,
 					   i,
 					   rmw_path ? " (rmw)" : "");
+			beamfs_alert_uncorrectable(sb, phys);
 			uncorrectable = true;
 		} else if (rc > 0) {
 			unsigned int np = (unsigned int)rc;

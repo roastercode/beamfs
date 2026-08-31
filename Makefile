@@ -15,6 +15,7 @@ beamfs-y := super.o      \
             rsbench.o    \
             budget.o     \
             clock.o      \
+            alert.o      \
             edac.o       \
             alloc.o      \
             namei.o
