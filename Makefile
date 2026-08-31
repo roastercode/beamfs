@@ -12,6 +12,7 @@ beamfs-y := super.o      \
             file_inline.o \
             scrub.o      \
             indparity.o  \
+            rsbench.o    \
             edac.o       \
             alloc.o      \
             namei.o

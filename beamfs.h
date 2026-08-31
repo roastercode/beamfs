@@ -339,6 +339,10 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
 
+/* rsbench.c -- codec cost, no block layer underneath */
+void beamfs_debugfs_init(void);
+void beamfs_debugfs_exit(void);
+
 u64  beamfs_alloc_inode_num(struct super_block *sb);
 void beamfs_free_inode_num(struct super_block *sb, u64 ino);
 

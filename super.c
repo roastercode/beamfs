@@ -1199,12 +1199,22 @@ static int __init beamfs_init(void)
 		return ret;
 	}
 
+	/*
+	 * Last, and its failure is not fatal: debugfs may be absent from
+	 * the build or the mount, and a filesystem that refuses to load
+	 * because a benchmark has nowhere to publish itself would be
+	 * trading a working module for a measurement.
+	 */
+	beamfs_debugfs_init();
+
 	pr_info("beamfs: module loaded (beamfs - resilient filesystem)\n");
 	return 0;
 }
 
 static void __exit beamfs_exit(void)
 {
+	/* Before the codec tables go, since a reader could be in a run. */
+	beamfs_debugfs_exit();
 	unregister_filesystem(&beamfs_fs_type);
 	rcu_barrier();
 	kmem_cache_destroy(beamfs_inode_cachep);
