@@ -2170,8 +2170,32 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
-	loff_t before = i_size_read(inode);
+	loff_t before;
 	ssize_t ret;
+
+	/*
+	 * generic_write_checks first, and it is not optional.
+	 *
+	 * It is what moves ki_pos to i_size when the file was opened
+	 * O_APPEND, and it enforces the rlimit and the s_maxbytes bound
+	 * along the way. Without it every append wrote at whatever
+	 * position the descriptor happened to hold, which for a fresh
+	 * open is zero: three four-byte appends left a four-byte file
+	 * reading CCCC, and xfstests generic/069 reported "maybe corrupt
+	 * O_APPEND" with one file holding twelve megabytes that belonged
+	 * to its siblings.
+	 *
+	 * generic_file_write_iter calls it, which is why filesystems
+	 * built on that never notice. iomap_file_buffered_write sits
+	 * below it and expects the caller to have done the checks --
+	 * xfs_file_write_checks exists for this, and says so in a
+	 * comment: "that assigns ki_pos for O_APPEND".
+	 */
+	ret = generic_write_checks(iocb, from);
+	if (ret <= 0)
+		return ret;
+
+	before = i_size_read(inode);
 
 	ret = iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
 					&beamfs_inline_write_ops, NULL);
@@ -2241,6 +2265,20 @@ const struct file_operations beamfs_inline_file_operations = {
 	.mmap        = generic_file_mmap,
 	.fsync       = beamfs_inline_fsync,
 	.splice_read = filemap_splice_read,
+	/*
+	 * splice_write is what copy_file_range falls back to.
+	 *
+	 * The VFS has no .copy_file_range here and no .remap_file_range,
+	 * so vfs_copy_file_range reaches do_splice_direct -- which needs
+	 * an output side. Without it the syscall returns EINVAL, and fsx
+	 * stops on its first COPY operation, taking generic/075 with it.
+	 *
+	 * iter_file_splice_write goes through write_iter, so the RS
+	 * encode and the append handling apply to spliced data exactly as
+	 * they do to written data. ext2 declares the same pair, which is
+	 * why it never had this gap.
+	 */
+	.splice_write = iter_file_splice_write,
 };
 
 /* ------------------------------------------------------------------------- */
