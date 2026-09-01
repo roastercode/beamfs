@@ -1968,6 +1968,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	u8      *scratch;
 	struct beamfs_inline_wb_ctx *wb = NULL;
 	struct buffer_head *last_bh = NULL;
+	u64      last_phys = 0;
 	bool     folio_done = false;
 	ssize_t  done = 0;
 	int      ret  = 0;
@@ -2043,6 +2044,38 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		mutex_unlock(&fi->i_alloc_mutex);
 		if (ret < 0)
 			break;
+
+		/*
+		 * Never lock the same buffer twice in one pass.
+		 *
+		 * sb_bread returns the same buffer_head for the same block,
+		 * so a second visit to a physical block already handled in
+		 * this loop deadlocks the flusher against itself in
+		 * lock_buffer, with no timeout and no way out. umount then
+		 * waits behind it in wb_wait_for_completion and the
+		 * filesystem is unusable for the life of the mount.
+		 *
+		 * It should not be possible: distinct logical blocks map to
+		 * distinct physical ones. It happened under generic/027,
+		 * which fills the volume to ENOSPC and unlinks in a loop,
+		 * so the mapping is wrong somewhere upstream -- two logical
+		 * blocks resolving to one physical block is corruption
+		 * whatever produced it.
+		 *
+		 * Refusing to proceed turns a permanent hang into an EIO
+		 * the caller can see, and says so loudly enough to find the
+		 * real cause. Fixing the mapping is a separate matter; this
+		 * is about the flusher not being the thing that dies.
+		 */
+		if (phys == last_phys) {
+			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu maps to phys=%llu again in one writeback pass\n",
+					   (unsigned long long)inode->i_ino,
+					   (unsigned long long)b,
+					   (unsigned long long)phys);
+			ret = -EIO;
+			break;
+		}
+		last_phys = phys;
 
 		bh = sb_bread(sb, phys);
 		if (!bh) {
@@ -2166,7 +2199,25 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			 * fs/buffer.c:2701 on the first flush after mount,
 			 * before the rootfs finished coming up.
 			 */
-			if (!bh->b_end_io)
+			/*
+			 * Set it, never inherit it.
+			 *
+			 * The buffer comes from the block device's cache and
+			 * can carry a b_end_io from an earlier life. Only
+			 * filling it in when NULL therefore submitted with
+			 * whatever was left there: end_buffer_async_write in
+			 * the case that killed the machine, whose first act
+			 * is BUG_ON(!buffer_async_write(bh)). The flag was
+			 * not set, the BUG fired inside the completion
+			 * interrupt, and a BUG in interrupt context is a
+			 * panic -- generic/027 took the node down every time,
+			 * with no ssh and no dmesg, which is why this took so
+			 * long to see.
+			 *
+			 * Only the block carrying the folio completion keeps
+			 * its own handler; everything else gets the plain one.
+			 */
+			if (bh != last_bh)
 				bh->b_end_io = end_buffer_write_sync;
 			get_bh(bh);
 			submit_bh(REQ_OP_WRITE |
