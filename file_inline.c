@@ -1968,6 +1968,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	u8      *scratch;
 	struct beamfs_inline_wb_ctx *wb = NULL;
 	struct buffer_head *last_bh = NULL;
+	bool     folio_done = false;
 	ssize_t  done = 0;
 	int      ret  = 0;
 
@@ -2088,10 +2089,62 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		 * changes the priority hint here; the wait itself is done
 		 * once for the whole range by the writepages caller.
 		 */
-		write_dirty_buffer(bh,
-				   (wpc->wbc &&
+		/*
+		 * submit_bh, not write_dirty_buffer.
+		 *
+		 * write_dirty_buffer overwrites b_end_io with
+		 * end_buffer_write_sync -- erasing the completion armed a
+		 * few lines above -- and returns without submitting
+		 * anything at all if the buffer is already clean. Either
+		 * way beamfs_inline_wb_end_io never runs, so
+		 * iomap_finish_folio_write never runs, and the folio stays
+		 * in writeback for the life of the mount.
+		 *
+		 * xfstests generic/285 caught it: two rm processes sat in
+		 * folio_wait_writeback under beamfs_evict_inode for nine
+		 * hours, with no disk I/O and no hung-task report, holding
+		 * the whole run behind them.
+		 *
+		 * Clearing the dirty bit by hand is what write_dirty_buffer
+		 * did for us; submitting by hand is what keeps the
+		 * completion we installed.
+		 */
+		lock_buffer(bh);
+		if (test_clear_buffer_dirty(bh)) {
+			/*
+			 * submit_bh_wbc asserts b_end_io is set. Only the
+			 * last block of the range carries the folio
+			 * completion; the rest get the plain one, which is
+			 * what write_dirty_buffer installed unconditionally
+			 * and what its removal took away -- a BUG at
+			 * fs/buffer.c:2701 on the first flush after mount,
+			 * before the rootfs finished coming up.
+			 */
+			if (!bh->b_end_io)
+				bh->b_end_io = end_buffer_write_sync;
+			get_bh(bh);
+			submit_bh(REQ_OP_WRITE |
+				  ((wpc->wbc &&
 				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
-				   REQ_SYNC : 0);
+				   REQ_SYNC : 0), bh);
+		} else {
+			/*
+			 * Already clean, so no completion is coming. If this
+			 * was the block carrying the folio's completion, run
+			 * it here rather than leaving the folio waiting.
+			 */
+			unlock_buffer(bh);
+			if (bh == last_bh) {
+				struct beamfs_inline_wb_ctx *ctx = bh->b_private;
+
+				bh->b_end_io  = ctx->orig_end_io;
+				bh->b_private = ctx->orig_private;
+				kfree(ctx);
+				iomap_finish_folio_write(inode, folio, len);
+				last_bh = NULL;
+				folio_done = true;
+			}
+		}
 		brelse(bh);
 
 		p    += slice_length;
@@ -2109,7 +2162,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	 * finish the folio here, otherwise nothing ever would and sync()
 	 * would wait on it forever.
 	 */
-	if (!last_bh)
+	if (!last_bh && !folio_done)
 		iomap_finish_folio_write(inode, folio, len);
 
 	(void)done;
