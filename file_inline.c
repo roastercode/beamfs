@@ -1976,9 +1976,55 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	 * 3824 bytes will not fit on the aarch64 kernel stack given the
 	 * frame pressure this path already carries.
 	 */
+	/*
+	 * Tell iomap this range is mapped.
+	 *
+	 * iomap_writeback_range() adds the return value to
+	 * bytes_submitted only when wpc->iomap.type is not IOMAP_HOLE:
+	 *
+	 *   if (wpc->iomap.type != IOMAP_HOLE)
+	 *           *bytes_submitted += ret;
+	 *
+	 * Nothing here ever filled wpc->iomap in, so it stayed zeroed --
+	 * and IOMAP_HOLE is zero. Every folio therefore came out of
+	 * iomap_writeback_folio() with bytes_submitted == 0, whatever had
+	 * actually been written, and iomap took the "nothing was
+	 * submitted" branch and ended the writeback itself. The
+	 * completion armed below then ended it a second time: 74
+	 * folio_end_writeback for 60 folios, measured.
+	 *
+	 * The hang follows from the double end. Between iomap's end and
+	 * the late completion, another thread can redirty the folio and
+	 * start writeback again; the stale completion ends that one, and
+	 * the writeback it belonged to is left with nobody to close it.
+	 * rm then sits in folio_wait_writeback under evict_inode for as
+	 * long as the mount lasts.
+	 *
+	 * XFS fills this in through xfs_bmbt_to_iomap for the same
+	 * reason. Here the mapping is per-block and computed inside the
+	 * loop, so the type is all iomap needs: it uses it to decide
+	 * whether the range counted, not to find the blocks.
+	 */
+	wpc->iomap.type = IOMAP_MAPPED;
+	wpc->iomap.offset = pos;
+	wpc->iomap.length = len;
+	wpc->iomap.bdev = sb->s_bdev;
+
 	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
-	if (!scratch)
+	if (!scratch) {
+		/*
+		 * Finish the folio before leaving. Returning straight out
+		 * left it in writeback with no completion coming, and the
+		 * next process to touch the file waited on it forever --
+		 * the same shape as the defects above, reached by a path
+		 * that only opens when memory is short.
+		 *
+		 * The allocator has already logged the failure, so there
+		 * is nothing to add to it here.
+		 */
+		iomap_finish_folio_write(inode, folio, len);
 		return -ENOMEM;
+	}
 
 	while (p < end) {
 		u64    b            = p / BEAMFS_DATA_INLINE_BYTES;
@@ -2288,7 +2334,29 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 const struct address_space_operations beamfs_inline_aops = {
 	.read_folio       = beamfs_inline_read_folio,
 	.writepages       = beamfs_inline_writepages,
-	.dirty_folio      = filemap_dirty_folio,
+	/*
+	 * iomap_dirty_folio, not filemap_dirty_folio.
+	 *
+	 * filemap's marks the folio dirty and stops there. iomap's also
+	 * allocates the iomap_folio_state and calls
+	 * iomap_set_range_dirty, which is what iomap_find_dirty_range
+	 * later reads to decide what to write back.
+	 *
+	 * Without it the folio is dirty to the VFS and clean to iomap:
+	 * iomap_writeback_folio calls folio_start_writeback, finds no
+	 * dirty range to hand to ->writeback_range, submits nothing --
+	 * and nothing ever ends the writeback it just started. The folio
+	 * stays that way for the life of the mount, and the next process
+	 * to touch the file waits in folio_wait_writeback forever.
+	 *
+	 * Found through xfstests: rm sat in truncate_inode_partial_folio
+	 * under beamfs_evict_inode for nine hours while the tracing said
+	 * every folio that reached writeback_range was accounted for --
+	 * correctly, because the one that mattered never got there.
+	 *
+	 * gfs2 declares the same, which is the shortest way to see it.
+	 */
+	.dirty_folio      = iomap_dirty_folio,
 	/* Required once the folio state is iomap's: the kernel warns at
 	 * compaction time without it.
 	 */
