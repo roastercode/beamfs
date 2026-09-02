@@ -76,6 +76,26 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	 * makes decode_rs8 return success while the data has actually
 	 * been altered toward a wrong codeword.
 	 */
+	/*
+	 * A free inode is not a corrupt one.
+	 *
+	 * Free slots are zeroed, i_crc32 included, and crc32 of a zeroed
+	 * buffer is 0xf288b395 rather than zero -- so every read of a free
+	 * inode fails the check below by construction. Dozens of them
+	 * appeared in twenty milliseconds during one test run, reported as
+	 * "CRC32 mismatch", which is both the wrong error and the wrong
+	 * diagnosis: nothing was corrupt, something had followed a stale
+	 * reference.
+	 *
+	 * ESTALE is what the VFS expects here, and it is what ext2 returns
+	 * for an inode with no links.
+	 */
+	if (le16_to_cpu(raw->i_mode) == 0) {
+		brelse(bh);
+		iget_failed(inode);
+		return ERR_PTR(-ESTALE);
+	}
+
 	crc = beamfs_crc32(raw, offsetof(struct beamfs_inode, i_crc32));
 	if (crc != le32_to_cpu(raw->i_crc32)) {
 		u32 scheme = le32_to_cpu(

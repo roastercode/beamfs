@@ -115,6 +115,25 @@ struct beamfs_sb_info {
 	u64                       s_scrub_blocks;      /* blocks checked */
 	u64                       s_scrub_corrected;   /* blocks with corrections */
 	u64                       s_scrub_uncorrectable;
+
+	/*
+	 * Sweep pacing, closed on what the last sweep found.
+	 *
+	 * The interval was a constant the operator set once, so the
+	 * scrubber consumed the same bandwidth on a volume where nothing
+	 * had been corrected in months as on one correcting steadily. In
+	 * a radiotherapy vault the neutron flux exists only during
+	 * treatment: a fixed rate is both wasteful at night and too slow
+	 * during a session, and it is the one environment this filesystem
+	 * was built for.
+	 *
+	 * s_scrub_base_ms is what the operator asked for and the pace
+	 * returns to when the volume is quiet. s_scrub_last_corrected is
+	 * the correction count at the end of the previous sweep, which is
+	 * all that is needed to know whether this one found more.
+	 */
+	unsigned int              s_scrub_base_ms;
+	u64                       s_scrub_last_corrected;
 	struct kobject            s_kobj;
 	struct completion         s_kobj_unregister;
 };

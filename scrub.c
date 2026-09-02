@@ -126,6 +126,39 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 		}
 	}
 
+	/*
+	 * Write the repair back, or it was not a repair.
+	 *
+	 * The decoder puts corrected data in staging and corrected parity
+	 * straight into the buffer; without this the buffer was released
+	 * and both were discarded. The block on disk stayed damaged, the
+	 * next sweep found the same errors, and the counter climbed
+	 * forever -- measured: 120 corrections of one block over 119
+	 * sweeps, none of which fixed anything.
+	 *
+	 * That is the failure this filesystem exists to prevent. Each
+	 * upset is individually correctable; what kills the data is their
+	 * sum. A scrubber that detects without repairing lets them
+	 * accumulate to the ninth, and the ninth is unrecoverable.
+	 *
+	 * Written under the buffer lock so a concurrent reader sees the
+	 * block whole, and only when something was corrected: an
+	 * untouched block must not be dirtied, or a quiet volume would
+	 * rewrite itself endlessly and wear the medium for nothing.
+	 */
+	if (n_corrected) {
+		unsigned int k;
+
+		lock_buffer(bh);
+		for (k = 0; k < BEAMFS_DATA_INLINE_SUBBLOCKS; k++)
+			memcpy((u8 *)bh->b_data + (size_t)k * BEAMFS_SUBBLOCK_TOTAL,
+			       staging + (size_t)k * BEAMFS_SUBBLOCK_DATA,
+			       BEAMFS_SUBBLOCK_DATA);
+		set_buffer_uptodate(bh);
+		unlock_buffer(bh);
+		mark_buffer_dirty(bh);
+	}
+
 	*corrected = n_corrected;
 	brelse(bh);
 
@@ -259,6 +292,70 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	brelse(bh);
 }
 
+/*
+ * Set the pace from what the sweep just found.
+ *
+ * One rule, applied once per sweep: corrections mean go faster, silence
+ * means drift back. Halve the interval on any correction, and add an
+ * eighth back when there were none.
+ *
+ * Halving is deliberate. A rise in flux is abrupt -- a beam turns on,
+ * an aircraft reaches altitude -- and a scrubber that eased into it
+ * would spend the interesting minutes still at its idle rate. Recovery
+ * is gradual for the opposite reason: nothing is lost by staying alert
+ * a while after the last correction, and a volume that oscillates
+ * around the threshold should settle rather than thrash.
+ *
+ * Bounded below at 1 ms, because faster is a busy loop rather than a
+ * scrub, and above by whatever the operator set, because they know
+ * what the volume is for and this only ever tightens their number.
+ *
+ * The rate is a response to measured corrections, not a prediction. It
+ * follows the environment; it does not model it.
+ */
+static void beamfs_scrub_pace(struct beamfs_sb_info *sbi)
+{
+	unsigned int cur = READ_ONCE(sbi->s_scrub_interval_ms);
+	unsigned int base = sbi->s_scrub_base_ms;
+	u64 found;
+
+	if (!cur || !base)
+		return;
+
+	found = sbi->s_scrub_corrected - sbi->s_scrub_last_corrected;
+	sbi->s_scrub_last_corrected = sbi->s_scrub_corrected;
+
+	if (found) {
+		cur = max_t(unsigned int, 1u, cur / 2);
+	} else if (cur < base) {
+		cur += max_t(unsigned int, 1u, base / 8);
+		cur = min(cur, base);
+	}
+
+	WRITE_ONCE(sbi->s_scrub_interval_ms, cur);
+}
+
+/*
+ * What the pacing is doing, and why.
+ *
+ * A mechanism that changes its own rate has to be able to account for
+ * it: an operator seeing the scrubber consume more bandwidth than they
+ * configured needs to find the reason here rather than guess. The
+ * ratio to base is the useful number -- 1 means quiet, 32 means the
+ * volume has been correcting for a while.
+ */
+static ssize_t scrub_pace_show(struct beamfs_sb_info *sbi, char *buf)
+{
+	unsigned int cur = READ_ONCE(sbi->s_scrub_interval_ms);
+	unsigned int base = sbi->s_scrub_base_ms;
+
+	return sysfs_emit(buf,
+			  "interval_ms %u\nbase_ms %u\nfactor %u\ncorrected %llu\n",
+			  cur, base,
+			  (cur && base > cur) ? base / cur : 1,
+			  sbi->s_scrub_corrected);
+}
+
 static int beamfs_scrub_thread(void *data)
 {
 	struct super_block *sb = data;
@@ -293,6 +390,7 @@ static int beamfs_scrub_thread(void *data)
 		if (sbi->s_scrub_cursor >= sbi->s_ninodes) {
 			sbi->s_scrub_cursor = 0;
 			sbi->s_scrub_passes++;
+			beamfs_scrub_pace(sbi);
 			/*
 			 * Re-anchor once per sweep, so the wall-clock
 			 * reference is at most one sweep old rather than as
@@ -349,6 +447,13 @@ static ssize_t interval_store(struct beamfs_sb_info *sbi, const char *buf,
 	 * reasonable choice, and one who wants a tight sweep before a
 	 * mission is making another.
 	 */
+	/*
+	 * Writing the interval sets the ceiling as well as the current
+	 * pace: an operator asking for a rate is stating what the volume
+	 * should cost when nothing is wrong, and the pacing only ever
+	 * tightens from there.
+	 */
+	sbi->s_scrub_base_ms = v;
 	WRITE_ONCE(sbi->s_scrub_interval_ms, v);
 	return len;
 }
@@ -478,6 +583,7 @@ BEAMFS_SCRUB_RO(corrected);
 BEAMFS_SCRUB_RO(uncorrectable);
 BEAMFS_SCRUB_RO(error_budget);
 BEAMFS_SCRUB_RO(clock_anchor);
+BEAMFS_SCRUB_RO(scrub_pace);
 BEAMFS_SCRUB_RW(alert_rate_limit);
 
 static struct attribute *beamfs_scrub_attrs[] = {
@@ -489,6 +595,7 @@ static struct attribute *beamfs_scrub_attrs[] = {
 	&beamfs_scrub_attr_uncorrectable.attr,
 	&beamfs_scrub_attr_error_budget.attr,
 	&beamfs_scrub_attr_clock_anchor.attr,
+	&beamfs_scrub_attr_scrub_pace.attr,
 	&beamfs_scrub_attr_alert_rate_limit.attr,
 	NULL,
 };
@@ -544,6 +651,8 @@ int beamfs_scrub_init(struct super_block *sb)
 	int ret;
 
 	sbi->s_scrub_interval_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
+	sbi->s_scrub_base_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
+	sbi->s_scrub_last_corrected = 0;
 	sbi->s_scrub_cursor = 0;
 	sbi->s_scrub_passes = 0;
 	sbi->s_scrub_blocks = 0;
