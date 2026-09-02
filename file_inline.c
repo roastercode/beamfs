@@ -518,6 +518,24 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					      u64 iblock_logical,
 					      u64 *phys_out)
 {
+	/*
+	 * Nothing free: say so once and return, rather than walking the
+	 * whole indirection tree to discover it at every level.
+	 *
+	 * Without this a full volume produced one failed allocation per
+	 * block per level -- 19531 suppressed log callbacks in three
+	 * seconds under generic/224 -- and the writeback path spent its
+	 * time in the allocator and the ring buffer instead of returning
+	 * ENOSPC. The test then exceeded its timeout for want of an error
+	 * the filesystem already knew.
+	 *
+	 * s_free_blocks is read without the lock. It is a hint here: a
+	 * concurrent free racing this check costs one retry, and the
+	 * allocation below is still the thing that decides.
+	 */
+	if (BEAMFS_SB(inode->i_sb)->s_free_blocks == 0)
+		return -ENOSPC;
+
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	struct super_block       *sb = inode->i_sb;
 	struct buffer_head       *ibh;
@@ -542,7 +560,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		}
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
-			pr_err_ratelimited("beamfs/inline: no free blocks (direct)\n");
+			pr_warn_once("beamfs/inline: volume full, first refusal at direct\n");
 			return -ENOSPC;
 		}
 		/* Zero-init the freshly allocated data block on disk. */
@@ -594,7 +612,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			/* Allocate indirect block first, zero-init. */
 			indirect_blk = beamfs_alloc_block(sb, inode);
 			if (!indirect_blk) {
-				pr_err_ratelimited("beamfs/inline: no free blocks (indirect)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at indirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, indirect_blk);
@@ -645,7 +663,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(ibh);
-			pr_err_ratelimited("beamfs/inline: no free blocks (data)\n");
+			pr_warn_once("beamfs/inline: volume full, first refusal at data\n");
 			return -ENOSPC;
 		}
 		dbh = sb_getblk(sb, new_block);
@@ -712,7 +730,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		if (!dindirect_blk) {
 			dindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!dindirect_blk) {
-				pr_err_ratelimited("beamfs/inline: no free blocks (dindirect)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at dindirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, dindirect_blk);
@@ -755,7 +773,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
-				pr_err_ratelimited("beamfs/inline: no free blocks (L1 indirect)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at L1 indirect\n");
 				return -ENOSPC;
 			}
 			l1bh = sb_getblk(sb, l1_blk);
@@ -806,7 +824,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l1bh);
-			pr_err_ratelimited("beamfs/inline: no free blocks (dindirect data)\n");
+			pr_warn_once("beamfs/inline: volume full, first refusal at dindirect data\n");
 			return -ENOSPC;
 		}
 		dbh = sb_getblk(sb, new_block);
@@ -872,7 +890,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		if (!tindirect_blk) {
 			tindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!tindirect_blk) {
-				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect\n");
 				return -ENOSPC;
 			}
 			ibh = sb_getblk(sb, tindirect_blk);
@@ -915,7 +933,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
-				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L1)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect L1\n");
 				return -ENOSPC;
 			}
 			l1bh = sb_getblk(sb, l1_blk);
@@ -961,7 +979,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			l2_blk = beamfs_alloc_block(sb, inode);
 			if (!l2_blk) {
 				brelse(l1bh);
-				pr_err_ratelimited("beamfs/inline: no free blocks (tindirect L2)\n");
+				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect L2\n");
 				return -ENOSPC;
 			}
 			l2bh = sb_getblk(sb, l2_blk);
@@ -1012,7 +1030,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l2bh);
-			pr_err_ratelimited("beamfs/inline: no free blocks (tindirect data)\n");
+			pr_warn_once("beamfs/inline: volume full, first refusal at tindirect data\n");
 			return -ENOSPC;
 		}
 		dbh = sb_getblk(sb, new_block);
@@ -2251,15 +2269,25 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	kfree(scratch);
 
 	/*
-	 * The whole range counts as handled: iomap_writeback_range() loops
-	 * while rlen remains, and a short count would bring it back for a
-	 * folio already handed to the completion path.
+	 * On success the whole range counts as handled:
+	 * iomap_writeback_range() loops while rlen remains, and a short
+	 * count would bring it back for a folio already handed to the
+	 * completion path. If no completion was armed, finish the folio
+	 * here, because nothing else will.
 	 *
-	 * If no completion was armed -- an error before the last block --
-	 * finish the folio here, otherwise nothing ever would and sync()
-	 * would wait on it forever.
+	 * On error, do not. iomap_writeback_range() returns immediately
+	 * without adding anything to bytes_submitted, so
+	 * iomap_writeback_folio() ends the folio itself for its full size
+	 * -- and a finish here as well is one too many. With one block per
+	 * folio there is no counter to absorb it: iomap_finish_folio_write
+	 * ends the writeback on the first call and the second acts on a
+	 * folio that is no longer in it.
+	 *
+	 * The visible form was ENOSPC on the indirect path leaving 128
+	 * fsstress processes in folio_wait_writeback under evict_inode,
+	 * each holding a lock the next test waited on.
 	 */
-	if (!last_bh && !folio_done)
+	if (ret >= 0 && !last_bh && !folio_done)
 		iomap_finish_folio_write(inode, folio, len);
 
 	(void)done;

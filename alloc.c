@@ -212,6 +212,12 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	inode_table_blk  = le64_to_cpu(sbi->s_beamfs_sb->s_inode_table_blk);
 	inodes_per_block = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
 
+	/*
+	 * Start at the beginning: at mount the layout is whatever the
+	 * previous session left, and there is no better guess.
+	 */
+	sbi->s_alloc_goal = 0;
+
 	sbi->s_ninodes = total_inodes;
 
 	sbi->s_inode_bitmap = kvzalloc_objs(*sbi->s_inode_bitmap,
@@ -434,13 +440,33 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 		return 0;
 	}
 
-	bit = find_first_bit(sbi->s_block_bitmap, sbi->s_nblocks);
+	/*
+	 * From where the last one landed, then from the start.
+	 *
+	 * Two passes rather than one scan from zero: the first covers the
+	 * region a sequential writer is actually using, the second the
+	 * holes earlier writers left behind. Together they are exhaustive,
+	 * so free_blocks > 0 still guarantees a hit.
+	 */
+	bit = find_next_bit(sbi->s_block_bitmap, sbi->s_nblocks,
+			    sbi->s_alloc_goal);
+	if (bit >= sbi->s_nblocks && sbi->s_alloc_goal != 0)
+		bit = find_first_bit(sbi->s_block_bitmap, sbi->s_nblocks);
+
 	if (bit >= sbi->s_nblocks) {
 		spin_unlock(&sbi->s_lock);
 		pr_err("beamfs: bitmap inconsistency: free_blocks=%lu but no free bit\n",
 		       sbi->s_free_blocks);
 		return 0;
 	}
+
+	/*
+	 * Next search starts after this one. Past the end it wraps, which
+	 * the second pass above then handles.
+	 */
+	sbi->s_alloc_goal = bit + 1;
+	if (sbi->s_alloc_goal >= sbi->s_nblocks)
+		sbi->s_alloc_goal = 0;
 
 	clear_bit(bit, sbi->s_block_bitmap);
 	sbi->s_free_blocks--;
@@ -546,6 +572,18 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 		spin_unlock(&sbi->s_lock);
 		return;
 	}
+
+	/*
+	 * Pull the goal back to what was just freed, if it is behind.
+	 *
+	 * Without this a block freed before the cursor is only found on
+	 * the next wrap, so a workload that fills, deletes and refills --
+	 * generic/015 and generic/027 both do exactly that -- walks the
+	 * whole bitmap again on every cycle instead of reusing what it
+	 * just released.
+	 */
+	if (bit < sbi->s_alloc_goal)
+		sbi->s_alloc_goal = bit;
 
 	set_bit(bit, sbi->s_block_bitmap);
 	sbi->s_free_blocks++;

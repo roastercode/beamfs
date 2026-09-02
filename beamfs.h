@@ -37,6 +37,24 @@ struct beamfs_sb_info {
 	spinlock_t                s_lock;     /* Superblock lock */
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
+
+	/*
+	 * Where the last allocation landed.
+	 *
+	 * find_first_bit scans from zero every time, so the cost of an
+	 * allocation grows with how full the volume is and filling one is
+	 * quadratic. Measured: 240 writes/s on an empty volume, 17 on a
+	 * mostly full one, a fifteenfold fall that made generic/015 and
+	 * generic/074 exceed a twenty-minute timeout.
+	 *
+	 * Resuming from the last position makes the common case -- a
+	 * sequential writer -- constant time. Wrapping to zero on the
+	 * first miss keeps it exhaustive, so a volume with a hole near
+	 * the start still fills completely.
+	 *
+	 * ext2 has done this since 1993 and calls it the goal.
+	 */
+	unsigned long             s_alloc_goal;
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
