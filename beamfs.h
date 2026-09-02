@@ -132,6 +132,14 @@ struct beamfs_sb_info {
 	 * the correction count at the end of the previous sweep, which is
 	 * all that is needed to know whether this one found more.
 	 */
+	/*
+	 * Where the wear scan has reached, and how many worn blocks the
+	 * last pass over the budget found. The cursor is a block offset
+	 * within the data region, not a byte offset in the budget.
+	 */
+	u64                       s_wear_cursor;
+	u64                       s_wear_visits;
+
 	unsigned int              s_scrub_base_ms;
 	u64                       s_scrub_last_corrected;
 	struct kobject            s_kobj;
@@ -421,6 +429,7 @@ void beamfs_budget_record(struct super_block *sb, u64 phys,
 			  unsigned int symbols);
 u8   beamfs_budget_read(struct super_block *sb, u64 phys);
 void beamfs_budget_histogram(struct super_block *sb, u64 *hist);
+u64  beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold);
 
 /* rsbench.c -- codec cost, no block layer underneath */
 void beamfs_debugfs_init(void);

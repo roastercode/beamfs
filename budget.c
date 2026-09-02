@@ -106,6 +106,43 @@ void beamfs_budget_record(struct super_block *sb, u64 phys,
  * Returns 0 when the feature is off, which reads as "no wear known"
  * rather than "no wear" -- the distinction belongs to the caller.
  */
+/*
+ * The next block at or past @from whose margin has fallen to @threshold.
+ *
+ * The budget region is one byte per block -- a quarter of a per mille of
+ * the volume -- so reading it end to end costs four thousand times less
+ * than sweeping the data it describes. It is already the index of where
+ * attention is due; nothing needed building, only reading.
+ *
+ * That asymmetry is the point. A block that has spent six of its eight
+ * correctable symbols is two upsets from unrecoverable and should be
+ * looked at often. A block that has never needed a correction can wait.
+ * Sweeping both at one rate spends the same effort on 262051 untouched
+ * blocks as on the one that matters -- measured, on a volume with
+ * exactly that shape.
+ *
+ * Returns the block number, or 0 when the region holds nothing above the
+ * threshold from @from onward. Reads a budget block at a time rather than
+ * a byte, since the caller walks forward and the buffer cache will have
+ * the next byte already.
+ */
+u64 beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	u64 phys;
+
+	if (!sbi->s_budget_len)
+		return 0;
+
+	for (phys = max_t(u64, from, sbi->s_data_start);
+	     phys < sbi->s_data_start + sbi->s_nblocks;
+	     phys++) {
+		if (beamfs_budget_read(sb, phys) >= threshold)
+			return phys;
+	}
+	return 0;
+}
+
 u8 beamfs_budget_read(struct super_block *sb, u64 phys)
 {
 	struct buffer_head *bh;

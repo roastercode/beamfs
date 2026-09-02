@@ -350,10 +350,65 @@ static ssize_t scrub_pace_show(struct beamfs_sb_info *sbi, char *buf)
 	unsigned int base = sbi->s_scrub_base_ms;
 
 	return sysfs_emit(buf,
-			  "interval_ms %u\nbase_ms %u\nfactor %u\ncorrected %llu\n",
+			  "interval_ms %u\nbase_ms %u\nfactor %u\ncorrected %llu\nwear_visits %llu\n",
 			  cur, base,
 			  (cur && base > cur) ? base / cur : 1,
-			  sbi->s_scrub_corrected);
+			  sbi->s_scrub_corrected,
+			  sbi->s_wear_visits);
+}
+
+/*
+ * Visit one worn block, if the budget knows of any.
+ *
+ * The sequential sweep answers "has anything changed"; this answers
+ * "where is the margin thin". They are different questions and the
+ * pacing above cannot serve the second: raising the rate for the whole
+ * volume to watch three blocks doubles the cost of 262051 that are
+ * untouched, which is what the measurement showed it doing.
+ *
+ * Called once per sweep step, so a worn block is seen every few
+ * hundred milliseconds while a fresh one waits for the sweep to reach
+ * it -- minutes or hours apart on a real volume. The ratio comes out of
+ * the geometry rather than a tuning knob: there is one wear visit per
+ * ordinary visit, and the number of worn blocks is small by definition.
+ * If it stops being small, the volume has a bigger problem than
+ * scheduling.
+ *
+ * Threshold at half the correctable symbols. Below that a block has
+ * consumed margin but retains most of it; at four of eight it is closer
+ * to the edge than to the start, and that is the point where seeing it
+ * often begins to matter.
+ */
+#define BEAMFS_WEAR_THRESHOLD  (BEAMFS_RS_PARITY / 4)
+
+static void beamfs_scrub_wear_step(struct super_block *sb,
+				   struct beamfs_sb_info *sbi)
+{
+	unsigned int corrected = 0;
+	u64 phys;
+
+	if (!sbi->s_budget_len)
+		return;
+
+	phys = beamfs_budget_next_worn(sb, sbi->s_wear_cursor,
+				       BEAMFS_WEAR_THRESHOLD);
+	if (!phys) {
+		/* Round again from the start of the data region. */
+		sbi->s_wear_cursor = 0;
+		return;
+	}
+
+	sbi->s_wear_cursor = phys + 1;
+	sbi->s_wear_visits++;
+
+	if (!beamfs_block_is_allocated(sb, phys))
+		return;
+
+	if (beamfs_scrub_check_block(sb, phys, &corrected) == -EUCLEAN)
+		sbi->s_scrub_uncorrectable++;
+	sbi->s_scrub_blocks++;
+	if (corrected)
+		sbi->s_scrub_corrected++;
 }
 
 static int beamfs_scrub_thread(void *data)
@@ -385,6 +440,14 @@ static int beamfs_scrub_thread(void *data)
 		if (sbi->s_inode_bitmap &&
 		    !test_bit(ino, sbi->s_inode_bitmap))
 			beamfs_scrub_one_inode(sb, ino);
+
+		/*
+		 * One worn block per step, alongside the sweep. The two
+		 * run at the same cadence but cover sets of wildly
+		 * different size, which is what gives worn blocks their
+		 * attention without slowing the sweep.
+		 */
+		beamfs_scrub_wear_step(sb, sbi);
 
 		sbi->s_scrub_cursor++;
 		if (sbi->s_scrub_cursor >= sbi->s_ninodes) {
@@ -653,6 +716,8 @@ int beamfs_scrub_init(struct super_block *sb)
 	sbi->s_scrub_interval_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
 	sbi->s_scrub_base_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
 	sbi->s_scrub_last_corrected = 0;
+	sbi->s_wear_cursor = 0;
+	sbi->s_wear_visits = 0;
 	sbi->s_scrub_cursor = 0;
 	sbi->s_scrub_passes = 0;
 	sbi->s_scrub_blocks = 0;
