@@ -680,6 +680,70 @@ static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
  * Linux deployment corpus has all symlinks < 96 bytes; slow symlink
  * (data-block path) is deferred to a follow-up.
  */
+/*
+ * Put a long target in a data block and point i_direct[0] at it.
+ *
+ * The block is written through the same RS encoder as file data, so the
+ * target is protected exactly as a file of the same length would be.
+ * The tail is zeroed rather than left as whatever the allocator
+ * returned: a symlink is read by length, but an uninitialised tail
+ * still means the block's parity covers bytes nobody chose.
+ */
+static int beamfs_symlink_store_block(struct inode *inode, const char *target,
+				      size_t len)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	struct buffer_head *bh;
+	u64 phys;
+	u8 *staging;
+	int ret = 0;
+
+	staging = kzalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!staging)
+		return -ENOMEM;
+	memcpy(staging, target, len);
+
+	phys = beamfs_alloc_block(sb, inode);
+	if (!phys) {
+		kfree(staging);
+		return -ENOSPC;
+	}
+
+	bh = sb_getblk(sb, phys);
+	if (!bh) {
+		beamfs_free_block(sb, phys, inode);
+		kfree(staging);
+		return -EIO;
+	}
+
+	lock_buffer(bh);
+	memset(bh->b_data, 0, BEAMFS_BLOCK_SIZE);
+	for (unsigned int i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
+		memcpy((u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
+		       staging + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+		       BEAMFS_SUBBLOCK_DATA);
+	beamfs_rs_encode_region((u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS);
+	set_buffer_uptodate(bh);
+	unlock_buffer(bh);
+	mark_buffer_dirty(bh);
+	ret = sync_dirty_buffer(bh);
+	brelse(bh);
+	kfree(staging);
+
+	if (ret) {
+		beamfs_free_block(sb, phys, inode);
+		return ret;
+	}
+
+	fi->i_direct[0] = cpu_to_le64(phys);
+	return 0;
+}
+
 static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 			  struct dentry *dentry, const char *symname)
 {
@@ -689,7 +753,15 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 	int                       ret;
 
 	len = strlen(symname);
-	if (len == 0 || len >= sizeof(((struct beamfs_inode *)0)->i_direct))
+	/*
+	 * PATH_MAX is the ceiling the VFS enforces; anything under it is a
+	 * legitimate target and has to be storable. Ninety-six bytes was
+	 * not a design limit, it was the size of the field the short form
+	 * happens to reuse, and any absolute path of moderate depth
+	 * exceeds it -- generic/360 links to a 1019-byte path and got
+	 * ENAMETOOLONG.
+	 */
+	if (len == 0 || len > BEAMFS_DATA_INLINE_BYTES)
 		return -ENAMETOOLONG;
 
 	inode = beamfs_new_inode(dir, S_IFLNK | 0777);
@@ -697,13 +769,30 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 		return PTR_ERR(inode);
 
 	fi = BEAMFS_I(inode);
-	/*
-	 * Reuse i_direct[] as a 96-byte inline payload. The fast-symlink
-	 * convention is mirrored on-disk via beamfs_write_inode_raw which
-	 * memcpys fi->i_direct verbatim into the on-disk inode.
-	 */
 	memset(fi->i_direct, 0, sizeof(fi->i_direct));
-	memcpy(fi->i_direct, symname, len);
+
+	if (len < sizeof(fi->i_direct)) {
+		/*
+		 * Short form: the target lives in i_direct[] as raw bytes,
+		 * carried to disk by write_inode_raw's verbatim memcpy and
+		 * covered by the inode's own CRC and RS parity.
+		 */
+		memcpy(fi->i_direct, symname, len);
+	} else {
+		/*
+		 * Long form: the target goes in a data block, and
+		 * i_direct[0] holds its number. i_size tells the two apart
+		 * on the way back, so nothing new is needed on disk.
+		 *
+		 * A block brings the RS codewords with it, so a long target
+		 * ends up better protected than a short one -- which is the
+		 * right way round, since it carries more to lose.
+		 */
+		ret = beamfs_symlink_store_block(inode, symname, len);
+		if (ret)
+			goto out_iput;
+	}
+
 	inode->i_size = len;
 	inode->i_op = &beamfs_symlink_inode_operations;
 
@@ -741,8 +830,54 @@ static const char *beamfs_get_link(struct dentry *dentry,
 				   struct delayed_call *done)
 {
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	struct buffer_head *bh;
+	loff_t len = i_size_read(inode);
+	u64 phys;
+	char *buf;
+	int ret;
 
-	return (const char *)fi->i_direct;
+	if (len < (loff_t)sizeof(fi->i_direct))
+		return (const char *)fi->i_direct;
+
+	/*
+	 * Long form. RCU-walk cannot take the buffer lock or sleep on a
+	 * read, so hand it back to the caller for a ref-walk retry.
+	 */
+	if (!dentry)
+		return ERR_PTR(-ECHILD);
+
+	if (len > BEAMFS_DATA_INLINE_BYTES)
+		return ERR_PTR(-EUCLEAN);
+
+	phys = le64_to_cpu(fi->i_direct[0]);
+	if (!phys)
+		return ERR_PTR(-EUCLEAN);
+
+	buf = kzalloc(BEAMFS_DATA_INLINE_BYTES + 1, GFP_NOFS);
+	if (!buf)
+		return ERR_PTR(-ENOMEM);
+
+	bh = sb_bread(sb, phys);
+	if (!bh) {
+		kfree(buf);
+		return ERR_PTR(-EIO);
+	}
+
+	lock_buffer(bh);
+	ret = beamfs_inline_decode_symlink(sb, bh, phys, inode, buf,
+					   (u32)len);
+	unlock_buffer(bh);
+	brelse(bh);
+
+	if (ret) {
+		kfree(buf);
+		return ERR_PTR(ret);
+	}
+
+	buf[len] = '\0';
+	set_delayed_call(done, kfree_link, buf);
+	return buf;
 }
 
 const struct inode_operations beamfs_symlink_inode_operations = {

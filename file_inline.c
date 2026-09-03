@@ -1488,6 +1488,28 @@ out_brelse:
 	return ret;
 }
 
+/*
+ * beamfs_inline_decode_symlink -- RS-decode a block holding a link target.
+ *
+ * The same decode as file data, exposed for namei.c because a long
+ * symlink is a data block in every respect but the path that reaches it.
+ * Separate entry point rather than a wider signature on the file path:
+ * this one takes no folio, no iomap iterator and no RMW flag, and
+ * threading three unused arguments through the reader to avoid twelve
+ * lines here would be the worse trade.
+ */
+int beamfs_inline_decode_symlink(struct super_block *sb,
+				 struct buffer_head *bh, u64 phys,
+				 struct inode *inode, u8 *dst, u32 len)
+{
+	if (len > BEAMFS_DATA_INLINE_BYTES)
+		return -EUCLEAN;
+
+	return beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, 0,
+						   dst, 0, len, false);
+}
+
+
 /* ------------------------------------------------------------------------- */
 /* beamfs_inline_folio_coverage -- compute INLINE disk block coverage of a   */
 /*                                  VFS folio.                               */

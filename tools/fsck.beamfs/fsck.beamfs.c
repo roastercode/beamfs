@@ -557,8 +557,36 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 		 * where it refuses to free them: fast symlinks own no on-disk
 		 * data blocks.
 		 */
-		if ((raw.i_mode & 0xF000) == 0xA000)
+		if ((raw.i_mode & 0xF000) == 0xA000) {
+			/*
+			 * Two shapes, told apart by size. Under 96 bytes the
+			 * target sits in i_direct[] as raw text and there is
+			 * nothing to check: reading those bytes as blocks
+			 * yields whatever the path spelt.
+			 *
+			 * At or above 96 the target lives in a data block
+			 * and i_direct[0] names it. That one is a real
+			 * pointer, and skipping it -- correct while the
+			 * short form was the only form -- would report a
+			 * legitimately owned block as unreferenced on every
+			 * volume holding a long symlink.
+			 */
+			if (le64toh(raw.i_size) >= sizeof(raw.i_direct)) {
+				uint64_t phys = le64toh(raw.i_direct[0]);
+
+				if (phys < data_start ||
+				    phys >= data_start + nblocks) {
+					fprintf(stderr,
+						"fsck.beamfs: pass 3: inode %llu symlink target block %llu out of [%llu, %llu)\n",
+						(unsigned long long)ino,
+						(unsigned long long)phys,
+						(unsigned long long)data_start,
+						(unsigned long long)(data_start + nblocks));
+					bad_pointer_inodes++;
+				}
+			}
 			continue;
+		}
 
 		for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
 			uint64_t phys = raw.i_direct[i];
@@ -741,8 +769,33 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		 * where it refuses to free them: fast symlinks own no on-disk
 		 * data blocks.
 		 */
-		if ((raw.i_mode & 0xF000) == 0xA000)
+		if ((raw.i_mode & 0xF000) == 0xA000) {
+			/*
+			 * Two shapes, told apart by size. Under 96 bytes the
+			 * target sits in i_direct[] as raw text and there is
+			 * nothing to check: reading those bytes as blocks
+			 * yields whatever the path spelt.
+			 *
+			 * At or above 96 the target lives in a data block
+			 * and i_direct[0] names it. That one is a real
+			 * pointer, and skipping it -- correct while the
+			 * short form was the only form -- would report a
+			 * legitimately owned block as unreferenced on every
+			 * volume holding a long symlink.
+			 */
+			if (le64toh(raw.i_size) >= sizeof(raw.i_direct)) {
+				uint64_t phys = le64toh(raw.i_direct[0]);
+
+				if (phys >= data_start &&
+				    phys < data_start + nblocks) {
+					uint64_t bit = phys - data_start;
+
+					reference[bit / 8] |=
+						(uint8_t)(1u << (bit % 8));
+				}
+			}
 			continue;
+		}
 
 		for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
 			uint64_t phys = raw.i_direct[i];

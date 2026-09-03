@@ -408,6 +408,9 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+int  beamfs_inline_decode_symlink(struct super_block *sb,
+				  struct buffer_head *bh, u64 phys,
+				  struct inode *inode, u8 *dst, u32 len);
 
 /* alert.c -- uevent on threshold crossing */
 enum {

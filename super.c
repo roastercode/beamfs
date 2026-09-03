@@ -279,16 +279,29 @@ static void beamfs_free_data_blocks(struct inode *inode)
 	int                      i;
 
 	/*
-	 * Fast symlinks store their target inline in i_direct[] as raw
-	 * bytes (up to BEAMFS_DIRECT_BLOCKS * sizeof(__le64) = 96 bytes).
-	 * These bytes are NOT block pointers, so iterating over them and
-	 * feeding them to beamfs_free_block() produces out-of-range bogus
-	 * block numbers (the ASCII bytes of the target path interpreted as
-	 * little-endian u64). Fast symlinks own no on-disk data blocks, so
-	 * there is nothing to free here.
+	 * Symlinks come in two shapes and i_size tells them apart.
+	 *
+	 * Short ones keep the target in i_direct[] as raw bytes. Those
+	 * bytes are not block pointers: freeing them would hand the
+	 * allocator the ASCII of the path read as little-endian u64, which
+	 * is how that bug presents. They own nothing, so there is nothing
+	 * to free.
+	 *
+	 * Long ones keep the target in a data block with i_direct[0]
+	 * holding its number, and that block has to go back. Returning
+	 * early for every symlink -- correct while the short form was the
+	 * only form -- would leak one block per long symlink, forever.
 	 */
-	if (S_ISLNK(inode->i_mode))
+	if (S_ISLNK(inode->i_mode)) {
+		if (i_size_read(inode) >= (loff_t)sizeof(fi->i_direct)) {
+			u64 blk = le64_to_cpu(fi->i_direct[0]);
+
+			if (blk)
+				beamfs_free_block(sb, blk, NULL);
+		}
+		memset(fi->i_direct, 0, sizeof(fi->i_direct));
 		return;
+	}
 
 	cap = BEAMFS_DIRECT_BLOCKS + (unsigned int)nptrs + 1;
 	seen = kmalloc_array(cap, sizeof(*seen), GFP_NOFS);
