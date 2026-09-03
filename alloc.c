@@ -106,6 +106,11 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	sbi->s_bitmap_blocks_count =
 		beamfs_bitmap_blocks_count_from_flags(sbi->s_beamfs_sb->s_flags);
 
+	sbi->s_bitmap_needs_encode =
+		bitmap_zalloc(sbi->s_bitmap_blocks_count, GFP_KERNEL);
+	if (!sbi->s_bitmap_needs_encode)
+		return -ENOMEM;
+
 	sbi->s_bitmap_blkhs = kcalloc(sbi->s_bitmap_blocks_count,
 				      sizeof(*sbi->s_bitmap_blkhs), GFP_KERNEL);
 	if (!sbi->s_bitmap_blkhs) {
@@ -139,6 +144,8 @@ int beamfs_setup_bitmap(struct super_block *sb)
 				}
 				kfree(sbi->s_bitmap_blkhs);
 				sbi->s_bitmap_blkhs = NULL;
+				bitmap_free(sbi->s_bitmap_needs_encode);
+				sbi->s_bitmap_needs_encode = NULL;
 				kvfree(sbi->s_block_bitmap);
 				sbi->s_block_bitmap = NULL;
 				return -EIO;
@@ -232,6 +239,8 @@ int beamfs_setup_bitmap(struct super_block *sb)
 		}
 		kfree(sbi->s_bitmap_blkhs);
 		sbi->s_bitmap_blkhs = NULL;
+		bitmap_free(sbi->s_bitmap_needs_encode);
+		sbi->s_bitmap_needs_encode = NULL;
 		kvfree(sbi->s_block_bitmap);
 		sbi->s_block_bitmap = NULL;
 		return -ENOMEM;
@@ -284,6 +293,76 @@ int beamfs_setup_bitmap(struct super_block *sb)
  * Called under s_lock. @bit_global is the global bit index (0-based)
  * just modified in sbi->s_block_bitmap by the caller.
  */
+/*
+ * Rebuild the on-disk image of every bitmap block whose bits moved.
+ *
+ * Called from sync_fs, immediately before the buffers are written, so
+ * one rebuild covers however many allocations and frees happened since
+ * the last sync -- 220000 of them for an 800 MiB write, previously one
+ * rebuild each.
+ *
+ * s_block_bitmap is the authority and is read under test_bit, which is
+ * atomic; the buffer lock serialises against a concurrent rebuild of
+ * the same block.
+ */
+/*
+ * Rebuild one bitmap block's on-disk image. The buffer lock must be held.
+ */
+static void beamfs_bitmap_encode_one_locked(struct beamfs_sb_info *sbi, u32 k,
+					    struct buffer_head *bh)
+{
+	unsigned long first, last, scan;
+	u8 *bdata = (u8 *)bh->b_data;
+	u32 i, b;
+
+	first = (unsigned long)k * BEAMFS_BITS_PER_BITMAP_BLOCK;
+	last  = min(first + BEAMFS_BITS_PER_BITMAP_BLOCK,
+		    (unsigned long)sbi->s_nblocks);
+
+	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
+	scan = first;
+	for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS && scan < last; i++) {
+		u8 *subdata = bdata + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+
+		for (b = 0; b < BEAMFS_SUBBLOCK_DATA * 8 && scan < last;
+		     b++, scan++) {
+			if (test_bit(scan, sbi->s_block_bitmap))
+				subdata[b / 8] |= (1u << (b % 8));
+		}
+	}
+
+	beamfs_rs_encode_region(bdata, BEAMFS_SUBBLOCK_TOTAL,
+				bdata + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_BITMAP_SUBBLOCKS);
+}
+
+void beamfs_bitmap_encode_pending(struct super_block *sb)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	u32 k;
+
+	if (!sbi || !sbi->s_bitmap_blkhs || !sbi->s_bitmap_needs_encode ||
+	    !sbi->s_block_bitmap)
+		return;
+
+	for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+		struct buffer_head *bh;
+
+		if (!test_and_clear_bit(k, sbi->s_bitmap_needs_encode))
+			continue;
+
+		bh = sbi->s_bitmap_blkhs[k];
+		if (!bh)
+			continue;
+
+		lock_buffer(bh);
+		beamfs_bitmap_encode_one_locked(sbi, k, bh);
+		unlock_buffer(bh);
+	}
+}
+
 int beamfs_write_bitmap_block(struct super_block *sb,
 			      unsigned long bit_global,
 			      struct inode *owner)
@@ -339,27 +418,29 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	if (block_last_bit > max_bit)
 		block_last_bit = max_bit;
 
-	bit = 0;
-	scan = block_first_bit;
-	for (i = 0;
-	     i < BEAMFS_BITMAP_SUBBLOCKS && scan < block_last_bit;
-	     i++) {
-		u8 *subdata = bdata + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
-
-		for (b = 0;
-		     b < BEAMFS_SUBBLOCK_DATA * 8 && scan < block_last_bit;
-		     b++, bit++, scan++) {
-			if (test_bit(scan, sbi->s_block_bitmap))
-				subdata[b / 8] |= (1u << (b % 8));
-		}
-	}
-
-	beamfs_rs_encode_region(
-		bdata, BEAMFS_SUBBLOCK_TOTAL,
-		bdata + BEAMFS_SUBBLOCK_DATA,
-		BEAMFS_SUBBLOCK_TOTAL,
-		BEAMFS_SUBBLOCK_DATA,
-		BEAMFS_BITMAP_SUBBLOCKS);
+	/*
+	 * Note that this block's image is stale and stop there.
+	 *
+	 * Rebuilding it means walking 3824 bytes bit by bit and running
+	 * sixteen RS encodes, and it was done on every allocation and
+	 * every free -- one full rebuild per data block touched. The bit
+	 * that changed is already in s_block_bitmap, which is the
+	 * authority; the on-disk image only has to be right when the
+	 * buffer reaches the disk, and beamfs_bitmap_encode_pending()
+	 * makes it so from sync_fs.
+	 *
+	 * mark_buffer_dirty still happens here, so the VFS sees the block
+	 * as needing writeback exactly as before and the
+	 * bitmap-before-inode ordering below is untouched.
+	 */
+	set_bit(k, sbi->s_bitmap_needs_encode);
+	(void)bdata;
+	(void)bit;
+	(void)scan;
+	(void)i;
+	(void)b;
+	(void)block_first_bit;
+	(void)block_last_bit;
 
 	mark_buffer_dirty(bh);
 	/* Bind to owner inode so VFS writeback flushes this bitmap
@@ -376,8 +457,23 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * beamfs_setup_bitmap), where the caller already drives a
 	 * synchronous sync_dirty_buffer.
 	 */
-	if (owner && !(inode_state_read_once(owner) & I_FREEING))
+	if (owner && !(inode_state_read_once(owner) & I_FREEING)) {
+		/*
+		 * Attaching the buffer to the inode's metadata list hands
+		 * it to __writeback_single_inode, which writes it without
+		 * ever calling sync_fs. Deferring the rebuild is only safe
+		 * while nothing else can write the buffer; this path can,
+		 * so the image has to be correct before the handover.
+		 *
+		 * The rebuild still happens once per block that moved
+		 * rather than once per bit, because the bit is cleared
+		 * here and the next allocation in the same block sets it
+		 * again.
+		 */
+		beamfs_bitmap_encode_one_locked(sbi, k, bh);
+		clear_bit(k, sbi->s_bitmap_needs_encode);
 		mmb_mark_buffer_dirty(bh, &BEAMFS_I(owner)->i_metadata_bhs);
+	}
 
 	unlock_buffer(bh);
 	return 0;
@@ -401,6 +497,8 @@ void beamfs_destroy_bitmap(struct super_block *sb)
 		}
 		kfree(sbi->s_bitmap_blkhs);
 		sbi->s_bitmap_blkhs = NULL;
+		bitmap_free(sbi->s_bitmap_needs_encode);
+		sbi->s_bitmap_needs_encode = NULL;
 	}
 	if (sbi->s_block_bitmap) {
 		kvfree(sbi->s_block_bitmap);

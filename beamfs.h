@@ -34,6 +34,26 @@ struct beamfs_sb_info {
 	/* Array of K bhs; K = s_bitmap_blocks_count (multi-block bitmap). */
 	struct buffer_head      **s_bitmap_blkhs;
 	u32                       s_bitmap_blocks_count;
+
+	/*
+	 * Which bitmap blocks need their on-disk image rebuilt, and
+	 * whether the superblock does.
+	 *
+	 * Rebuilding means walking 3824 bytes bit by bit out of the
+	 * in-memory bitmap and running sixteen RS encodes over the result.
+	 * Doing that per allocation cost one full re-encode per data block
+	 * touched -- measured at 25264 rebuilds for 25264 allocations, and
+	 * a second RS pass over the superblock alongside it, so two
+	 * metadata encodes for every block of payload. Writing 800 MiB
+	 * meant 220000 of each.
+	 *
+	 * The bit itself is what changed; the codeword only has to be
+	 * right when the buffer reaches the disk. Marking here and
+	 * rebuilding in sync_fs collapses thousands of rebuilds into one
+	 * per block that was actually touched.
+	 */
+	unsigned long            *s_bitmap_needs_encode;
+	bool                      s_super_needs_encode;
 	spinlock_t                s_lock;     /* Superblock lock */
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
@@ -384,6 +404,9 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 
 /* alloc.c */
 int  beamfs_setup_bitmap(struct super_block *sb);
+void beamfs_bitmap_encode_pending(struct super_block *sb);
+void beamfs_super_encode_pending(struct beamfs_sb_info *sbi);
+void beamfs_dirty_super_now(struct beamfs_sb_info *sbi);
 int  beamfs_write_bitmap_block(struct super_block *sb,
 			       unsigned long bit_global,
 			       struct inode *owner);

@@ -79,6 +79,20 @@ static void beamfs_put_super(struct super_block *sb)
 	if (sbi) {
 		/* Stop the sweep before the structures it reads go away. */
 		beamfs_scrub_exit(sb);
+
+		/*
+		 * Belt and braces. The VFS calls sync_fs before put_super,
+		 * so anything pending has normally been rebuilt and written
+		 * already -- but the encode is now deferred, and an image
+		 * that never gets rebuilt is an image that reaches the disk
+		 * stale. Doing it here costs one pass over blocks that are
+		 * usually already clean.
+		 */
+		beamfs_bitmap_encode_pending(sb);
+		beamfs_super_encode_pending(sbi);
+		if (sbi->s_sbh && buffer_dirty(sbi->s_sbh))
+			sync_dirty_buffer(sbi->s_sbh);
+
 		beamfs_destroy_bitmap(sb);
 		brelse(sbi->s_sbh);
 		kfree(sbi->s_beamfs_sb);
@@ -439,6 +453,18 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 
 	t0_ns = ktime_get_ns();
 
+	/*
+	 * Rebuild what changed, once, before any of it is written.
+	 *
+	 * The bits themselves moved in s_block_bitmap as they were
+	 * allocated and freed; the on-disk images and their RS parity are
+	 * built here instead of on every bit. One rebuild per bitmap block
+	 * that was touched, rather than one per data block -- 220000 of
+	 * them for an 800 MiB write, measured.
+	 */
+	beamfs_bitmap_encode_pending(sb);
+	beamfs_super_encode_pending(sbi);
+
 	/* Flush all dirty bitmap buffers synchronously. */
 	if (sbi->s_bitmap_blkhs) {
 		for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
@@ -571,7 +597,52 @@ static void beamfs_sb_from_rs_staging(const u8 staging[BEAMFS_SB_RS_STAGING_BYTE
 	memcpy(base + off_uuid, staging + off_crc32, off_pad - off_uuid);
 }
 
+/*
+ * Rebuild the superblock's on-disk image if anything changed it.
+ *
+ * The same reasoning as the bitmap: the in-memory superblock is the
+ * authority, and its 2743-byte staging copy plus RS encode only has to
+ * be right when the buffer is written. Doing it per allocation meant a
+ * kvmalloc and a full re-encode for every data block -- the second of
+ * two metadata encodes per block of payload.
+ */
+void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
+{
+	if (!sbi || !sbi->s_super_needs_encode)
+		return;
+	sbi->s_super_needs_encode = false;
+	beamfs_dirty_super_now(sbi);
+}
+
+/*
+ * Note that the superblock changed. The rebuild happens at sync.
+ */
 void beamfs_dirty_super(struct beamfs_sb_info *sbi)
+{
+	if (!sbi)
+		return;
+
+	/*
+	 * The superblock buffer comes from the block device's cache, so
+	 * the periodic flusher can write it at any time without going
+	 * through sync_fs. Deferring its rebuild the way the bitmap's is
+	 * deferred would let it reach the disk with the bits of one state
+	 * and the parity of another -- and a superblock whose parity does
+	 * not match is a volume that may not mount.
+	 *
+	 * So the rebuild stays here, where it always was. What the
+	 * bitmap's deferral bought does not apply: this is one buffer,
+	 * and the RS pass over 2743 bytes is a fraction of the sixteen
+	 * codewords a bitmap block needs.
+	 *
+	 * The flag is still set, so sync_fs and put_super have something
+	 * to act on if a future path marks without rebuilding.
+	 */
+	sbi->s_super_needs_encode = false;
+	beamfs_dirty_super_now(sbi);
+}
+
+void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 {
 	struct beamfs_super_block *fsb;
 	u32 crc;
