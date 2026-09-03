@@ -193,6 +193,7 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 {
 	u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
 	struct buffer_head *ibh;
+	__le64 *ptrs;
 	u64 visited = 0;
 	u64 j;
 
@@ -203,8 +204,24 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 	if (!ibh)
 		return 0;
 
+	/*
+	 * Copy the pointers and let the buffer go, for the same reason
+	 * the inode is snapshotted above: the loop sleeps for the pace
+	 * interval after every block, and a pointer into a block-device
+	 * buffer does not survive that reliably. Reading ptrs[j] after a
+	 * recycle gives whatever now occupies the page, and the sweep
+	 * then reads and releases blocks at random -- which is how brelse
+	 * came to be called on an already-free buffer.
+	 *
+	 * One page copied per indirect block visited, against a sweep
+	 * that walks at one block per interval.
+	 */
+	ptrs = kmemdup(ibh->b_data, BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	brelse(ibh);
+	if (!ptrs)
+		return 0;
+
 	for (j = 0; j < nptrs && !kthread_should_stop(); j++) {
-		__le64 *ptrs = (__le64 *)ibh->b_data;
 		u64 child = le64_to_cpu(ptrs[j]);
 		unsigned int corrected = 0;
 		int ret;
@@ -232,7 +249,7 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 		msleep_interruptible(READ_ONCE(sbi->s_scrub_interval_ms));
 	}
 
-	brelse(ibh);
+	kfree(ptrs);
 	return visited;
 }
 
@@ -257,15 +274,39 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	mode = le16_to_cpu(raw->i_mode);
 
 	/*
+	 * Take a copy of what the sweep needs, then let the buffer go.
+	 *
+	 * The loops below sleep for the pace interval between blocks --
+	 * hundreds of milliseconds, sometimes seconds -- and reading
+	 * raw->i_direct[i] after each nap means holding a pointer into a
+	 * block-device buffer across all of it. The buffer can be
+	 * recycled in that window, and then the pointers read out of it
+	 * are whatever now occupies the page: brelse on a buffer that was
+	 * already free, from beamfs_scrub_check_block, WARNING at
+	 * fs/buffer.c:1141.
+	 *
+	 * Ninety-six bytes of pointers, copied once. The sweep works from
+	 * a snapshot, which is what it wants anyway -- a file being
+	 * rewritten underneath it is not something the scrubber has to
+	 * follow.
+	 */
+	{
+		struct beamfs_inode snap;
+
+		memcpy(&snap, raw, sizeof(snap));
+		brelse(bh);
+		bh = NULL;
+		raw = &snap;
+		mode = le16_to_cpu(snap.i_mode);
+
+	/*
 	 * Regular files only. A directory block has its own layout, and a
 	 * fast symlink keeps its target in the pointer array as raw bytes
 	 * -- feeding either to the decoder is the same mistake as sweeping
 	 * the bitmap.
 	 */
-	if (!S_ISREG(mode)) {
-		brelse(bh);
+	if (!S_ISREG(mode))
 		return;
-	}
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS && !kthread_should_stop(); i++) {
 		u64 blk = le64_to_cpu(raw->i_direct[i]);
@@ -288,8 +329,7 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_indirect), 1, sbi);
 	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_dindirect), 2, sbi);
 	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_tindirect), 3, sbi);
-
-	brelse(bh);
+	}
 }
 
 /*

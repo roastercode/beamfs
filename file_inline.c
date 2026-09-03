@@ -2308,7 +2308,29 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			}
 		}
 
-		lock_buffer(bh);
+		/*
+		 * Send the batch before waiting on a buffer lock.
+		 *
+		 * Up to 32 buffers stay locked until the bio is submitted,
+		 * so a block that comes round again inside the same pass
+		 * finds its own lock held and waits for a completion that
+		 * cannot arrive until this loop submits -- which it never
+		 * will. The flusher sat in __lock_buffer for an hour with
+		 * zero writes and PSI at 80%, and every fsstress behind it
+		 * blocked in sync_inodes_sb.
+		 *
+		 * The old phys == last_phys guard only caught the same
+		 * block twice in a row, not one seen 30 positions earlier.
+		 *
+		 * trylock first: on the common path it succeeds and costs
+		 * nothing. On contention, submit what is held -- which
+		 * releases those buffers through the completion -- and
+		 * then wait properly.
+		 */
+		if (!trylock_buffer(bh)) {
+			beamfs_inline_wb_batch_submit(&wbb);
+			lock_buffer(bh);
+		}
 
 		/*
 		 * Read-modify-write, except when there is nothing to
