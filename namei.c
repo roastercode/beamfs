@@ -695,7 +695,13 @@ static int beamfs_dir_is_empty(struct inode *inode)
 	u64      block_no;
 	u32      offset;
 	unsigned int i;
-	int      ret = 1;
+	/*
+	 * Zero means empty. rmdir treats any non-zero return as the
+	 * reason it cannot proceed and hands it straight back, so this is
+	 * an error code and not a predicate -- getting that backwards
+	 * made every rmdir on an empty directory fail.
+	 */
+	int      ret = 0;
 
 	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
 	if (!payload)
@@ -734,7 +740,7 @@ static int beamfs_dir_is_empty(struct inode *inode)
 			    !(de->d_name_len == 1 && de->d_name[0] == '.') &&
 			    !(de->d_name_len == 2 && de->d_name[0] == '.' &&
 			      de->d_name[1] == '.')) {
-				ret = 0;
+				ret = -ENOTEMPTY;
 				goto out;
 			}
 
