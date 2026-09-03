@@ -2150,19 +2150,46 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 
 		lock_buffer(bh);
 
-		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
-							  scratch, 0,
-							  BEAMFS_DATA_INLINE_BYTES,
-							  true);
-		if (ret < 0) {
-			unlock_buffer(bh);
-			brelse(bh);
-			break;
-		}
+		/*
+		 * Read-modify-write, except when there is nothing to
+		 * preserve.
+		 *
+		 * The decode exists so a partial write keeps the bytes it
+		 * does not touch. A slice covering the whole block leaves
+		 * none of them: every byte of scratch is overwritten two
+		 * statements later, so decoding first is 16 RS passes over
+		 * data that is discarded.
+		 *
+		 * That is the common case -- a sequential writer fills
+		 * block after block end to end -- and decode_rs8 was 5% of
+		 * a write-only profile because of it.
+		 *
+		 * A block being written whole also does not need its
+		 * previous contents to be correctable: an uncorrectable
+		 * block that is about to be entirely replaced is not an
+		 * error, and reporting it as one would be wrong.
+		 */
+		if (slice_offset == 0 &&
+		    slice_length == BEAMFS_DATA_INLINE_BYTES) {
+			src = kmap_local_folio(folio, folio_off);
+			memcpy(scratch, src, slice_length);
+			kunmap_local(src);
+		} else {
+			ret = beamfs_inline_decode_block_into_buf(sb, bh, phys,
+								  inode, b,
+								  scratch, 0,
+								  BEAMFS_DATA_INLINE_BYTES,
+								  true);
+			if (ret < 0) {
+				unlock_buffer(bh);
+				brelse(bh);
+				break;
+			}
 
-		src = kmap_local_folio(folio, folio_off);
-		memcpy(scratch + slice_offset, src, slice_length);
-		kunmap_local(src);
+			src = kmap_local_folio(folio, folio_off);
+			memcpy(scratch + slice_offset, src, slice_length);
+			kunmap_local(src);
+		}
 
 		for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++)
 			memcpy((u8 *)bh->b_data +
