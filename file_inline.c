@@ -1627,7 +1627,31 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * iomap_read_folio_iter() has released the folio, which
 	 * dereferences NULL on the next round.
 	 */
-	if (pos >= i_size) {
+	/*
+	 * Past EOF is a hole to a reader and nothing of the sort to a
+	 * writer.
+	 *
+	 * A write at pos == i_size is the ordinary case of extending a
+	 * file, and the block holding that position usually exists
+	 * already: at 3824 usable bytes per block, appending to a 32-byte
+	 * file writes into block 0, which has data in it.
+	 *
+	 * Reporting IOMAP_HOLE there made iomap_block_needs_zeroing true
+	 * on the first term, so __iomap_write_begin took the zeroing
+	 * branch and called folio_zero_segments over the whole folio
+	 * outside the written range -- erasing bytes 0..31, which were on
+	 * disk and below i_size. generic/639 writes 32 bytes, cycles the
+	 * mount, writes 32 more, and reads back thirty-two zeros followed
+	 * by the second write. Silent loss of data the caller never
+	 * touched.
+	 *
+	 * iomap works in i_blocksize units, 4096, while a block carries
+	 * 3824 bytes of payload, so its block boundaries are not ours and
+	 * a range it considers past EOF can hold live bytes. Answering
+	 * the question it actually asked -- what is mapped here -- rather
+	 * than a shortcut about EOF keeps the two views consistent.
+	 */
+	if (!(flags & IOMAP_WRITE) && pos >= i_size) {
 		iomap->length = length;
 		iomap->type = IOMAP_HOLE;
 		return 0;
@@ -1670,7 +1694,6 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 */
 	iomap->addr = (u64)phys * BEAMFS_BLOCK_SIZE;
 
-	(void)flags;
 	(void)srcmap;
 	return 0;
 }
