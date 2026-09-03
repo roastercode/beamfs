@@ -1963,41 +1963,161 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
 	.read_folio_range = beamfs_inline_write_read_folio_range,
 };
 
+
 /*
- * Writeback completion for one INLINE block.
+ * Grouped writeback: one request for many contiguous blocks.
  *
- * iomap_writeback_folio() ends the folio itself only when nothing was
- * submitted; past that it waits for the filesystem to report completion.
- * mark_buffer_dirty() and write_dirty_buffer() are asynchronous, so the
- * folio cannot be finished when writeback_range returns -- the I/O is
- * still in flight, and sync() would then wait on a completion that never
- * arrives. The buffer's end_io callback is where the folio is released,
- * once per block, with the folio held until the last one lands.
+ * ## The measurement
+ *
+ * Nine request sizes were timed on the lab device and fitted to
+ * t = L + size/D by least squares: L = 413 us of fixed cost per
+ * request, D = 740 MB/s of asymptotic bandwidth. With B = 3824 bytes of
+ * payload and T = 4080 bytes written per block, a request carrying n
+ * blocks yields
+ *
+ *     Q(n) = n*B / (L + n*T/D)
+ *
+ * Q(1) is 9 MB/s. One request per block therefore caps this filesystem
+ * at 9 MB/s regardless of anything else in the code -- and 1.8 MB/s was
+ * what it actually did, so the other 80% is RS encoding and copies.
+ * ext4 on the same device measures 100 MB/s, because it groups about
+ * 256 blocks per request.
+ *
+ * ## Why 32 and not 256
+ *
+ * Q(32) is 208 MB/s, Q(256) is 537. The larger batch is worth two and a
+ * half times the throughput and is not taken.
+ *
+ * Every block in flight is a codeword held in memory with its parity
+ * computed and not yet written -- unprotected by construction until the
+ * device acknowledges it. At 32 blocks that window is 128 KiB; at 256
+ * it is a megabyte. And 208 MB/s is already twice what ext4 manages
+ * here and two orders past what the target deployments generate:
+ * dosimetry logs and DICOM instances, measured in megabytes.
+ *
+ * Buying throughput nobody needs with an eightfold exposure window is
+ * the wrong trade for this filesystem. It is the one place where
+ * following ext4 would be a mistake.
+ *
+ * ## Why not iomap_ioend
+ *
+ * iomap groups writeback already, and beamfs names
+ * iomap_ioend_writeback_submit on its legacy path. It does not fit
+ * here. iomap_add_to_ioend adds map_len bytes -- a logical length --
+ * and iomap_can_add_to_ioend derives the sector from the file offset
+ * linearly. Both assume one logical byte per physical byte. Beamfs
+ * writes 4080 for every 3824, which is exactly where the parity lives,
+ * so neither the length nor the sector arithmetic survives the
+ * translation.
+ *
+ * The grouping rule is borrowed all the same: keep a bio open, compare
+ * the expected sector, submit when contiguity breaks. That is a
+ * block-layer technique rather than an ext4 one -- XFS, f2fs and btrfs
+ * all do it under different names.
  */
-struct beamfs_inline_wb_ctx {
-	struct inode  *inode;
-	struct folio  *folio;
-	size_t         len;
-	bh_end_io_t   *orig_end_io;
-	void          *orig_private;
+#define BEAMFS_WB_BATCH_BLOCKS 32
+
+struct beamfs_inline_wb_batch {
+	struct bio   *bio;
+	sector_t      next_sector;  /* sector the next block must start at */
+	u64           next_pos;     /* file offset the next block must be at */
+	unsigned int  blocks;       /* blocks accumulated so far */
+	struct inode *inode;
+	/*
+	 * blk_opf_t rather than int. The type is annotated so operation
+	 * flags cannot be mixed with ordinary integers, and sparse says so
+	 * -- "restricted blk_opf_t degrades to integer" -- the moment they
+	 * are. Declaring it int made REQ_SYNC lose that guarantee on the
+	 * way in and again on the way to bio_alloc.
+	 */
+	blk_opf_t     sync;         /* REQ_SYNC, or 0 */
 };
 
-static void beamfs_inline_wb_end_io(struct buffer_head *bh, int uptodate)
+/*
+ * Completion for a grouped request.
+ *
+ * The bio carries block-device folios with one buffer_head each --
+ * measured on the rig as folio order 0, size 4096, one buffer per
+ * folio, which is what bdev.c produces when it sets folio_min_order
+ * from the block size. So the buffers are recovered from the folios
+ * instead of being carried in a list of their own, the way
+ * ext4_finish_bio does it.
+ */
+static void beamfs_inline_wb_batch_end_io(struct bio *bio)
 {
-	struct beamfs_inline_wb_ctx *wb = bh->b_private;
-	struct inode *inode = wb->inode;
-	struct folio *folio = wb->folio;
-	size_t len = wb->len;
+	struct folio_iter fi;
+	int err = blk_status_to_errno(bio->bi_status);
 
-	bh->b_end_io = wb->orig_end_io;
-	bh->b_private = wb->orig_private;
-	kfree(wb);
+	bio_for_each_folio_all(fi, bio) {
+		struct buffer_head *bh = folio_buffers(fi.folio);
 
-	if (!uptodate)
-		mapping_set_error(inode->i_mapping, -EIO);
+		if (!bh)
+			continue;
+		if (err)
+			clear_buffer_uptodate(bh);
+		else
+			set_buffer_uptodate(bh);
+		unlock_buffer(bh);
+		put_bh(bh);
+	}
+	bio_put(bio);
+}
 
-	end_buffer_write_sync(bh, uptodate);
-	iomap_finish_folio_write(inode, folio, len);
+/* Send whatever has accumulated, if anything has. */
+static void beamfs_inline_wb_batch_submit(struct beamfs_inline_wb_batch *wbb)
+{
+	if (!wbb->bio)
+		return;
+	submit_bio(wbb->bio);
+	wbb->bio = NULL;
+	wbb->blocks = 0;
+}
+
+/*
+ * Add one prepared block, opening or submitting as the rule requires.
+ *
+ * @bh is locked, carries its own reference, and its data are the
+ * finished codewords. It is handed to the bio and released by the
+ * completion above.
+ *
+ * Contiguity is checked on the physical sector and on the logical
+ * position, as iomap does and unlike ext4 which checks only the former.
+ * Beamfs has holes in sparse files, and joining two physically adjacent
+ * blocks across a logical hole would write data where none belongs.
+ */
+static int beamfs_inline_wb_batch_add(struct beamfs_inline_wb_batch *wbb,
+				      struct buffer_head *bh, u64 pos)
+{
+	sector_t sector = (sector_t)bh->b_blocknr *
+			  (bh->b_size >> SECTOR_SHIFT);
+
+	if (wbb->bio &&
+	    (wbb->blocks >= BEAMFS_WB_BATCH_BLOCKS ||
+	     sector != wbb->next_sector ||
+	     pos != wbb->next_pos))
+		beamfs_inline_wb_batch_submit(wbb);
+
+	if (!wbb->bio) {
+		wbb->bio = bio_alloc(bh->b_bdev, BIO_MAX_VECS,
+				     REQ_OP_WRITE | wbb->sync, GFP_NOFS);
+		if (!wbb->bio)
+			return -ENOMEM;
+		wbb->bio->bi_iter.bi_sector = sector;
+		wbb->bio->bi_end_io = beamfs_inline_wb_batch_end_io;
+		wbb->bio->bi_write_hint = wbb->inode->i_write_hint;
+	}
+
+	if (!bio_add_folio(wbb->bio, bh->b_folio, bh->b_size,
+			   bh_offset(bh))) {
+		/* Full. Send it and start again in a fresh one. */
+		beamfs_inline_wb_batch_submit(wbb);
+		return beamfs_inline_wb_batch_add(wbb, bh, pos);
+	}
+
+	wbb->blocks++;
+	wbb->next_sector = sector + (bh->b_size >> SECTOR_SHIFT);
+	wbb->next_pos = pos + BEAMFS_DATA_INLINE_BYTES;
+	return 0;
 }
 
 /*
@@ -2029,12 +2149,21 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	u64      p    = pos;
 	u64      end  = pos + len;
 	u8      *scratch;
-	struct beamfs_inline_wb_ctx *wb = NULL;
-	struct buffer_head *last_bh = NULL;
 	u64      last_phys = 0;
-	bool     folio_done = false;
 	ssize_t  done = 0;
 	int      ret  = 0;
+
+	/*
+	 * One batch per call. Carrying it in wpc->wb_ctx would group
+	 * across folios too, which is where the remaining factor of two
+	 * lives; this keeps the lifetime plain while the change is new,
+	 * because a bio that outlives its call is a bio nobody submits.
+	 */
+	struct beamfs_inline_wb_batch wbb = {
+		.inode = inode,
+		.sync  = (wpc->wbc && wpc->wbc->sync_mode == WB_SYNC_ALL) ?
+			 REQ_SYNC : 0,
+	};
 
 	/*
 	 * 3824 bytes will not fit on the aarch64 kernel stack given the
@@ -2140,12 +2269,43 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		}
 		last_phys = phys;
 
-		bh = sb_bread(sb, phys);
-		if (!bh) {
-			pr_err_ratelimited("beamfs/inline: writeback_range: sb_bread phys=%llu failed\n",
-					   (unsigned long long)phys);
-			ret = -EIO;
-			break;
+		/*
+		 * A block being written whole needs a buffer, not its
+		 * contents.
+		 *
+		 * sb_bread reads from the disk and waits for it. On the
+		 * sequential path that is one synchronous read per 3824
+		 * bytes written, and the flusher spends its time waiting
+		 * for data it is about to discard: draining 300 MiB of
+		 * dirty pages meant 80000 blocking reads, one after
+		 * another. Measured with PSI at 60% of wall time stalled on
+		 * I/O with 319 MiB dirty and never draining -- generic/074
+		 * and generic/015 both timed out that way, and neither was
+		 * stuck.
+		 *
+		 * sb_getblk returns the same buffer_head with no read at
+		 * all. The block is filled entirely below and marked
+		 * uptodate, which is what ext4 does on the same path.
+		 *
+		 * The partial case still reads: those bytes are kept.
+		 */
+		if (slice_offset == 0 &&
+		    slice_length == BEAMFS_DATA_INLINE_BYTES) {
+			bh = sb_getblk(sb, phys);
+			if (!bh) {
+				pr_err_ratelimited("beamfs/inline: writeback_range: sb_getblk phys=%llu failed\n",
+						   (unsigned long long)phys);
+				ret = -EIO;
+				break;
+			}
+		} else {
+			bh = sb_bread(sb, phys);
+			if (!bh) {
+				pr_err_ratelimited("beamfs/inline: writeback_range: sb_bread phys=%llu failed\n",
+						   (unsigned long long)phys);
+				ret = -EIO;
+				break;
+			}
 		}
 
 		lock_buffer(bh);
@@ -2214,32 +2374,44 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 
 		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)bh->b_data,
 					     scratch, inode->i_ino, b);
+		/*
+		 * Every byte of the block has just been written, so the
+		 * buffer is current whether or not it was ever read.
+		 * sb_getblk hands back a buffer that is not uptodate.
+		 */
+		set_buffer_uptodate(bh);
 		mark_buffer_dirty(bh);
+
 
 		/*
 		 * The folio is finished from the completion of the last block
 		 * of the range, not here: the write is still in flight when
 		 * this returns.
 		 */
-		if (p + slice_length >= end) {
-			wb = kmalloc_obj(*wb, GFP_NOFS);
-			if (!wb) {
-				unlock_buffer(bh);
-				brelse(bh);
-				ret = -ENOMEM;
-				break;
-			}
-			wb->inode        = inode;
-			wb->folio        = folio;
-			wb->len          = len;
-			wb->orig_end_io  = bh->b_end_io;
-			wb->orig_private = bh->b_private;
-			bh->b_private = wb;
-			bh->b_end_io  = beamfs_inline_wb_end_io;
-			last_bh = bh;
-		}
+		/*
+		 * The folio is finished by the caller once the batch is
+		 * handed over, not from a per-block completion.
+		 *
+		 * iomap_finish_folio_write does not claim the data are on
+		 * the platter -- it says the filesystem is done touching
+		 * the folio. XFS decrements it as it accumulates into an
+		 * ioend, without waiting for the bio, and the bio holds
+		 * block-device folios pinned by get_bh rather than the
+		 * file's own, so nothing it points at can go away.
+		 */
 
-		unlock_buffer(bh);
+		/*
+		 * The lock is held from before the decode through to the
+		 * hand-over, without the release-and-retake the old
+		 * completion path needed.
+		 *
+		 * Dropping it between the encode and the submit opened a
+		 * window where another writeback on the same physical
+		 * block could re-scatter and re-encode over finished
+		 * codewords -- the "hot sha == cold sha mismatch"
+		 * signature. Holding it throughout closes that, and the
+		 * batch completion is what finally releases it.
+		 */
 
 		/*
 		 * Queue rather than wait. Waiting per 4 KiB block measured at
@@ -2278,7 +2450,6 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		 * did for us; submitting by hand is what keeps the
 		 * completion we installed.
 		 */
-		lock_buffer(bh);
 		if (test_clear_buffer_dirty(bh)) {
 			/*
 			 * submit_bh_wbc asserts b_end_io is set. Only the
@@ -2307,36 +2478,58 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			 * Only the block carrying the folio completion keeps
 			 * its own handler; everything else gets the plain one.
 			 */
-			if (bh != last_bh)
-				bh->b_end_io = end_buffer_write_sync;
+			/*
+			 * Into the batch rather than straight to the device.
+			 *
+			 * The measurement behind this: 413 us of fixed cost
+			 * per request on this rig, so one request per
+			 * 3824-byte block caps the filesystem at 9 MB/s
+			 * whatever the rest of the code does -- and 1.8 was
+			 * measured. Thirty-two blocks per request puts the
+			 * ceiling at 208 MB/s. See beamfs_inline_wb_batch
+			 * above for the model, and for why 32 and not 256.
+			 *
+			 * No per-buffer completion is installed any more.
+			 * One bio completion covers every block it carries,
+			 * unlocking each buffer and dropping its reference;
+			 * until then the buffer stays locked and held.
+			 *
+			 * The b_end_io hazard the previous code guarded
+			 * against goes with it -- nothing inherits a handler
+			 * from the block device cache because nothing
+			 * installs one. That guard was earned:
+			 * end_buffer_async_write inherited from an earlier
+			 * life fired BUG_ON(!buffer_async_write(bh)) inside
+			 * the completion interrupt, which is a panic, and
+			 * generic/027 took the node down every time with no
+			 * ssh and no dmesg to show why.
+			 */
 			get_bh(bh);
-			submit_bh(REQ_OP_WRITE |
-				  ((wpc->wbc &&
-				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
-				   REQ_SYNC : 0), bh);
+			ret = beamfs_inline_wb_batch_add(&wbb, bh, p);
+			if (ret < 0) {
+				unlock_buffer(bh);
+				put_bh(bh);
+				brelse(bh);
+				break;
+			}
 		} else {
 			/*
-			 * Already clean, so no completion is coming. If this
-			 * was the block carrying the folio's completion, run
-			 * it here rather than leaving the folio waiting.
+			 * Already clean: someone else wrote it between the
+			 * mark and here, and there is nothing to send.
 			 */
 			unlock_buffer(bh);
-			if (bh == last_bh) {
-				struct beamfs_inline_wb_ctx *ctx = bh->b_private;
-
-				bh->b_end_io  = ctx->orig_end_io;
-				bh->b_private = ctx->orig_private;
-				kfree(ctx);
-				iomap_finish_folio_write(inode, folio, len);
-				last_bh = NULL;
-				folio_done = true;
-			}
 		}
 		brelse(bh);
 
 		p    += slice_length;
 		done += slice_length;
 	}
+
+	/*
+	 * Nothing may be left pending: iomap waits on the folio, and a bio
+	 * that is never submitted is a folio that never completes.
+	 */
+	beamfs_inline_wb_batch_submit(&wbb);
 
 	kfree(scratch);
 
@@ -2359,7 +2552,20 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	 * fsstress processes in folio_wait_writeback under evict_inode,
 	 * each holding a lock the next test waited on.
 	 */
-	if (ret >= 0 && !last_bh && !folio_done)
+	/*
+	 * The folio is done once the batch is away.
+	 *
+	 * On success the whole range counts as handled:
+	 * iomap_writeback_range() loops while rlen remains, and a short
+	 * count would bring it back for a folio already accounted for.
+	 *
+	 * On error, do not: iomap_writeback_range() returns without
+	 * adding anything to bytes_submitted, so iomap_writeback_folio()
+	 * ends the folio itself for its full size, and a second finish
+	 * here would be one too many. With one block per folio there is
+	 * no counter to absorb it.
+	 */
+	if (ret >= 0)
 		iomap_finish_folio_write(inode, folio, len);
 
 	(void)done;

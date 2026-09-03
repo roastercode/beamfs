@@ -33,6 +33,19 @@
  */
 #include <stdint.h>
 #include <stdbool.h>
+
+/*
+ * BIT and BIT_ULL come from linux/bits.h, which userspace does not get.
+ * mkfs.beamfs and fsck.beamfs include this file directly rather than
+ * keeping their own copies -- that is the point of it -- so the macros
+ * are defined here for them.
+ */
+#ifndef BIT
+#define BIT(n)      (1U << (n))
+#endif
+#ifndef BIT_ULL
+#define BIT_ULL(n)  (1ULL << (n))
+#endif
 #include <stddef.h>
 #include <linux/types.h>   /* __le16/__le32/__le64/__uNN, as the kernel spells them */
 
@@ -330,6 +343,24 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
 #define BEAMFS_MAX_IBLOCK_TINDIRECT  (BEAMFS_MAX_IBLOCK_DINDIRECT + (u64)BEAMFS_TINDIRECT_PTRS)
 
 /*
+ * The largest file the indirection can address, in bytes.
+ *
+ * Derived rather than stated, so it follows the geometry instead of
+ * having to be remembered when the geometry changes. Roughly 512 GiB at
+ * the current shape: twelve direct blocks, then 512 pointers per level
+ * over three levels, 3824 usable bytes each.
+ *
+ * s_maxbytes has to be this and not MAX_LFS_FILESIZE. Claiming 2^63
+ * meant the VFS accepted a truncate to eight exabytes and only found
+ * out at the read, which came back EIO because the logical block was
+ * past the tree -- generic/466 reports it as "Discrepancy @ blocksize
+ * 4096". A filesystem that overstates its reach turns a clean EFBIG at
+ * the point of asking into an I/O error somewhere later.
+ */
+#define BEAMFS_MAX_FILE_SIZE \
+	(BEAMFS_MAX_IBLOCK_TINDIRECT * (u64)BEAMFS_DATA_INLINE_BYTES)
+
+/*
  * Electromagnetic Resilience Journal entry -- 40 bytes (v4 format).
  *
  * Records each RS FEC correction event persistently in the superblock.
@@ -400,11 +431,11 @@ struct beamfs_rs_event {
  *                  symbols still carries a valid Shannon entropy
  *                  estimate over the position list.
  *
- * Bits (1U << 3) and higher are reserved and MUST be zero on write.
+ * Bits BIT(3) and higher are reserved and MUST be zero on write.
  */
-#define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  (1U << 0)
-#define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  (1U << 1)
-#define BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED (1U << 2)
+#define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  BIT(0)
+#define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  BIT(1)
+#define BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED BIT(2)
 
 /*
  * Shannon entropy parameters for the RS journal forensic estimator.
@@ -515,17 +546,17 @@ struct beamfs_rs_event {
  */
 
 /* COMPAT features (informational, mount continues if unknown) */
-#define BEAMFS_FEATURE_COMPAT_RS_JOURNAL_VERBOSE  (1ULL << 0)
-#define BEAMFS_FEATURE_COMPAT_LABEL_LONG          (1ULL << 1)
-#define BEAMFS_FEATURE_COMPAT_DIR_INDEX           (1ULL << 2)
+#define BEAMFS_FEATURE_COMPAT_RS_JOURNAL_VERBOSE  BIT_ULL(0)
+#define BEAMFS_FEATURE_COMPAT_LABEL_LONG          BIT_ULL(1)
+#define BEAMFS_FEATURE_COMPAT_DIR_INDEX           BIT_ULL(2)
 
 /* RO_COMPAT features (force RO mount if unknown) */
-#define BEAMFS_FEATURE_RO_COMPAT_LARGE_FILE       (1ULL << 0)
-#define BEAMFS_FEATURE_RO_COMPAT_HUGE_FILE        (1ULL << 1)
-#define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      (1ULL << 2)
-#define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        (1ULL << 3)
-#define BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM        (1ULL << 4)
-#define BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID      (1ULL << 5)
+#define BEAMFS_FEATURE_RO_COMPAT_LARGE_FILE       BIT_ULL(0)
+#define BEAMFS_FEATURE_RO_COMPAT_HUGE_FILE        BIT_ULL(1)
+#define BEAMFS_FEATURE_RO_COMPAT_EXTRA_ISIZE      BIT_ULL(2)
+#define BEAMFS_FEATURE_RO_COMPAT_BTREE_DIR        BIT_ULL(3)
+#define BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM        BIT_ULL(4)
+#define BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID      BIT_ULL(5)
 					  /* per-data-block integrity field in
 					   * the block tail pad; see format-v6.md.
 					   * NOT in _SUPP until read/write path
@@ -533,18 +564,18 @@ struct beamfs_rs_event {
 					   */
 
 /* INCOMPAT features (refuse mount if unknown) */
-#define BEAMFS_FEATURE_INCOMPAT_EXTENTS           (1ULL << 0)
-#define BEAMFS_FEATURE_INCOMPAT_64BIT             (1ULL << 1)
-#define BEAMFS_FEATURE_INCOMPAT_BIGALLOC          (1ULL << 2)
-#define BEAMFS_FEATURE_INCOMPAT_BLOCK_GROUPS      (1ULL << 3)
-#define BEAMFS_FEATURE_INCOMPAT_BTREE_ALLOC       (1ULL << 4)
-#define BEAMFS_FEATURE_INCOMPAT_JOURNAL           (1ULL << 5)
-#define BEAMFS_FEATURE_INCOMPAT_DAX               (1ULL << 6)
-#define BEAMFS_FEATURE_INCOMPAT_RS_HEAVY          (1ULL << 7)
-#define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      (1ULL << 8)
-#define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      (1ULL << 9)
-#define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       (1ULL << 10)
-#define BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY     (1ULL << 11)
+#define BEAMFS_FEATURE_INCOMPAT_EXTENTS           BIT_ULL(0)
+#define BEAMFS_FEATURE_INCOMPAT_64BIT             BIT_ULL(1)
+#define BEAMFS_FEATURE_INCOMPAT_BIGALLOC          BIT_ULL(2)
+#define BEAMFS_FEATURE_INCOMPAT_BLOCK_GROUPS      BIT_ULL(3)
+#define BEAMFS_FEATURE_INCOMPAT_BTREE_ALLOC       BIT_ULL(4)
+#define BEAMFS_FEATURE_INCOMPAT_JOURNAL           BIT_ULL(5)
+#define BEAMFS_FEATURE_INCOMPAT_DAX               BIT_ULL(6)
+#define BEAMFS_FEATURE_INCOMPAT_RS_HEAVY          BIT_ULL(7)
+#define BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS      BIT_ULL(8)
+#define BEAMFS_FEATURE_INCOMPAT_BG_RS_PARITY      BIT_ULL(9)
+#define BEAMFS_FEATURE_INCOMPAT_LARGE_BLOCK       BIT_ULL(10)
+#define BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY     BIT_ULL(11)
 /*
  * BEAMFS_FEATURE_INCOMPAT_ENCRYPT: reserved for a future at-rest
  * encryption layer, not yet implemented. Declared now, alongside
@@ -569,7 +600,7 @@ struct beamfs_rs_event {
  *     implements the bit, not an implementation detail to silently
  *     inherit from the current cleartext path.
  */
-#define BEAMFS_FEATURE_INCOMPAT_ENCRYPT           (1ULL << 12)
+#define BEAMFS_FEATURE_INCOMPAT_ENCRYPT           BIT_ULL(12)
 /*
  * INDIRECT_PARITY -- RS parity for indirection blocks, held out of band.
  *
@@ -596,7 +627,7 @@ struct beamfs_rs_event {
  * region would allocate indirect blocks without writing their parity,
  * leaving the volume looking protected while it is not.
  */
-#define BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY   (1ULL << 13)
+#define BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY   BIT_ULL(13)
 
 /*
  * How much an indirect block costs to protect, chosen at mkfs time.
@@ -659,7 +690,99 @@ enum beamfs_ind_parity_mode {
  * parity region does it, for the same reason -- a lookup table would
  * be metadata needing its own protection.
  */
-#define BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET      (1ULL << 14)
+#define BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET      BIT_ULL(14)
+
+/*
+ * BEAMFS_FEATURE_INCOMPAT_DIR_RS: directory blocks carry parity, and
+ * their entries are variable length.
+ *
+ * ## Why parity
+ *
+ * Every other structure on this volume is covered. Data blocks carry
+ * sixteen RS codewords, inodes carry CRC32 with RS behind it, indirect
+ * blocks carry their own parity, the superblock and the bitmap are both
+ * encoded. Directory blocks were written with memset and
+ * mark_buffer_dirty and nothing else -- 4096 raw bytes, no checksum, no
+ * correction.
+ *
+ * An upset in a directory block was therefore silent and permanent: a
+ * flipped inode number points a name at the wrong file, a flipped
+ * length walks the parser off the end of an entry, and neither is
+ * detectable let alone correctable. In a filesystem whose reason for
+ * existing is surviving upsets, that was the one hole left in the
+ * chain.
+ *
+ * ## Why variable length in the same change
+ *
+ * A protected directory block has 3824 usable bytes instead of 4096, so
+ * the layout moves either way. Doing both at once costs one format
+ * migration rather than two.
+ *
+ * Entries were a fixed 268 bytes -- twelve of header and 256 for the
+ * name, whatever the name's length. That is fourteen entries per block
+ * and a hard ceiling of 7336 per directory, since a directory reaches
+ * twelve direct blocks plus 512 through one indirect. d_rec_len existed
+ * in the on-disk entry and was written correctly by both mkfs and the
+ * kernel; nothing ever read it, because every walk stepped by
+ * sizeof(struct beamfs_dir_entry).
+ *
+ * With the field finally used, a name of eleven characters occupies 24
+ * bytes: 159 entries per protected block, and a ceiling above 83000.
+ * Eleven times the density, eleven times fewer blocks to read on a
+ * lookup, and eleven times less metadata exposed to upsets for the same
+ * directory -- the resilience argument and the performance argument
+ * point the same way.
+ *
+ * ## Why entries avoid straddling subblocks
+ *
+ * Each of the sixteen subblocks is an independent codeword: one is
+ * correctable, or not, on its own. An entry spanning two of them turns
+ * a single uncorrectable subblock into a parse failure for the entry
+ * after it as well, and from there for the rest of the block.
+ *
+ * So an entry is placed within one subblock whenever it fits. That
+ * costs a few bytes of padding at each boundary -- about 3% -- and
+ * keeps damage where it landed.
+ *
+ * A name of 255 characters, which NAME_MAX allows and xfstests
+ * exercises, needs 268 bytes and cannot fit in 239. Such an entry is
+ * allowed to span, because the alternative is refusing a filename every
+ * other Linux filesystem accepts. The threshold is 227 characters:
+ * below it nothing straddles, above it the entry spans two subblocks
+ * and an uncorrectable one costs both.
+ *
+ * The property is kept where it can be and dropped only where the
+ * format would otherwise have to lie about what it supports.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_DIR_RS            BIT_ULL(15)
+
+/*
+ * A directory entry, on disk, under DIR_RS.
+ *
+ * d_rec_len is the distance to the next entry and includes the header.
+ * The name follows immediately and is not terminated: d_name_len says
+ * how long it is. Entries are aligned so the next one starts on a
+ * four-byte boundary, and a record length of zero ends the subblock.
+ */
+#define BEAMFS_DIRENT_HDR_LEN   12
+#define BEAMFS_DIRENT_ALIGN     4
+#define BEAMFS_DIRENT_MIN_LEN   (BEAMFS_DIRENT_HDR_LEN + BEAMFS_DIRENT_ALIGN)
+
+/* Round a name length up to a whole record. */
+#define BEAMFS_DIRENT_LEN(namelen)                                     \
+	((((BEAMFS_DIRENT_HDR_LEN) + (namelen) +                       \
+	   (BEAMFS_DIRENT_ALIGN) - 1) / (BEAMFS_DIRENT_ALIGN)) *       \
+	 (BEAMFS_DIRENT_ALIGN))
+
+/*
+ * The longest entry that still fits inside one subblock. Anything
+ * longer is placed across a boundary rather than refused.
+ */
+#define BEAMFS_DIRENT_INLINE_MAX  BEAMFS_SUBBLOCK_DATA
+#define BEAMFS_DIRENT_FITS_SUB(len)  ((len) <= BEAMFS_DIRENT_INLINE_MAX)
+
+/* Returned by the placement helpers when a block cannot take an entry. */
+#define BEAMFS_DIRENT_NOSPACE   ((u32)~0U)
 
 /*
  * What the wall clock was worth when the anchor was taken.
@@ -709,7 +832,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID)
 #define BEAMFS_FEAT_INCOMPAT_SUPP  (BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY | \
-				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET)
+				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
+				    BEAMFS_FEATURE_INCOMPAT_DIR_RS)
 
 /*
  * On-disk superblock - block 0

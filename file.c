@@ -408,7 +408,7 @@ static int beamfs_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 	return 0;
 }
 
-const struct iomap_ops beamfs_iomap_ops = {
+static const struct iomap_ops beamfs_iomap_ops = {
 	.iomap_begin = beamfs_iomap_begin,
 	.iomap_end   = beamfs_iomap_end,
 };

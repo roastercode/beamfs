@@ -8,6 +8,7 @@ obj-$(CONFIG_BEAMFS_FS) += beamfs.o
 beamfs-y := super.o      \
             inode.o      \
             dir.o        \
+            dirent.o     \
             file.o       \
             file_inline.o \
             scrub.o      \

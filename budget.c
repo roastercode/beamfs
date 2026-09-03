@@ -129,16 +129,62 @@ void beamfs_budget_record(struct super_block *sb, u64 phys,
 u64 beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-	u64 phys;
+	u64 first, last, phys;
 
 	if (!sbi->s_budget_len)
 		return 0;
 
-	for (phys = max_t(u64, from, sbi->s_data_start);
-	     phys < sbi->s_data_start + sbi->s_nblocks;
-	     phys++) {
-		if (beamfs_budget_read(sb, phys) >= threshold)
-			return phys;
+	first = max_t(u64, from, sbi->s_data_start);
+	last  = sbi->s_data_start + sbi->s_nblocks;
+	phys  = first;
+
+	/*
+	 * One block read per 4096 blocks examined, not one per block.
+	 *
+	 * The region is a flat array of one byte per data block, so a
+	 * single 4096-byte read covers 4096 of them. Calling
+	 * beamfs_budget_read in a loop did sb_bread and brelse for every
+	 * byte: on the 58 GiB volume in the lab that is 15115022 block
+	 * reads to find one worn block, and the sweep asks once every
+	 * hundred milliseconds.
+	 *
+	 * The comment on this function already claimed it read a block at
+	 * a time. It did not. Now it does.
+	 */
+	while (phys < last) {
+		struct buffer_head *bh;
+		u64 region_blk;
+		u32 offset;
+		u32 span;
+		const u8 *p;
+		u32 i;
+
+		if (!budget_slot(sb, phys, &region_blk, &offset))
+			return 0;
+
+		/* Blocks described by the remainder of this region block. */
+		span = min_t(u64, BEAMFS_BLOCK_SIZE - offset, last - phys);
+
+		bh = sb_bread(sb, region_blk);
+		if (!bh) {
+			/*
+			 * Unreadable region block: skip what it covered
+			 * rather than stop. A wear scan that gives up on
+			 * one bad block stops watching everything past it.
+			 */
+			phys += span;
+			continue;
+		}
+
+		p = (const u8 *)bh->b_data + offset;
+		for (i = 0; i < span; i++) {
+			if (p[i] >= threshold) {
+				brelse(bh);
+				return phys + i;
+			}
+		}
+		brelse(bh);
+		phys += span;
 	}
 	return 0;
 }

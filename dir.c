@@ -29,34 +29,43 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 	struct inode            *inode = file_inode(file);
 	struct super_block      *sb    = inode->i_sb;
 	struct buffer_head      *bh;
-	struct beamfs_dir_entry  *de;
+	struct beamfs_dir_entry *de;
+	u8            *payload;
 	unsigned long  block_no;
-	unsigned int   offset;
+	u32            offset;
 	int            block_idx;
-	int            entry_slot;
 	int            start_block;
-	int            start_slot;
+	u32            start_off;
+	int            ret = 0;
 
 	if (ctx->pos == INT_MAX)
 		return 0;
 
-	/* Emit . and .. */
 	if (ctx->pos < 2) {
 		if (!dir_emit_dots(file, ctx))
 			return 0;
 	}
 
 	/*
-	 * Decode resume position. pos == 2 means start from the beginning.
-	 * pos > 2 encodes ((block_idx+1) << 16) | entry_slot from last emit.
+	 * The cookie carries a byte offset now, not a slot number.
+	 *
+	 * Slots existed because every entry was 268 bytes whatever its
+	 * name; with variable-length entries there is no slot to count.
+	 * Sixteen bits is more than the 3824 bytes a block holds, so the
+	 * layout of the cookie is unchanged and telldir/seekdir keep
+	 * working across the format change.
 	 */
 	if (ctx->pos <= 2) {
 		start_block = 0;
-		start_slot  = 0;
+		start_off   = 0;
 	} else {
 		start_block = (int)((ctx->pos >> 16) & 0x7FFF) - 1;
-		start_slot  = (int)(ctx->pos & 0xFFFF);
+		start_off   = (u32)(ctx->pos & 0xFFFF);
 	}
+
+	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!payload)
+		return -ENOMEM;
 
 	for (block_idx = start_block;
 	     block_idx < (int)(BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS);
@@ -64,8 +73,10 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		u64 _bno;
 		int _ret = beamfs_dir_get_block(inode, block_idx, false, &_bno);
 
-		if (_ret)
-			return _ret;
+		if (_ret) {
+			ret = _ret;
+			goto out;
+		}
 		block_no = (unsigned long)_bno;
 		if (!block_no)
 			break;
@@ -74,42 +85,39 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		if (!bh)
 			continue;
 
-		entry_slot = (block_idx == start_block) ? start_slot : 0;
-		offset = entry_slot * sizeof(struct beamfs_dir_entry);
+		/*
+		 * Decode before reading anything. A flipped inode number
+		 * points a name at the wrong file and a flipped length
+		 * walks the parser into the next entry; both were silent
+		 * before this block carried parity.
+		 */
+		_ret = beamfs_dirent_decode(sb, bh, payload);
+		brelse(bh);
+		if (_ret < 0) {
+			pr_err_ratelimited("beamfs: directory block %lu uncorrectable\n",
+					   block_no);
+			ret = _ret;
+			goto out;
+		}
 
-		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
-			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
+		offset = (block_idx == start_block) ? start_off : 0;
 
-			/*
-			 * Skip free slots (d_ino == 0): never-used trailing
-			 * slots and slots freed by beamfs_del_dirent. The
-			 * scan must traverse the entire block, not stop at
-			 * the first hole, because live entries may follow
-			 * a deleted entry within the same block.
-			 */
+		while (offset < BEAMFS_DATA_INLINE_BYTES) {
+			u32 next;
+
+			de = (struct beamfs_dir_entry *)(payload + offset);
+			if (!beamfs_dirent_valid(de, offset))
+				break;
+
 			if (de->d_ino &&
 			    !(de->d_name_len == 1 && de->d_name[0] == '.') &&
 			    !(de->d_name_len == 2 && de->d_name[0] == '.' &&
 			      de->d_name[1] == '.')) {
 				u8 dt;
 
-				/*
-				 * Update ctx->pos before dir_emit so the VFS
-				 * has a unique seek offset for each entry.
-				 * Encode as ((block_idx+1) << 16) | entry_slot.
-				 */
 				ctx->pos = ((loff_t)(block_idx + 1) << 16)
-					   | entry_slot;
+					   | offset;
 
-				/*
-				 * Translation layer: legacy beamfs
-				 * convention used d_file_type=1 for REG
-				 * and d_file_type=2 for DIR (predates
-				 * Linux DT_* alignment). New writes use
-				 * DT_REG=8 / DT_DIR=4 directly. Both
-				 * forms remain readable by userspace
-				 * through this mapping.
-				 */
 				switch (de->d_file_type) {
 				case 1:
 					dt = DT_REG;
@@ -123,50 +131,58 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 				}
 
 				if (!dir_emit(ctx, de->d_name, de->d_name_len,
-					      le64_to_cpu(de->d_ino),
-					      dt)) {
-					brelse(bh);
-					return 0;
-				}
+					      le64_to_cpu(de->d_ino), dt))
+					goto out;
 			}
 
-			entry_slot++;
-			offset += sizeof(struct beamfs_dir_entry);
+			next = beamfs_dirent_next(de, offset);
+			if (next == BEAMFS_DIRENT_NOSPACE)
+				break;
+			offset = next;
 		}
-		brelse(bh);
 
-		/* Reset start_slot for subsequent blocks */
 		start_block = block_idx + 1;
-		start_slot  = 0;
+		start_off   = 0;
 	}
 
 	ctx->pos = INT_MAX;
-	return 0;
+out:
+	kfree(payload);
+	return ret;
 }
 
 /*
  * beamfs_lookup - find dentry in directory
  */
 struct dentry *beamfs_lookup(struct inode *dir,
-			    struct dentry *dentry,
-			    unsigned int flags)
+			     struct dentry *dentry,
+			     unsigned int flags)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
-	unsigned int  offset;
-	unsigned long block_no;
-	unsigned int i;
+	struct beamfs_dir_entry *de;
+	struct inode            *inode = NULL;
+	u8            *payload;
+	unsigned long  block_no;
+	u32            offset;
+	unsigned int   i;
+	int            ret = 0;
 
 	if (dentry->d_name.len > BEAMFS_MAX_FILENAME)
 		return ERR_PTR(-ENAMETOOLONG);
+
+	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!payload)
+		return ERR_PTR(-ENOMEM);
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
 		u64 _bno;
 		int _ret = beamfs_dir_get_block(dir, i, false, &_bno);
 
-		if (_ret)
-			return ERR_PTR(_ret);
+		if (_ret) {
+			ret = _ret;
+			goto out;
+		}
 		block_no = (unsigned long)_bno;
 		if (!block_no)
 			break;
@@ -175,31 +191,44 @@ struct dentry *beamfs_lookup(struct inode *dir,
 		if (!bh)
 			continue;
 
+		_ret = beamfs_dirent_decode(sb, bh, payload);
+		brelse(bh);
+		if (_ret < 0) {
+			ret = _ret;
+			goto out;
+		}
+
 		offset = 0;
-		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
-			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
-			/*
-			 * Skip free slots (d_ino == 0). lookup must traverse
-			 * the entire block, not stop at the first hole, because
-			 * the target entry may follow a deleted entry within
-			 * the same block.
-			 */
+		while (offset < BEAMFS_DATA_INLINE_BYTES) {
+			u32 next;
+
+			de = (struct beamfs_dir_entry *)(payload + offset);
+			if (!beamfs_dirent_valid(de, offset))
+				break;
+
 			if (de->d_ino &&
 			    de->d_name_len == dentry->d_name.len &&
 			    !memcmp(de->d_name, dentry->d_name.name,
-				    dentry->d_name.len)) {
-				u64 ino = le64_to_cpu(de->d_ino);
-				struct inode *inode;
-
-				brelse(bh);
-				inode = beamfs_iget(sb, ino);
-				return d_splice_alias(inode, dentry);
+				    de->d_name_len)) {
+				inode = beamfs_iget(sb,
+					(unsigned long)le64_to_cpu(de->d_ino));
+				goto out;
 			}
-			offset += sizeof(struct beamfs_dir_entry);
+
+			next = beamfs_dirent_next(de, offset);
+			if (next == BEAMFS_DIRENT_NOSPACE)
+				break;
+			offset = next;
 		}
-		brelse(bh);
 	}
-	return d_splice_alias(NULL, dentry);
+
+out:
+	kfree(payload);
+	if (ret)
+		return ERR_PTR(ret);
+	if (IS_ERR(inode))
+		return ERR_CAST(inode);
+	return d_splice_alias(inode, dentry);
 }
 
 const struct file_operations beamfs_dir_operations = {

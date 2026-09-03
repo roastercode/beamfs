@@ -57,8 +57,15 @@ int beamfs_write_inode_raw(struct inode *inode)
 	raw->i_dindirect = fi->i_dindirect;
 	raw->i_tindirect = fi->i_tindirect;
 
-	raw->i_crc32 = beamfs_crc32(raw,
-				    offsetof(struct beamfs_inode, i_crc32));
+	/*
+	 * cpu_to_le32, because i_crc32 is __le32 and beamfs_crc32 returns
+	 * host order. Assigning one to the other wrote the checksum in
+	 * whatever order the CPU used -- invisible on the little-endian
+	 * machines this has run on, and a volume no big-endian host could
+	 * mount. sparse called it: "incorrect type in assignment".
+	 */
+	raw->i_crc32 = cpu_to_le32(beamfs_crc32(raw,
+				   offsetof(struct beamfs_inode, i_crc32)));
 
 	/*
 	 * Compute RS parity over the first BEAMFS_INODE_RS_DATA bytes
@@ -147,8 +154,22 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 			beamfs_free_block(sb, block_no, dir);
 			return -EIO;
 		}
+		/*
+		 * A new directory block is one free record covering the
+		 * whole payload, then parity over it.
+		 *
+		 * Zeroing alone used to be enough because every slot was a
+		 * fixed 268 bytes and an all-zero slot read as free. With
+		 * variable-length records the walk needs a d_rec_len to
+		 * step by, and a block of zeros would stop it at the first
+		 * entry -- so the block has to say, once, that all 3824
+		 * bytes are available.
+		 */
 		lock_buffer(dbh);
 		memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+		((struct beamfs_dir_entry *)dbh->b_data)->d_rec_len =
+			cpu_to_le16(BEAMFS_DATA_INLINE_BYTES);
+		beamfs_dirent_encode(dbh);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
 		mark_buffer_dirty(dbh);
@@ -215,8 +236,12 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		brelse(ibh);
 		return -EIO;
 	}
+	/* Same as the direct case: one free record, then parity. */
 	lock_buffer(dbh);
 	memset(dbh->b_data, 0, BEAMFS_BLOCK_SIZE);
+	((struct beamfs_dir_entry *)dbh->b_data)->d_rec_len =
+		cpu_to_le16(BEAMFS_DATA_INLINE_BYTES);
+	beamfs_dirent_encode(dbh);
 	set_buffer_uptodate(dbh);
 	unlock_buffer(dbh);
 	mark_buffer_dirty(dbh);
@@ -236,96 +261,129 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 /* ------------------------------------------------------------------ */
 
 static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
-			    u64 ino, unsigned int file_type)
+			     unsigned long ino, u8 file_type)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
-	unsigned int             offset;
-	u64                      block_no;
-	unsigned int             i;
+	struct beamfs_dir_entry *de;
+	u8      *payload;
+	u64      block_no;
+	u32      offset, place;
+	u16      want;
+	unsigned int i;
+	int      ret = -ENOSPC;
 
-	/*
-	 * Scan all allocated dir blocks (direct + indirect) for a free
-	 * slot. beamfs_dir_get_block(alloc=false) returns 0/HOLE when
-	 * no more allocated blocks; we fall through to alloc one.
-	 */
+	if (name->len > BEAMFS_MAX_FILENAME)
+		return -ENAMETOOLONG;
+
+	want = (u16)BEAMFS_DIRENT_LEN(name->len);
+
+	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!payload)
+		return -ENOMEM;
+
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		int ret;
+		int rc = beamfs_dir_get_block(dir, i, true, &block_no);
 
-		ret = beamfs_dir_get_block(dir, i, false, &block_no);
-		if (ret)
-			return ret;
+		if (rc) {
+			ret = rc;
+			goto out;
+		}
 		if (!block_no)
 			break;
 
 		bh = sb_bread(sb, block_no);
-		if (!bh)
-			return -EIO;
+		if (!bh) {
+			ret = -EIO;
+			goto out;
+		}
 
+		rc = beamfs_dirent_decode(sb, bh, payload);
+		if (rc < 0) {
+			brelse(bh);
+			ret = rc;
+			goto out;
+		}
+
+		/*
+		 * Look for a record with room to spare.
+		 *
+		 * A deleted entry leaves its record in place with d_ino
+		 * zeroed, so the space it held is reusable without
+		 * compacting the block. An entry in use can also give up
+		 * its tail if its record is longer than its name needs --
+		 * which is how ext2 has done it since 1993, and what keeps
+		 * a directory from fragmenting as names come and go.
+		 */
 		offset = 0;
-		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
-			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
+		while (offset < BEAMFS_DATA_INLINE_BYTES) {
+			u16 rec, used;
+			u32 next;
 
-			/*
-			 * Free slot: d_ino == 0. Scan whole block past holes
-			 * to avoid early ENOSPC due to deleted-entry gaps.
-			 */
-			if (!de->d_ino) {
-				de->d_ino       = cpu_to_le64(ino);
-				de->d_name_len  = name->len;
-				de->d_file_type = file_type;
-				de->d_rec_len   = cpu_to_le16(
-					sizeof(struct beamfs_dir_entry));
-				memcpy(de->d_name, name->name, name->len);
-				de->d_name[name->len] = '\0';
-				mark_buffer_dirty(bh);
-				brelse(bh);
-				inode_set_mtime_to_ts(dir,
-					current_time(dir));
-				inode_set_ctime_to_ts(dir, current_time(dir));
-				mark_inode_dirty(dir);
-				return 0;
+			de = (struct beamfs_dir_entry *)(payload + offset);
+			if (!beamfs_dirent_valid(de, offset))
+				break;
+
+			rec  = le16_to_cpu(de->d_rec_len);
+			used = de->d_ino ?
+			       (u16)BEAMFS_DIRENT_LEN(de->d_name_len) : 0;
+
+			if (!de->d_ino && rec >= want) {
+				/* Free record, large enough as it stands. */
+				place = offset;
+				goto place_it;
 			}
-			offset += sizeof(struct beamfs_dir_entry);
+			if (de->d_ino && rec - used >= want &&
+			    beamfs_dirent_place(offset + used, want) ==
+			    offset + used) {
+				/* Split the tail off a live record. */
+				de->d_rec_len = cpu_to_le16(used);
+				place = offset + used;
+				goto place_it;
+			}
+
+			next = beamfs_dirent_next(de, offset);
+			if (next == BEAMFS_DIRENT_NOSPACE)
+				break;
+			offset = next;
 		}
 		brelse(bh);
+		continue;
+
+place_it:
+		de = (struct beamfs_dir_entry *)(payload + place);
+		{
+			u16 rec = le16_to_cpu(de->d_rec_len);
+
+			/*
+			 * A record taken from a free slot keeps its old
+			 * length so the space is not lost; one split off a
+			 * live entry runs to the end of what was there.
+			 */
+			if (rec < want)
+				rec = want;
+			memset(de, 0, BEAMFS_DIRENT_HDR_LEN);
+			de->d_ino       = cpu_to_le64(ino);
+			de->d_rec_len   = cpu_to_le16(rec);
+			de->d_name_len  = (u8)name->len;
+			de->d_file_type = file_type;
+			memcpy(de->d_name, name->name, name->len);
+		}
+
+		lock_buffer(bh);
+		memcpy(bh->b_data, payload, BEAMFS_DATA_INLINE_BYTES);
+		beamfs_dirent_encode(bh);
+		set_buffer_uptodate(bh);
+		unlock_buffer(bh);
+		mark_buffer_dirty(bh);
+		brelse(bh);
+		ret = 0;
+		goto out;
 	}
 
-	/* All allocated blocks full -- allocate a new one. */
-	if (i >= BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS)
-		return -ENOSPC;
-
-	{
-		int ret = beamfs_dir_get_block(dir, i, true, &block_no);
-
-		if (ret)
-			return ret;
-		if (!block_no)
-			return -ENOSPC;
-	}
-
-	bh = sb_bread(sb, block_no);
-	if (!bh)
-		return -EIO;
-
-	de = (struct beamfs_dir_entry *)bh->b_data;
-	de->d_ino       = cpu_to_le64(ino);
-	de->d_name_len  = name->len;
-	de->d_file_type = file_type;
-	de->d_rec_len   = cpu_to_le16(sizeof(struct beamfs_dir_entry));
-	memcpy(de->d_name, name->name, name->len);
-	de->d_name[name->len] = '\0';
-
-	mark_buffer_dirty(bh);
-	brelse(bh);
-
-	inode_set_mtime_to_ts(dir, current_time(dir));
-
-	inode_set_ctime_to_ts(dir, current_time(dir));
-	mark_inode_dirty(dir);
-
-	return 0;
+out:
+	kfree(payload);
+	return ret;
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,53 +393,101 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 {
 	struct super_block      *sb = dir->i_sb;
-	struct beamfs_dir_entry  *de;
 	struct buffer_head      *bh;
-	unsigned int             offset;
-	u64                      block_no;
-	unsigned int             i;
+	struct beamfs_dir_entry *de, *prev;
+	u8      *payload;
+	u64      block_no;
+	u32      offset, prev_off;
+	unsigned int i;
+	int      ret = -ENOENT;
+
+	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!payload)
+		return -ENOMEM;
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		int ret = beamfs_dir_get_block(dir, i, false, &block_no);
+		int rc = beamfs_dir_get_block(dir, i, false, &block_no);
 
-		if (ret)
-			return ret;
+		if (rc) {
+			ret = rc;
+			goto out;
+		}
 		if (!block_no)
 			break;
 
 		bh = sb_bread(sb, block_no);
 		if (!bh)
-			return -EIO;
+			continue;
+
+		rc = beamfs_dirent_decode(sb, bh, payload);
+		if (rc < 0) {
+			brelse(bh);
+			ret = rc;
+			goto out;
+		}
 
 		offset = 0;
-		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
-			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
+		prev_off = BEAMFS_DIRENT_NOSPACE;
+		while (offset < BEAMFS_DATA_INLINE_BYTES) {
+			u32 next;
 
-			/*
-			 * Match target by d_ino != 0 + name compare. Must scan
-			 * the whole block: a previous unlink may have left a
-			 * hole (d_ino == 0) before our target.
-			 */
+			de = (struct beamfs_dir_entry *)(payload + offset);
+			if (!beamfs_dirent_valid(de, offset))
+				break;
+
 			if (de->d_ino &&
 			    de->d_name_len == name->len &&
 			    !memcmp(de->d_name, name->name, name->len)) {
-				/* Zero out the entry (mark as free) */
-				memset(de, 0, sizeof(*de));
+				/*
+				 * Fold the record into its predecessor when
+				 * there is one in the same subblock, so the
+				 * space comes back as a single free record
+				 * rather than a hole nothing can use.
+				 * Otherwise zero d_ino and leave the record,
+				 * which add_dirent will find.
+				 */
+				if (prev_off != BEAMFS_DIRENT_NOSPACE) {
+					u16 plen, dlen;
+
+					prev = (struct beamfs_dir_entry *)
+						(payload + prev_off);
+					plen = le16_to_cpu(prev->d_rec_len);
+					dlen = le16_to_cpu(de->d_rec_len);
+
+					if (prev_off / BEAMFS_SUBBLOCK_DATA ==
+					    offset / BEAMFS_SUBBLOCK_DATA)
+						prev->d_rec_len =
+						    cpu_to_le16(plen + dlen);
+					else
+						de->d_ino = 0;
+				} else {
+					de->d_ino = 0;
+				}
+
+				lock_buffer(bh);
+				memcpy(bh->b_data, payload,
+				       BEAMFS_DATA_INLINE_BYTES);
+				beamfs_dirent_encode(bh);
+				set_buffer_uptodate(bh);
+				unlock_buffer(bh);
 				mark_buffer_dirty(bh);
 				brelse(bh);
-				inode_set_mtime_to_ts(dir,
-					current_time(dir));
-				inode_set_ctime_to_ts(dir, current_time(dir));
-				mark_inode_dirty(dir);
-				return 0;
+				ret = 0;
+				goto out;
 			}
 
-			offset += sizeof(struct beamfs_dir_entry);
+			next = beamfs_dirent_next(de, offset);
+			if (next == BEAMFS_DIRENT_NOSPACE)
+				break;
+			prev_off = offset;
+			offset = next;
 		}
 		brelse(bh);
 	}
 
-	return -ENOENT;
+out:
+	kfree(payload);
+	return ret;
 }
 
 /* ------------------------------------------------------------------ */
@@ -582,41 +688,66 @@ static int beamfs_unlink(struct inode *dir, struct dentry *dentry)
  */
 static int beamfs_dir_is_empty(struct inode *inode)
 {
-	struct super_block *sb = inode->i_sb;
-	struct buffer_head *bh;
+	struct super_block      *sb = inode->i_sb;
+	struct buffer_head      *bh;
 	struct beamfs_dir_entry *de;
-	u64 block_no;
-	unsigned int offset, i;
-	int ret;
+	u8      *payload;
+	u64      block_no;
+	u32      offset;
+	unsigned int i;
+	int      ret = 1;
+
+	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	if (!payload)
+		return -ENOMEM;
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		ret = beamfs_dir_get_block(inode, i, false, &block_no);
-		if (ret)
-			return ret;
+		int rc = beamfs_dir_get_block(inode, i, false, &block_no);
 
+		if (rc) {
+			ret = rc;
+			goto out;
+		}
 		if (!block_no)
 			break;
 
 		bh = sb_bread(sb, block_no);
 		if (!bh)
-			return -EIO;
+			continue;
+
+		rc = beamfs_dirent_decode(sb, bh, payload);
+		brelse(bh);
+		if (rc < 0) {
+			ret = rc;
+			goto out;
+		}
 
 		offset = 0;
-		while (offset + sizeof(*de) <= BEAMFS_BLOCK_SIZE) {
-			de = (struct beamfs_dir_entry *)(bh->b_data + offset);
+		while (offset < BEAMFS_DATA_INLINE_BYTES) {
+			u32 next;
+
+			de = (struct beamfs_dir_entry *)(payload + offset);
+			if (!beamfs_dirent_valid(de, offset))
+				break;
 
 			if (de->d_ino &&
 			    !(de->d_name_len == 1 && de->d_name[0] == '.') &&
 			    !(de->d_name_len == 2 && de->d_name[0] == '.' &&
 			      de->d_name[1] == '.')) {
-				brelse(bh);
-				return -ENOTEMPTY;
+				ret = 0;
+				goto out;
 			}
-			offset += sizeof(struct beamfs_dir_entry);
+
+			next = beamfs_dirent_next(de, offset);
+			if (next == BEAMFS_DIRENT_NOSPACE)
+				break;
+			offset = next;
 		}
-		brelse(bh);
 	}
-	return 0;
+
+out:
+	kfree(payload);
+	return ret;
 }
 
 static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)

@@ -431,6 +431,14 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+/* dirent.c -- variable-length directory entries, and parity over them */
+u32  beamfs_dirent_place(u32 off, u16 len);
+u32  beamfs_dirent_next(const struct beamfs_dir_entry *de, u32 off);
+bool beamfs_dirent_valid(const struct beamfs_dir_entry *de, u32 off);
+void beamfs_dirent_encode(struct buffer_head *bh);
+int  beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
+			  u8 *dst);
 int  beamfs_inline_decode_symlink(struct super_block *sb,
 				  struct buffer_head *bh, u64 phys,
 				  struct inode *inode, u8 *dst, u32 len);
