@@ -282,15 +282,35 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 	if (!payload)
 		return -ENOMEM;
 
+	/*
+	 * Search first, allocate only when nothing has room.
+	 *
+	 * Asking dir_get_block to allocate on every pass gave the
+	 * directory a fresh block per attempt: generic/006 ran out of
+	 * space after 1047 files where it wanted 4096, and the blocks it
+	 * burned were never linked to anything, so entries written into
+	 * them were invisible to the next walk. That is where the stale
+	 * handles and the missing renames came from too.
+	 */
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS; i++) {
-		int rc = beamfs_dir_get_block(dir, i, true, &block_no);
+		int rc = beamfs_dir_get_block(dir, i, false, &block_no);
 
 		if (rc) {
 			ret = rc;
 			goto out;
 		}
-		if (!block_no)
-			break;
+		if (!block_no) {
+			/* End of what exists: take one more block. */
+			rc = beamfs_dir_get_block(dir, i, true, &block_no);
+			if (rc) {
+				ret = rc;
+				goto out;
+			}
+			if (!block_no) {
+				ret = -ENOSPC;
+				goto out;
+			}
+		}
 
 		bh = sb_bread(sb, block_no);
 		if (!bh) {
@@ -354,17 +374,40 @@ place_it:
 		de = (struct beamfs_dir_entry *)(payload + place);
 		{
 			u16 rec = le16_to_cpu(de->d_rec_len);
+			u16 keep = want;
 
 			/*
-			 * A record taken from a free slot keeps its old
-			 * length so the space is not lost; one split off a
-			 * live entry runs to the end of what was there.
+			 * Take what the name needs and leave the rest as a
+			 * free record.
+			 *
+			 * Keeping the whole thing gave a 24-byte name the
+			 * 3800 bytes the free record happened to span: the
+			 * block held one more entry and no others, and the
+			 * walk stepped 3800 bytes straight past the end. So
+			 * generic/006 stopped at 1047 files of 4096, and
+			 * anything written afterwards was invisible to
+			 * lookup while add_dirent still found the space --
+			 * "already present", and rename's del_dirent
+			 * failing after its add.
+			 *
+			 * The remainder becomes a free record only when it
+			 * can hold a header; below that it stays as slack
+			 * on this one, which is what ext2 does.
 			 */
-			if (rec < want)
-				rec = want;
+			if (rec >= (u16)(want + BEAMFS_DIRENT_MIN_LEN)) {
+				struct beamfs_dir_entry *rest =
+					(struct beamfs_dir_entry *)
+					(payload + place + want);
+
+				memset(rest, 0, BEAMFS_DIRENT_HDR_LEN);
+				rest->d_rec_len = cpu_to_le16(rec - want);
+			} else {
+				keep = rec > want ? rec : want;
+			}
+
 			memset(de, 0, BEAMFS_DIRENT_HDR_LEN);
 			de->d_ino       = cpu_to_le64(ino);
-			de->d_rec_len   = cpu_to_le16(rec);
+			de->d_rec_len   = cpu_to_le16(keep);
 			de->d_name_len  = (u8)name->len;
 			de->d_file_type = file_type;
 			memcpy(de->d_name, name->name, name->len);
@@ -377,6 +420,16 @@ place_it:
 		unlock_buffer(bh);
 		mark_buffer_dirty(bh);
 		brelse(bh);
+
+		/*
+		 * The directory changed, so its times did too. Dropping
+		 * these in the rewrite made generic/003 report that mtime
+		 * and ctime stood still across a file creation.
+		 */
+		inode_set_mtime_to_ts(dir, current_time(dir));
+		inode_set_ctime_to_ts(dir, current_time(dir));
+		mark_inode_dirty(dir);
+
 		ret = 0;
 		goto out;
 	}
@@ -446,22 +499,38 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 				 * Otherwise zero d_ino and leave the record,
 				 * which add_dirent will find.
 				 */
-				if (prev_off != BEAMFS_DIRENT_NOSPACE) {
-					u16 plen, dlen;
+				/*
+				 * Merge into the predecessor only when the
+				 * predecessor is itself free.
+				 *
+				 * Growing a live entry's d_rec_len to cover
+				 * the space just released makes the walk
+				 * step over that space, so anything written
+				 * there afterwards is invisible: rename put
+				 * the new name in the hole, del_dirent could
+				 * not find the old one, and the directory
+				 * ended up with both -- "already present",
+				 * then drop_nlink below zero when rm caught
+				 * up. ext2 merges only into free records for
+				 * exactly this reason.
+				 *
+				 * Zeroing d_ino and leaving the record where
+				 * it is costs nothing: add_dirent reuses a
+				 * free record and splits what it does not
+				 * need.
+				 */
+				de->d_ino = 0;
 
+				if (prev_off != BEAMFS_DIRENT_NOSPACE) {
 					prev = (struct beamfs_dir_entry *)
 						(payload + prev_off);
-					plen = le16_to_cpu(prev->d_rec_len);
-					dlen = le16_to_cpu(de->d_rec_len);
 
-					if (prev_off / BEAMFS_SUBBLOCK_DATA ==
+					if (!prev->d_ino &&
+					    prev_off / BEAMFS_SUBBLOCK_DATA ==
 					    offset / BEAMFS_SUBBLOCK_DATA)
-						prev->d_rec_len =
-						    cpu_to_le16(plen + dlen);
-					else
-						de->d_ino = 0;
-				} else {
-					de->d_ino = 0;
+						prev->d_rec_len = cpu_to_le16(
+						    le16_to_cpu(prev->d_rec_len) +
+						    le16_to_cpu(de->d_rec_len));
 				}
 
 				lock_buffer(bh);
@@ -472,6 +541,16 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 				unlock_buffer(bh);
 				mark_buffer_dirty(bh);
 				brelse(bh);
+
+				/*
+				 * Removing an entry changes the directory as
+				 * much as adding one does. Both lost these in
+				 * the rewrite for variable-length records.
+				 */
+				inode_set_mtime_to_ts(dir, current_time(dir));
+				inode_set_ctime_to_ts(dir, current_time(dir));
+				mark_inode_dirty(dir);
+
 				ret = 0;
 				goto out;
 			}
