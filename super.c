@@ -1017,7 +1017,13 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_fs_info  = sbi;
 	sb->s_magic    = BEAMFS_MAGIC;
 	sb->s_op       = &beamfs_super_ops;
-	sb->s_maxbytes = MAX_LFS_FILESIZE;
+	/*
+	 * What the indirection can actually address, not what the type
+	 * could hold. See BEAMFS_MAX_FILE_SIZE: overstating this makes
+	 * the VFS accept sizes the filesystem cannot reach and defers the
+	 * failure to a read that has no good way to explain itself.
+	 */
+	sb->s_maxbytes = (loff_t)BEAMFS_MAX_FILE_SIZE;
 
 	/* Read root inode (inode 1) */
 	root_inode = beamfs_iget(sb, 1);

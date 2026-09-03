@@ -330,6 +330,24 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
 #define BEAMFS_MAX_IBLOCK_TINDIRECT  (BEAMFS_MAX_IBLOCK_DINDIRECT + (u64)BEAMFS_TINDIRECT_PTRS)
 
 /*
+ * The largest file the indirection can address, in bytes.
+ *
+ * Derived rather than stated, so it follows the geometry instead of
+ * having to be remembered when the geometry changes. Roughly 512 GiB at
+ * the current shape: twelve direct blocks, then 512 pointers per level
+ * over three levels, 3824 usable bytes each.
+ *
+ * s_maxbytes has to be this and not MAX_LFS_FILESIZE. Claiming 2^63
+ * meant the VFS accepted a truncate to eight exabytes and only found
+ * out at the read, which came back EIO because the logical block was
+ * past the tree -- generic/466 reports it as "Discrepancy @ blocksize
+ * 4096". A filesystem that overstates its reach turns a clean EFBIG at
+ * the point of asking into an I/O error somewhere later.
+ */
+#define BEAMFS_MAX_FILE_SIZE \
+	(BEAMFS_MAX_IBLOCK_TINDIRECT * (u64)BEAMFS_DATA_INLINE_BYTES)
+
+/*
  * Electromagnetic Resilience Journal entry -- 40 bytes (v4 format).
  *
  * Records each RS FEC correction event persistently in the superblock.
