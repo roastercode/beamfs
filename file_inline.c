@@ -2034,6 +2034,30 @@ struct beamfs_inline_wb_batch {
 };
 
 /*
+ * What a submitted batch has to give back.
+ *
+ * The buffers are carried explicitly rather than recovered from the
+ * bio's folios at completion. folio_buffers() returns the first
+ * buffer_head attached to a page, which is the right one only while
+ * there is exactly one buffer per folio. That held on the rootfs when
+ * it was measured -- order 0, 4096 bytes, one buffer -- but
+ * mapping_set_folio_min_order sets a floor and not a ceiling, and under
+ * memory pressure the block device cache hands back larger folios. The
+ * completion then unlocked some other block's buffer and left ours
+ * locked for good: the flusher sat in __lock_buffer for thirty-one
+ * minutes with no writes at all and PSI at 85%, every fsstress behind
+ * it waiting in sync_inodes_sb, and merged and io_ms identical across
+ * consecutive samples.
+ *
+ * Thirty-two pointers, allocated with the bio and freed by the
+ * completion. No inference about what the page cache decided to do.
+ */
+struct beamfs_inline_wb_done {
+	unsigned int        n;
+	struct buffer_head *bh[BEAMFS_WB_BATCH_BLOCKS];
+};
+
+/*
  * Completion for a grouped request.
  *
  * The bio carries block-device folios with one buffer_head each --
@@ -2045,14 +2069,13 @@ struct beamfs_inline_wb_batch {
  */
 static void beamfs_inline_wb_batch_end_io(struct bio *bio)
 {
-	struct folio_iter fi;
+	struct beamfs_inline_wb_done *d = bio->bi_private;
 	int err = blk_status_to_errno(bio->bi_status);
+	unsigned int i;
 
-	bio_for_each_folio_all(fi, bio) {
-		struct buffer_head *bh = folio_buffers(fi.folio);
+	for (i = 0; i < d->n; i++) {
+		struct buffer_head *bh = d->bh[i];
 
-		if (!bh)
-			continue;
 		if (err)
 			clear_buffer_uptodate(bh);
 		else
@@ -2060,6 +2083,7 @@ static void beamfs_inline_wb_batch_end_io(struct bio *bio)
 		unlock_buffer(bh);
 		put_bh(bh);
 	}
+	kfree(d);
 	bio_put(bio);
 }
 
@@ -2090,6 +2114,7 @@ static int beamfs_inline_wb_batch_add(struct beamfs_inline_wb_batch *wbb,
 {
 	sector_t sector = (sector_t)bh->b_blocknr *
 			  (bh->b_size >> SECTOR_SHIFT);
+	struct beamfs_inline_wb_done *d;
 
 	if (wbb->bio &&
 	    (wbb->blocks >= BEAMFS_WB_BATCH_BLOCKS ||
@@ -2098,21 +2123,30 @@ static int beamfs_inline_wb_batch_add(struct beamfs_inline_wb_batch *wbb,
 		beamfs_inline_wb_batch_submit(wbb);
 
 	if (!wbb->bio) {
+		d = kzalloc(sizeof(*d), GFP_NOFS);
+		if (!d)
+			return -ENOMEM;
+
 		wbb->bio = bio_alloc(bh->b_bdev, BIO_MAX_VECS,
 				     REQ_OP_WRITE | wbb->sync, GFP_NOFS);
-		if (!wbb->bio)
+		if (!wbb->bio) {
+			kfree(d);
 			return -ENOMEM;
+		}
 		wbb->bio->bi_iter.bi_sector = sector;
 		wbb->bio->bi_end_io = beamfs_inline_wb_batch_end_io;
+		wbb->bio->bi_private = d;
 		wbb->bio->bi_write_hint = wbb->inode->i_write_hint;
 	}
 
 	if (!bio_add_folio(wbb->bio, bh->b_folio, bh->b_size,
 			   bh_offset(bh))) {
-		/* Full. Send it and start again in a fresh one. */
 		beamfs_inline_wb_batch_submit(wbb);
 		return beamfs_inline_wb_batch_add(wbb, bh, pos);
 	}
+
+	d = wbb->bio->bi_private;
+	d->bh[d->n++] = bh;
 
 	wbb->blocks++;
 	wbb->next_sector = sector + (bh->b_size >> SECTOR_SHIFT);
