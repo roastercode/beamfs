@@ -313,8 +313,27 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	}
 
 	if (nerr < 0) {
-		pr_err_ratelimited("beamfs: RS block uncorrectable (len=%zu)\n",
-				   len);
+		/*
+		 * Say who asked.
+		 *
+		 * Nine call sites reach this decoder -- the bitmap at
+		 * mount, a directory block, file data, an indirect block,
+		 * an inode, the sweep, the superblock, the bench -- and the
+		 * message named none of them. Two uncorrectable blocks in a
+		 * three-hundred-second test told us nothing: from the sweep
+		 * reading a block that was never written it is harmless,
+		 * from a read of file data it is data loss.
+		 *
+		 * Level 1 and not 0: beamfs_rs_decode_region sits between
+		 * this and every real caller, so level 0 would name it
+		 * every time and say nothing.
+		 *
+		 * %pS on the return address costs nothing here, on a path
+		 * that is already rate-limited and already failing.
+		 */
+		pr_err_ratelimited("beamfs: RS uncorrectable (len=%zu) from %pS\n",
+				   len,
+				   __builtin_return_address(1));
 		return -EBADMSG;
 	}
 
