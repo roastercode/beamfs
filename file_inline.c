@@ -2123,7 +2123,7 @@ static int beamfs_inline_wb_batch_add(struct beamfs_inline_wb_batch *wbb,
 		beamfs_inline_wb_batch_submit(wbb);
 
 	if (!wbb->bio) {
-		d = kzalloc(sizeof(*d), GFP_NOFS);
+		d = kzalloc_obj(*d, GFP_NOFS);
 		if (!d)
 			return -ENOMEM;
 
