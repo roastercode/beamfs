@@ -1,0 +1,5 @@
+test: generic/024
+outcome: PASS
+seconds: 36
+node: master
+commit: 96d4b74

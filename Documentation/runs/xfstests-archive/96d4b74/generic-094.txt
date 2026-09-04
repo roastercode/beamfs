@@ -1,0 +1,6 @@
+test: generic/094
+outcome: NOTRUN
+seconds: 24
+node: master
+commit: 96d4b74
+reason: O_DIRECT is not supported

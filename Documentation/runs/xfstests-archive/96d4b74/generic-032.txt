@@ -1,0 +1,6 @@
+test: generic/032
+outcome: NOTRUN
+seconds: 23
+node: master
+commit: 96d4b74
+reason: xfs_io falloc failed (old kernel/wrong fs?)

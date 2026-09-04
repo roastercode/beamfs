@@ -1,0 +1,6 @@
+test: generic/047
+outcome: NOTRUN
+seconds: 23
+node: compute02
+commit: 96d4b74
+reason: beamfs does not support shutdown

@@ -1,0 +1,6 @@
+test: generic/103
+outcome: NOTRUN
+seconds: 21
+node: compute01
+commit: 96d4b74
+reason: attr namespace user not supported by this filesystem type: b

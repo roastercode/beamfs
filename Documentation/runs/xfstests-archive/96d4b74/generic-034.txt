@@ -1,0 +1,6 @@
+test: generic/034
+outcome: NOTRUN
+seconds: 26
+node: compute02
+commit: 96d4b74
+reason: This test requires dm flakey support

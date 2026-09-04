@@ -1,0 +1,5 @@
+test: generic/006
+outcome: PASS
+seconds: 209
+node: compute02
+commit: 96d4b74

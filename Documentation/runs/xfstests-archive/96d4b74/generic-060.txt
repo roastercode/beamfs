@@ -1,0 +1,6 @@
+test: generic/060
+outcome: NOTRUN
+seconds: 22
+node: compute02
+commit: 96d4b74
+reason: xfs_io fpunch failed (old kernel/wrong fs?)

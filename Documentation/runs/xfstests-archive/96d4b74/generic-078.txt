@@ -1,0 +1,6 @@
+test: generic/078
+outcome: NOTRUN
+seconds: 26
+node: master
+commit: 96d4b74
+reason: kernel doesn't support renameat2 syscall

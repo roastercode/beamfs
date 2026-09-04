@@ -1,0 +1,48 @@
+test: generic/015
+outcome: FAIL
+seconds: 1213
+node: compute03
+commit: 96d4b74
+
+--- log ---
+=== check output ===
+FSTYP         -- beamfs
+PLATFORM      -- Linux/aarch64 beamfs-compute03 7.1.3 #1 SMP PREEMPT Sat Jul  4 11:45:09 UTC 2026
+MKFS_OPTIONS  -- -N 16384 /dev/vdh
+MOUNT_OPTIONS -- /dev/vdh /mnt/scratch
+
+generic/015       
+
+=== expected vs got ===
+
+=== kernel messages ===
+[  941.405990] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[  945.981196] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[  945.981313] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[  946.577625] run fstests generic/007 at 2026-09-04 08:29:09
+[ 1016.642117] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1016.642285] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1023.753981] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1023.754077] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1024.097730] beamfs-xfstests: BEGIN generic/011
+[ 1027.279000] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1027.279111] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1035.450270] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1035.450383] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1039.876666] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1039.876767] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1040.321581] run fstests generic/011 at 2026-09-04 08:30:43
+[ 1090.092580] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1090.092678] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1096.829522] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1096.829641] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1097.201083] beamfs-xfstests: BEGIN generic/015
+[ 1100.366569] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1100.366683] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1108.981624] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1108.981720] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1113.288846] beamfs: bitmaps initialized (261108 data blocks, 261108 free; 16384 inodes, 16382 free)
+[ 1113.289363] beamfs: mounted v5 (blocks=262144 free=261108 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)
+[ 1113.784583] run fstests generic/015 at 2026-09-04 08:31:56
+[ 1120.671276] beamfs: bitmaps initialized (64506 data blocks, 64506 free; 16384 inodes, 16382 free)
+[ 1120.671747] beamfs: mounted v5 (blocks=65536 free=64506 inodes=16384 scheme=2 feat=0x0000000000000000/0x0000000000008000/0x0000000000000000)

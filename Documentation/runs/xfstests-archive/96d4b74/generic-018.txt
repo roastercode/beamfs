@@ -1,0 +1,6 @@
+test: generic/018
+outcome: NOTRUN
+seconds: 28
+node: compute02
+commit: 96d4b74
+reason: defragmentation not supported for fstype "beamfs"

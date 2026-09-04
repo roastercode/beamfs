@@ -1,0 +1,6 @@
+test: generic/082
+outcome: NOTRUN
+seconds: 22
+node: master
+commit: 96d4b74
+reason: disk quotas not supported by this filesystem type: beamfs

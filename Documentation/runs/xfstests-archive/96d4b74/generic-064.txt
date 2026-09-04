@@ -1,0 +1,6 @@
+test: generic/064
+outcome: NOTRUN
+seconds: 24
+node: compute02
+commit: 96d4b74
+reason: xfs_io finsert failed (old kernel/wrong fs?)

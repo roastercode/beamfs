@@ -1,0 +1,6 @@
+test: generic/019
+outcome: NOTRUN
+seconds: 24
+node: compute03
+commit: 96d4b74
+reason: /sys/kernel/debug/fail_make_request not found. Seems that C

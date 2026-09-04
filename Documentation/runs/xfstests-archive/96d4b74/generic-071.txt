@@ -1,0 +1,6 @@
+test: generic/071
+outcome: NOTRUN
+seconds: 26
+node: compute01
+commit: 96d4b74
+reason: xfs_io falloc -k failed (old kernel/wrong fs?)

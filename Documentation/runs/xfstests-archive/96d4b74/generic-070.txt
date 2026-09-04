@@ -1,0 +1,6 @@
+test: generic/070
+outcome: NOTRUN
+seconds: 24
+node: master
+commit: 96d4b74
+reason: attr namespace user not supported by this filesystem type: b

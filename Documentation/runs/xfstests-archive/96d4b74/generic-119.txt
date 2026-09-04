@@ -1,0 +1,6 @@
+test: generic/119
+outcome: NOTRUN
+seconds: 22
+node: compute01
+commit: 96d4b74
+reason: Reflink not supported by test filesystem type: beamfs

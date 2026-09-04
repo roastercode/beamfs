@@ -1,0 +1,6 @@
+test: generic/068
+outcome: NOTRUN
+seconds: 25
+node: compute02
+commit: 96d4b74
+reason: beamfs does not support freezing

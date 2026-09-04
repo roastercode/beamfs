@@ -1,0 +1,6 @@
+test: generic/004
+outcome: NOTRUN
+seconds: 21
+node: master
+commit: 96d4b74
+reason: O_TMPFILE is not supported
