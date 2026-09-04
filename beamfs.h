@@ -357,7 +357,8 @@ int beamfs_rs_encode(u8 *data, size_t len, u8 *parity);
  * beamfs_rs_compute_entropy_q16_16(positions, return_value, len).
  */
 int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
-		    int *positions, unsigned int max_positions);
+		    int *positions, unsigned int max_positions,
+		     const char *who);
 
 /*
  * Shannon entropy estimator for the RS journal.
@@ -400,7 +401,8 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 			   size_t data_len, unsigned int n_subblocks,
 			   int *results,
 			   int *positions_buf,
-			   unsigned int positions_stride);
+			   unsigned int positions_stride,
+			    const char *who);
 
 /* alloc.c */
 int  beamfs_setup_bitmap(struct super_block *sb);

@@ -96,7 +96,8 @@ static int beamfs_rsbench_run(u32 iters, u64 *enc_ns, u64 *dec_ns)
 					      BEAMFS_SUBBLOCK_DATA,
 					      BEAMFS_DATA_INLINE_SUBBLOCKS,
 					      results, positions,
-					      BEAMFS_RS_PARITY / 2);
+					      BEAMFS_RS_PARITY / 2,
+				"bench");
 		if (ret < 0)
 			goto out;
 		cond_resched();

@@ -95,7 +95,8 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 				      BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_DATA_INLINE_SUBBLOCKS,
 				      results, positions,
-				      BEAMFS_RS_PARITY / 2);
+				      BEAMFS_RS_PARITY / 2,
+				"sweep");
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {

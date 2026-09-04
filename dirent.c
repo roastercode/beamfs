@@ -189,7 +189,8 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 				      BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_DATA_INLINE_SUBBLOCKS,
 				      results, positions,
-				      BEAMFS_RS_PARITY / 2);
+				      BEAMFS_RS_PARITY / 2,
+				"directory");
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {

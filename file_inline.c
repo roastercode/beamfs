@@ -1239,7 +1239,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS,
 		rs_results,
 		rs_positions,
-		BEAMFS_RS_PARITY / 2);
+		BEAMFS_RS_PARITY / 2,
+				"file data");
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		int rc = rs_results[i];

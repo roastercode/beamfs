@@ -210,7 +210,8 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 				slot + (size_t)i * BEAMFS_RS_PARITY,
 				BEAMFS_RS_PARITY,
 				BEAMFS_SUBBLOCK_DATA, 1,
-				results, positions, BEAMFS_RS_PARITY / 2);
+				results, positions, BEAMFS_RS_PARITY / 2,
+				"indirect");
 
 			if (rc < 0 || results[0] < 0) {
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u uncorrectable\n",

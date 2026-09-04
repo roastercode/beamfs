@@ -271,7 +271,8 @@ int beamfs_rs_encode(uint8_t *data, size_t len, uint8_t *parity)
  * Stack cost: BEAMFS_SUBBLOCK_DATA = 239 bytes for the snapshot (per call).
  */
 int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
-		    int *positions, unsigned int max_positions)
+		    int *positions, unsigned int max_positions,
+		    const char *who)
 {
 	u16 par[BEAMFS_RS_PARITY];
 	u8 data_orig[BEAMFS_SUBBLOCK_DATA];
@@ -324,16 +325,14 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 		 * reading a block that was never written it is harmless,
 		 * from a read of file data it is data loss.
 		 *
-		 * Level 1 and not 0: beamfs_rs_decode_region sits between
-		 * this and every real caller, so level 0 would name it
-		 * every time and say nothing.
-		 *
-		 * %pS on the return address costs nothing here, on a path
-		 * that is already rate-limited and already failing.
+		 * The caller passes its own name. __builtin_return_address
+		 * was tried first and returned 0x0: the compiler inlines
+		 * beamfs_rs_decode_region, so there is no frame to walk
+		 * back to. A string the caller supplies cannot be
+		 * optimised away.
 		 */
-		pr_err_ratelimited("beamfs: RS uncorrectable (len=%zu) from %pS\n",
-				   len,
-				   __builtin_return_address(1));
+		pr_err_ratelimited("beamfs: RS uncorrectable (len=%zu) in %s\n",
+				   len, who ? who : "?");
 		return -EBADMSG;
 	}
 
@@ -425,7 +424,8 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 			   size_t data_len, unsigned int n_subblocks,
 			   int *results,
 			   int *positions_buf,
-			   unsigned int positions_stride)
+			   unsigned int positions_stride,
+			   const char *who)
 {
 	unsigned int i;
 	int worst = 0;
@@ -444,7 +444,7 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 			? positions_buf + (size_t)i * positions_stride
 			: NULL;
 		int rc = beamfs_rs_decode(d, data_len, p,
-					 pos, positions_stride);
+					 pos, positions_stride, who);
 
 		if (results)
 			results[i] = rc;

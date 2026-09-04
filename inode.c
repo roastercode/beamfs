@@ -144,7 +144,8 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			nerr = beamfs_rs_decode((u8 *)raw, BEAMFS_INODE_RS_DATA,
 					       raw->i_reserved,
 					       positions,
-					       BEAMFS_RS_PARITY / 2);
+					       BEAMFS_RS_PARITY / 2,
+				"inode");
 			if (nerr < 0) {
 				pr_err("beamfs: inode %lu uncorrectable\n", ino);
 				brelse(bh);

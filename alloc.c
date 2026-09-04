@@ -160,7 +160,8 @@ int beamfs_setup_bitmap(struct super_block *sb)
 				BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_BITMAP_SUBBLOCKS,
 				rs_results, rs_positions,
-				BEAMFS_RS_PARITY / 2);
+				BEAMFS_RS_PARITY / 2,
+				"bitmap");
 
 			for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++) {
 				int rc = rs_results[i];

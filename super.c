@@ -992,7 +992,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 					    BEAMFS_SB_RS_SUBBLOCKS,
 					    rs_results,
 					    rs_positions,
-					    BEAMFS_RS_PARITY / 2);
+					    BEAMFS_RS_PARITY / 2,
+				"superblock");
 		if (rc < 0) {
 			errorf(fc, "beamfs: superblock CRC32 mismatch and RS uncorrectable");
 			kvfree(staging);
