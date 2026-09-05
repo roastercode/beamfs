@@ -309,34 +309,84 @@ int beamfs_setup_bitmap(struct super_block *sb)
 /*
  * Rebuild one bitmap block's on-disk image. The buffer lock must be held.
  */
-static void beamfs_bitmap_encode_one_locked(struct beamfs_sb_info *sbi, u32 k,
+/*
+ * Rebuild one subblock of a bitmap block, or all of them.
+ *
+ * @sub: which codeword to rebuild, or BEAMFS_BITMAP_SUBBLOCKS for all.
+ *
+ * The whole-block version cost 30592 test_bit calls and sixteen RS
+ * encodes for one bit changed. Filling 256 MiB means 70197 allocations,
+ * so generic/015 spent two billion test_bit calls and 1.1 million RS
+ * encodes in the allocator -- twenty minutes on a test that should take
+ * one, with the flusher pinned at 92% of a core.
+ *
+ * Two things were wasteful and neither had to be. A bit belongs to
+ * exactly one of the sixteen codewords, so changing it invalidates one
+ * parity block, not sixteen. And the in-memory bitmap is already a bit
+ * array in the same order as the on-disk one: memcpy moves it, where
+ * the old loop asked about every bit individually.
+ *
+ * Per allocation this becomes one memcpy of 239 bytes and one RS
+ * encode. The full-block path stays for mount, where the whole image
+ * genuinely has to be built.
+ */
+static void beamfs_bitmap_encode_sub_locked(struct beamfs_sb_info *sbi,
+					    u32 k, u32 sub,
 					    struct buffer_head *bh)
 {
-	unsigned long first, last, scan;
+	unsigned long first, last;
 	u8 *bdata = (u8 *)bh->b_data;
-	u32 i, b;
+	u32 i, lo, hi;
 
 	first = (unsigned long)k * BEAMFS_BITS_PER_BITMAP_BLOCK;
 	last  = min(first + BEAMFS_BITS_PER_BITMAP_BLOCK,
 		    (unsigned long)sbi->s_nblocks);
 
-	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
-	scan = first;
-	for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS && scan < last; i++) {
-		u8 *subdata = bdata + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
-
-		for (b = 0; b < BEAMFS_SUBBLOCK_DATA * 8 && scan < last;
-		     b++, scan++) {
-			if (test_bit(scan, sbi->s_block_bitmap))
-				subdata[b / 8] |= (1u << (b % 8));
-		}
+	if (sub >= BEAMFS_BITMAP_SUBBLOCKS) {
+		lo = 0;
+		hi = BEAMFS_BITMAP_SUBBLOCKS;
+		memset(bdata, 0, BEAMFS_BLOCK_SIZE);
+	} else {
+		lo = sub;
+		hi = sub + 1;
 	}
 
-	beamfs_rs_encode_region(bdata, BEAMFS_SUBBLOCK_TOTAL,
-				bdata + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_BITMAP_SUBBLOCKS);
+	for (i = lo; i < hi; i++) {
+		u8 *subdata = bdata + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+		unsigned long bit0 = first +
+				     (unsigned long)i * BEAMFS_SUBBLOCK_DATA * 8;
+		size_t nbytes;
+
+		if (bit0 >= last) {
+			memset(subdata, 0, BEAMFS_SUBBLOCK_DATA);
+			continue;
+		}
+
+		/*
+		 * Bit b of the volume lives at bit b - bit0 of this
+		 * codeword, and bit0 is a multiple of 1912 -- which is a
+		 * multiple of 8, so the copy is byte-aligned and memcpy
+		 * does it.
+		 */
+		nbytes = min_t(size_t, BEAMFS_SUBBLOCK_DATA,
+			       DIV_ROUND_UP(last - bit0, 8));
+		memcpy(subdata, (const u8 *)sbi->s_block_bitmap + bit0 / 8,
+		       nbytes);
+		if (nbytes < BEAMFS_SUBBLOCK_DATA)
+			memset(subdata + nbytes, 0,
+			       BEAMFS_SUBBLOCK_DATA - nbytes);
+
+		beamfs_rs_encode_region(subdata, BEAMFS_SUBBLOCK_TOTAL,
+					subdata + BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_SUBBLOCK_TOTAL,
+					BEAMFS_SUBBLOCK_DATA, 1);
+	}
+}
+
+static void beamfs_bitmap_encode_one_locked(struct beamfs_sb_info *sbi, u32 k,
+					    struct buffer_head *bh)
+{
+	beamfs_bitmap_encode_sub_locked(sbi, k, BEAMFS_BITMAP_SUBBLOCKS, bh);
 }
 
 void beamfs_bitmap_encode_pending(struct super_block *sb)
@@ -412,7 +462,14 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * bits per rebuild, not letting the buffer reach the disk stale.
 	 */
 	lock_buffer(bh);
-	beamfs_bitmap_encode_one_locked(sbi, k, bh);
+	/*
+	 * Only the codeword this bit belongs to. The other fifteen are
+	 * untouched and their parity still holds.
+	 */
+	beamfs_bitmap_encode_sub_locked(sbi, k,
+		(u32)((bit_global % BEAMFS_BITS_PER_BITMAP_BLOCK) /
+		      (BEAMFS_SUBBLOCK_DATA * 8)),
+		bh);
 	clear_bit(k, sbi->s_bitmap_needs_encode);
 	mark_buffer_dirty(bh);
 
