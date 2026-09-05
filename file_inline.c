@@ -1677,7 +1677,32 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * iomap->addr is reported to fiemap and tracing but nothing
 	 * derives an I/O sector from it.
 	 */
-	iomap->length = length;
+	/*
+	 * Report asks about one block; read asks about the whole range.
+	 *
+	 * IOMAP_REPORT is fiemap, and it wants the truth: this mapping
+	 * describes the block pos falls in and nothing beyond it.
+	 * Claiming the requested length told fiemap that the answer for
+	 * the first block held for the entire file, so a leading hole
+	 * was reported as spanning 1 MiB, iomap stepped past EOF, and a
+	 * file with 512 KiB of data came back with no extents at all.
+	 *
+	 * Everything else keeps the full length, and must. A mapping
+	 * shorter than the folio makes iomap_read_folio_iter release the
+	 * folio -- nothing attached an iomap_folio_state, folio and
+	 * block size both being 4096 -- and then dereference it on the
+	 * next round at folio_size(). That is the NULL documented below,
+	 * confirmed by disassembly, and a 3824-byte mapping is always
+	 * shorter than a 4096-byte folio.
+	 */
+	if (flags & IOMAP_REPORT) {
+		u64 in_block = (u64)pos % BEAMFS_DATA_INLINE_BYTES;
+
+		iomap->length = min_t(u64, (u64)length,
+				      BEAMFS_DATA_INLINE_BYTES - in_block);
+	} else {
+		iomap->length = length;
+	}
 
 	ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	if (ret < 0)
