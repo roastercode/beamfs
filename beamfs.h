@@ -13,6 +13,13 @@
 #include <linux/fs_context.h>
 #include <linux/types.h>
 #include <linux/mutex.h>
+/*
+ * mempool_t and its operations, for the scratch reserve created at
+ * mount. Included explicitly rather than relied on: the aarch64 build
+ * got it through some other header's chain and the x86 one did not,
+ * which is the kind of thing a second architecture is for.
+ */
+#include <linux/mempool.h>
 
 /*
  * On-disk format lives in its own header so the userspace tools can
