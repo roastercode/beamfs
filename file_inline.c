@@ -3015,6 +3015,23 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 			 */
 			truncate_setsize(inode, new_size);
 		}
+
+		/*
+		 * A truncate changes the file, so it changes mtime, and it
+		 * changes the inode, so it changes ctime.
+		 *
+		 * setattr_copy below only carries the times the VFS asked
+		 * for, and truncate asks for none: the filesystem is
+		 * expected to set them itself, the way it does for a write.
+		 * generic/313 reports all four cases -- ctime and mtime,
+		 * shrinking and growing -- and says so in as many words.
+		 *
+		 * Both are set even when the size did not actually move,
+		 * because setattr_prepare has already accepted the request
+		 * and POSIX makes no exception for a truncate to the
+		 * current length.
+		 */
+		inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 	}
 
 	setattr_copy(idmap, inode, attr);

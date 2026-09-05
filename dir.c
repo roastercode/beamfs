@@ -115,9 +115,6 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 			      de->d_name[1] == '.')) {
 				u8 dt;
 
-				ctx->pos = ((loff_t)(block_idx + 1) << 16)
-					   | offset;
-
 				switch (de->d_file_type) {
 				case 1:
 					dt = DT_REG;
@@ -139,6 +136,27 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 			if (next == BEAMFS_DIRENT_NOSPACE)
 				break;
 			offset = next;
+
+			/*
+			 * Advance after emitting, and for every record --
+			 * not only the ones handed to the caller.
+			 *
+			 * The cookie has to name where reading resumes, so
+			 * it must point past what was just returned. Set
+			 * before dir_emit, it named the entry being
+			 * emitted, and a seekdir to a position obtained
+			 * from telldir returned that entry a second time.
+			 * Skipping it for records that are not emitted --
+			 * free ones, dot and dotdot -- left the cookie
+			 * pointing into the middle of the block for the
+			 * next call, which read the same ground again and
+			 * then ran out: t_readdir_3 calls that "Unexpected
+			 * EOF while reading dir".
+			 *
+			 * ext2 does the same thing at the bottom of its
+			 * loop, unconditionally.
+			 */
+			ctx->pos = ((loff_t)(block_idx + 1) << 16) | offset;
 		}
 
 		start_block = block_idx + 1;

@@ -77,6 +77,7 @@ static void print_usage(FILE *stream, const char *prog)
 		"Options:\n"
 		"  -n, --check-only   Read-only check, no modification (default)\n"
 		"  -p, --repair       Repair correctable errors\n"
+		"  -y, --yes          Same as --repair (fsck(8) convention)\n"
 		"  -f, --force        Bypass early-abort sanity checks\n"
 		"  -v, --verbose      Print progress to stdout\n"
 		"  -V, --version      Print version and exit\n"
@@ -1168,6 +1169,7 @@ int main(int argc, char **argv)
 	static const struct option long_opts[] = {
 		{ "check-only", no_argument, NULL, 'n' },
 		{ "repair",     no_argument, NULL, 'p' },
+		{ "yes",        no_argument, NULL, 'y' },
 		{ "force",      no_argument, NULL, 'f' },
 		{ "verbose",    no_argument, NULL, 'v' },
 		{ "version",    no_argument, NULL, 'V' },
@@ -1177,13 +1179,29 @@ int main(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "npfvVh", long_opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "npyfvVh", long_opts, NULL)) != -1) {
 		switch (c) {
 		case 'n':
 			opts.check_only = true;
 			opts.repair     = false;
 			break;
 		case 'p':
+		case 'y':
+			/*
+			 * -y is what every other fsck calls this, and what
+			 * callers pass without checking whether a
+			 * particular one understands it: e2fsck, fsck.vfat
+			 * and fsck.xfs all take it to mean repair without
+			 * asking. Refusing it returned exit code 16, usage
+			 * error, and xfstests read that as the check
+			 * failing -- generic/441 reports "fsck.beamfs
+			 * failed, err=16" on a filesystem that was
+			 * perfectly sound.
+			 *
+			 * There is nothing to prompt about here: this fsck
+			 * never asks a question, so -y and --repair are the
+			 * same request.
+			 */
 			opts.repair     = true;
 			opts.check_only = false;
 			break;
