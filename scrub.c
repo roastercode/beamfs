@@ -54,21 +54,22 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 			     unsigned int *corrected)
 {
 	struct buffer_head *bh;
-	int  *results;
-	int  *positions;
+	/*
+	 * On the stack, as in beamfs_dirent_decode: 64 and 512 bytes,
+	 * against a 2 KiB frame budget, on a sweep that must not wait on
+	 * the allocator while the machine is under pressure.
+	 */
+	int  results[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	int  positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	u8   *staging;
 	unsigned int i, n_corrected = 0;
 	int ret = 0;
 
 	*corrected = 0;
 
-	results = kcalloc(BEAMFS_DATA_INLINE_SUBBLOCKS, sizeof(*results),
-			  GFP_NOFS);
-	positions = kcalloc(BEAMFS_DATA_INLINE_SUBBLOCKS *
-			    (BEAMFS_RS_PARITY / 2), sizeof(*positions),
-			    GFP_NOFS);
-	staging = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
-	if (!results || !positions || !staging) {
+	memset(results, 0, sizeof(results));
+	staging = beamfs_scratch_get(sb);
+	if (!staging) {
 		ret = -ENOMEM;
 		goto out_free;
 	}
@@ -164,9 +165,7 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	brelse(bh);
 
 out_free:
-	kfree(staging);
-	kfree(positions);
-	kfree(results);
+	beamfs_scratch_put(sb, staging);
 	return ret;
 }
 

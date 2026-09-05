@@ -1228,7 +1228,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 * on rs_control->buffers[] is resolved by the per-CPU
 	 * rs_control allocation in edac.c.
 	 */
-	tmp = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	tmp = beamfs_scratch_get(sb);
 	if (!tmp)
 		return -ENOMEM;
 	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
@@ -1481,11 +1481,11 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 */
 	(void)corrected;
 
-	kfree(tmp);
+	beamfs_scratch_put(sb, tmp);
 	return 0;
 
 out_brelse:
-	kfree(tmp);
+	beamfs_scratch_put(sb, tmp);
 	return ret;
 }
 
@@ -2082,7 +2082,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	wpc->iomap.length = len;
 	wpc->iomap.bdev = sb->s_bdev;
 
-	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
 		/*
 		 * Finish the folio before leaving. Returning straight out
@@ -2480,7 +2480,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		done += slice_length;
 	}
 
-	kfree(scratch);
+	beamfs_scratch_put(sb, scratch);
 
 	/*
 	 * On success the whole range counts as handled:
@@ -2881,7 +2881,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (phys == 0)
 		return 0; /* HOLE: nothing to zero, sparse semantics */
 
-	scratch = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	scratch = beamfs_scratch_get(sb);
 	if (!scratch)
 		return -ENOMEM;
 
@@ -2893,7 +2893,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (!bh) {
 		pr_err_ratelimited("beamfs/inline: zero_tail: sb_bread phys=%llu failed\n",
 				   (unsigned long long)phys);
-		kfree(scratch);
+		beamfs_scratch_put(sb, scratch);
 		return -EIO;
 	}
 	/*
@@ -2910,7 +2910,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (ret < 0) {
 		unlock_buffer(bh);
 		brelse(bh);
-		kfree(scratch);
+		beamfs_scratch_put(sb, scratch);
 		return ret;
 	}
 
@@ -2932,7 +2932,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 				   ret);
 		unlock_buffer(bh);
 		brelse(bh);
-		kfree(scratch);
+		beamfs_scratch_put(sb, scratch);
 		return ret;
 	}
 
@@ -2944,7 +2944,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	unlock_buffer(bh);
 	ret = sync_dirty_buffer(bh);
 	brelse(bh);
-	kfree(scratch);
+	beamfs_scratch_put(sb, scratch);
 	return ret;
 }
 

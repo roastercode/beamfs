@@ -163,20 +163,26 @@ void beamfs_dirent_encode(struct buffer_head *bh)
 int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 			 u8 *dst)
 {
-	int *results, *positions;
+	/*
+	 * On the stack, not from the allocator.
+	 *
+	 * These are 64 and 512 bytes, and this runs once per directory
+	 * block on every lookup, readdir, create and unlink -- so a
+	 * ten-block directory meant twenty allocations to resolve one
+	 * name. Under memory pressure that turns a path that should never
+	 * block into one that does: generic/558 had twelve tasks in D and
+	 * one of them was sitting in kfree underneath this function,
+	 * called from beamfs_lookup.
+	 *
+	 * 576 bytes against the kernel's 2 KiB frame budget, on a
+	 * function whose callers are shallow.
+	 */
+	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int i, corrected = 0;
 	int ret = 0;
 
-	results = kcalloc(BEAMFS_DATA_INLINE_SUBBLOCKS, sizeof(*results),
-			  GFP_NOFS);
-	positions = kcalloc(BEAMFS_DATA_INLINE_SUBBLOCKS *
-			    (BEAMFS_RS_PARITY / 2), sizeof(*positions),
-			    GFP_NOFS);
-	if (!results || !positions) {
-		kfree(positions);
-		kfree(results);
-		return -ENOMEM;
-	}
+	memset(results, 0, sizeof(results));
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		memcpy(dst + (size_t)i * BEAMFS_SUBBLOCK_DATA,
@@ -207,7 +213,5 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 		}
 	}
 
-	kfree(positions);
-	kfree(results);
 	return ret < 0 ? ret : (int)corrected;
 }

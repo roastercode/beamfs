@@ -23,6 +23,26 @@
 struct beamfs_sb_info {
 	/* Block allocator */
 	unsigned long    *s_block_bitmap;  /* In-memory free block bitmap */
+
+	/*
+	 * Scratch pages for decode and encode, reserved at mount.
+	 *
+	 * Every path that touches a block needs one: a lookup decodes a
+	 * directory block, writeback decodes before it re-encodes, the
+	 * sweep decodes what it checks. They were kmalloc'd per call --
+	 * a ten-block directory meant ten allocations to resolve one name
+	 * -- and under memory pressure that turns a path which must not
+	 * block into one that does. generic/558 had twelve tasks in
+	 * uninterruptible sleep and one was in kfree beneath
+	 * beamfs_lookup.
+	 *
+	 * A mempool never returns NULL for GFP_NOFS and does not wait
+	 * while it holds a free element. Thirty-six kilobytes per mount
+	 * against a class of stall that only appears when the machine is
+	 * already in trouble -- which is exactly when a filesystem has to
+	 * keep working.
+	 */
+	mempool_t        *s_scratch_pool;
 	unsigned long     s_nblocks;       /* Number of data blocks */
 	unsigned long     s_data_start;    /* First data block number */
 	/* Inode allocator */
@@ -433,6 +453,10 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+/* Scratch pages, from the mount's reserve. Never NULL under GFP_NOFS. */
+void *beamfs_scratch_get(struct super_block *sb);
+void  beamfs_scratch_put(struct super_block *sb, void *p);
 
 /* dirent.c -- variable-length directory entries, and parity over them */
 u32  beamfs_dirent_place(u32 off, u16 len);

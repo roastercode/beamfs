@@ -278,7 +278,7 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 
 	want = (u16)BEAMFS_DIRENT_LEN(name->len);
 
-	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	payload = beamfs_scratch_get(sb);
 	if (!payload)
 		return -ENOMEM;
 
@@ -435,7 +435,7 @@ place_it:
 	}
 
 out:
-	kfree(payload);
+	beamfs_scratch_put(sb, payload);
 	return ret;
 }
 
@@ -454,7 +454,7 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 	unsigned int i;
 	int      ret = -ENOENT;
 
-	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	payload = beamfs_scratch_get(sb);
 	if (!payload)
 		return -ENOMEM;
 
@@ -565,7 +565,7 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 	}
 
 out:
-	kfree(payload);
+	beamfs_scratch_put(sb, payload);
 	return ret;
 }
 
@@ -782,7 +782,7 @@ static int beamfs_dir_is_empty(struct inode *inode)
 	 */
 	int      ret = 0;
 
-	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	payload = beamfs_scratch_get(sb);
 	if (!payload)
 		return -ENOMEM;
 
@@ -831,7 +831,7 @@ static int beamfs_dir_is_empty(struct inode *inode)
 	}
 
 out:
-	kfree(payload);
+	beamfs_scratch_put(sb, payload);
 	return ret;
 }
 
@@ -915,21 +915,22 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 	u8 *staging;
 	int ret = 0;
 
-	staging = kzalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	staging = beamfs_scratch_get(sb);
 	if (!staging)
 		return -ENOMEM;
+	memset(staging, 0, BEAMFS_DATA_INLINE_BYTES);
 	memcpy(staging, target, len);
 
 	phys = beamfs_alloc_block(sb, inode);
 	if (!phys) {
-		kfree(staging);
+		beamfs_scratch_put(sb, staging);
 		return -ENOSPC;
 	}
 
 	bh = sb_getblk(sb, phys);
 	if (!bh) {
 		beamfs_free_block(sb, phys, inode);
-		kfree(staging);
+		beamfs_scratch_put(sb, staging);
 		return -EIO;
 	}
 
@@ -949,7 +950,7 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 	mark_buffer_dirty(bh);
 	ret = sync_dirty_buffer(bh);
 	brelse(bh);
-	kfree(staging);
+	beamfs_scratch_put(sb, staging);
 
 	if (ret) {
 		beamfs_free_block(sb, phys, inode);
@@ -1070,6 +1071,12 @@ static const char *beamfs_get_link(struct dentry *dentry,
 	if (!phys)
 		return ERR_PTR(-EUCLEAN);
 
+	/*
+	 * kzalloc and not the mount reserve: this buffer is handed to the
+	 * VFS through set_delayed_call(kfree_link), so the kernel frees
+	 * it long after this function returns and it cannot come from a
+	 * pool this filesystem owns.
+	 */
 	buf = kzalloc(BEAMFS_DATA_INLINE_BYTES + 1, GFP_NOFS);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);

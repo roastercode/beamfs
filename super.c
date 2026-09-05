@@ -94,6 +94,8 @@ static void beamfs_put_super(struct super_block *sb)
 			sync_dirty_buffer(sbi->s_sbh);
 
 		beamfs_destroy_bitmap(sb);
+		mempool_destroy(sbi->s_scratch_pool);
+		sbi->s_scratch_pool = NULL;
 		brelse(sbi->s_sbh);
 		kfree(sbi->s_beamfs_sb);
 		kfree(sbi);
@@ -617,6 +619,35 @@ void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
 /*
  * Note that the superblock changed. The rebuild happens at sync.
  */
+/*
+ * A scratch page from the mount's reserve.
+ *
+ * mempool_alloc with GFP_NOFS does not return NULL: it waits on the
+ * reserve rather than on the allocator, and the reserve is sized so
+ * that every path which can be in flight at once has one.
+ */
+void *beamfs_scratch_get(struct super_block *sb)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	if (!sbi || !sbi->s_scratch_pool)
+		return kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	return mempool_alloc(sbi->s_scratch_pool, GFP_NOFS);
+}
+
+void beamfs_scratch_put(struct super_block *sb, void *p)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	if (!p)
+		return;
+	if (!sbi || !sbi->s_scratch_pool) {
+		kfree(p);
+		return;
+	}
+	mempool_free(p, sbi->s_scratch_pool);
+}
+
 void beamfs_dirty_super(struct beamfs_sb_info *sbi)
 {
 	if (!sbi)
@@ -1085,6 +1116,19 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_free_blocks = le64_to_cpu(fsb->s_free_blocks);
 	sbi->s_free_inodes = le64_to_cpu(fsb->s_free_inodes);
 	spin_lock_init(&sbi->s_lock);
+
+	/*
+	 * Nine elements: the paths that can hold a scratch page at the
+	 * same time are readdir, lookup, add_dirent, del_dirent,
+	 * dir_is_empty, the sweep, the block decoder and two in
+	 * writeback.
+	 */
+	sbi->s_scratch_pool = mempool_create_kmalloc_pool(9,
+							  BEAMFS_BLOCK_SIZE);
+	if (!sbi->s_scratch_pool) {
+		kfree(sbi);
+		return -ENOMEM;
+	}
 
 	sb->s_fs_info  = sbi;
 	sb->s_magic    = BEAMFS_MAGIC;

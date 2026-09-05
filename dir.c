@@ -63,7 +63,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		start_off   = (u32)(ctx->pos & 0xFFFF);
 	}
 
-	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	payload = beamfs_scratch_get(sb);
 	if (!payload)
 		return -ENOMEM;
 
@@ -147,7 +147,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 
 	ctx->pos = INT_MAX;
 out:
-	kfree(payload);
+	beamfs_scratch_put(sb, payload);
 	return ret;
 }
 
@@ -171,7 +171,7 @@ struct dentry *beamfs_lookup(struct inode *dir,
 	if (dentry->d_name.len > BEAMFS_MAX_FILENAME)
 		return ERR_PTR(-ENAMETOOLONG);
 
-	payload = kmalloc(BEAMFS_DATA_INLINE_BYTES, GFP_NOFS);
+	payload = beamfs_scratch_get(sb);
 	if (!payload)
 		return ERR_PTR(-ENOMEM);
 
@@ -223,7 +223,7 @@ struct dentry *beamfs_lookup(struct inode *dir,
 	}
 
 out:
-	kfree(payload);
+	beamfs_scratch_put(sb, payload);
 	if (ret)
 		return ERR_PTR(ret);
 	if (IS_ERR(inode))
