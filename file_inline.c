@@ -3040,8 +3040,51 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 	return 0;
 }
 
+/*
+ * fiemap for the INLINE scheme.
+ *
+ * beamfs_fiemap in file.c calls iomap_fiemap with beamfs_iomap_ops --
+ * the legacy scheme=5 map, where a logical block is 4096 bytes and disk
+ * offset is file offset. Under INLINE a logical block is 3824 bytes
+ * inside a 4096-byte physical one, so that map describes a geometry
+ * this file does not have: generic/473 saw data starting at block 136
+ * where it had written at 128, a drift of 272 bytes per block.
+ *
+ * What this reports is one extent per block, and that is not a
+ * limitation of the code. fiemap merges two extents when
+ * addr + length == next addr; here addr advances by 4096 while length
+ * is 3824, so the test never holds and never can. The mapping from
+ * file offset to disk offset is not affine, which is the price of
+ * putting each block's parity inside the block: 272 bytes of every
+ * 4096 belong to the code that protects the other 3824.
+ *
+ * So generic/473 still fails, and it fails for a reason worth stating
+ * rather than hiding: a tool asking where a file lives now gets the
+ * truth, block by block, instead of confident nonsense.
+ */
+static int beamfs_inline_fiemap(struct inode *inode,
+				struct fiemap_extent_info *fieinfo,
+				u64 start, u64 len)
+{
+	int ret;
+	loff_t i_size;
+
+	inode_lock(inode);
+	i_size = i_size_read(inode);
+	/* iomap_fiemap rejects len == 0; keep the call valid for an
+	 * empty file, where it returns no extents.
+	 */
+	if (i_size == 0)
+		i_size = 1;
+	len = min_t(u64, len, i_size);
+	ret = iomap_fiemap(inode, fieinfo, start, len,
+			   &beamfs_inline_iomap_ops);
+	inode_unlock(inode);
+	return ret;
+}
+
 const struct inode_operations beamfs_inline_inode_operations = {
 	.getattr        = simple_getattr,
 	.setattr        = beamfs_inline_setattr,
-	.fiemap         = beamfs_fiemap,  /* S2.2: shared with scheme=5, declared in file.c */
+	.fiemap         = beamfs_inline_fiemap,
 };
