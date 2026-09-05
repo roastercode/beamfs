@@ -116,6 +116,15 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 					     (unsigned int)results[i]);
 		} else if (results[i] < 0) {
 			/*
+			 * Say which block and which codeword. An
+			 * uncorrectable subblock is the event this
+			 * filesystem exists to report, and a line that
+			 * names neither is an alarm nobody can follow.
+			 */
+			pr_err_ratelimited("beamfs: sweep: block %llu subblock %u/%u uncorrectable\n",
+					   (unsigned long long)phys, i,
+					   BEAMFS_DATA_INLINE_SUBBLOCKS);
+			/*
 			 * Past the radius. Journalled with the same shape
 			 * the read path uses, so a forensic pass cannot tell
 			 * whether a reader or the scrubber found it -- which

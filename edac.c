@@ -293,46 +293,17 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	if (positions)
 		memcpy(data_orig, data, len);
 
-	/* Mode "apply": corrects data and parity in place. eras_pos = NULL
-	 * forces the kernel into the apply branch (decode_rs.c line 315).
-	 *
-	 * Per-CPU: get_cpu_ptr disables preemption while decode runs in
-	 * the CPU-local rs_control. decode_rs8 is pure computation, no
-	 * allocs, no sleeps -- preempt-disable is safe.
-	 */
-	{
-		struct rs_control **ctrl_p = get_cpu_ptr(beamfs_rs_ctrl_pcpu);
-		struct rs_control *ctrl = *ctrl_p;
-
-		if (!ctrl) {
-			put_cpu_ptr(beamfs_rs_ctrl_pcpu);
-			return -EINVAL;
-		}
-		nerr = decode_rs8(ctrl, data, par, len,
-				  NULL, 0, NULL, 0, NULL);
-		put_cpu_ptr(beamfs_rs_ctrl_pcpu);
-	}
-
 	if (nerr < 0) {
 		/*
-		 * Say who asked.
+		 * Silent here, on purpose.
 		 *
-		 * Nine call sites reach this decoder -- the bitmap at
-		 * mount, a directory block, file data, an indirect block,
-		 * an inode, the sweep, the superblock, the bench -- and the
-		 * message named none of them. Two uncorrectable blocks in a
-		 * three-hundred-second test told us nothing: from the sweep
-		 * reading a block that was never written it is harmless,
-		 * from a read of file data it is data loss.
-		 *
-		 * The caller passes its own name. __builtin_return_address
-		 * was tried first and returned 0x0: the compiler inlines
-		 * beamfs_rs_decode_region, so there is no frame to walk
-		 * back to. A string the caller supplies cannot be
-		 * optimised away.
+		 * This function knows a length and nothing else -- not the
+		 * block, not which of the sixteen subblocks, not what owns
+		 * it. It said "RS uncorrectable (len=239) in sweep", which
+		 * names the caller and stops exactly where the question
+		 * starts. Every caller has results[] and its own context,
+		 * and reports from there.
 		 */
-		pr_err_ratelimited("beamfs: RS uncorrectable (len=%zu) in %s\n",
-				   len, who ? who : "?");
 		return -EBADMSG;
 	}
 

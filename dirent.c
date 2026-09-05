@@ -209,6 +209,15 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 			beamfs_budget_record(sb, bh->b_blocknr,
 					     (unsigned int)results[i]);
 		} else if (results[i] < 0) {
+			/*
+			 * Name the block and the codeword. The buffer knows
+			 * where it came from; the decoder does not, and a
+			 * line that says only "uncorrectable" leaves the
+			 * reader with nowhere to look.
+			 */
+			pr_err_ratelimited("beamfs: directory block %llu subblock %u/%u uncorrectable\n",
+					   (unsigned long long)bh->b_blocknr,
+					   i, BEAMFS_DATA_INLINE_SUBBLOCKS);
 			ret = -EUCLEAN;
 		}
 	}

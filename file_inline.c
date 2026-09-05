@@ -1248,6 +1248,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		if (rc < 0) {
 			u32 xflags = rmw_path ?
 				BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0;
+
 			/*
 			 * Journal the uncorrectable event before raising the
 			 * error: forensic record takes priority over the alert.
