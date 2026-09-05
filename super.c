@@ -237,7 +237,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 	if (base + child_span * nptrs <= first)
 		return false;
 
-	ibh = sb_bread(sb, blk);
+	ibh = beamfs_bread(sb, blk, "superblock");
 	if (!ibh) {
 		pr_err_ratelimited("beamfs: cannot read indirect block %llu, subtree left allocated\n",
 				   (unsigned long long)blk);
@@ -652,6 +652,34 @@ void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
  * reserve rather than on the allocator, and the reserve is sized so
  * that every path which can be in flight at once has one.
  */
+/*
+ * The volume has failed. Say so once, and stop writing.
+ *
+ * ext4 calls this ext4_error and XFS calls it a shutdown; both do the
+ * same two things -- record the failure so nothing else tries, and
+ * take the mount read-only so the VFS stops sending work. Neither
+ * unwinds what was in flight: the point is to stop, not to repair.
+ *
+ * Not cleared on any path. A volume that failed once has to be
+ * unmounted and checked; pretending otherwise is how a bad device
+ * becomes a corrupt filesystem.
+ */
+void beamfs_fail(struct super_block *sb, const char *where, int err)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	if (!sbi)
+		return;
+	if (cmpxchg(&sbi->s_failed, false, true))
+		return;			/* someone else was first */
+
+	pr_err("beamfs: volume failed in %s (%d), going read-only\n",
+	       where, err);
+
+	if (!sb_rdonly(sb))
+		sb->s_flags |= SB_RDONLY;
+}
+
 void *beamfs_scratch_get(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
@@ -706,6 +734,23 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 
 	if (!sbi || !sbi->s_sbh || !sbi->s_beamfs_sb)
 		return;
+
+	/*
+	 * Nothing more goes to a volume that has failed.
+	 *
+	 * The superblock buffer could not be read back on a device
+	 * answering EIO, so it is not uptodate, and mark_buffer_dirty
+	 * below opens with WARN_ON_ONCE(!buffer_uptodate) -- which is the
+	 * kernel saying that a buffer nobody could read holds nothing
+	 * worth writing. generic/338 puts dm-error under the mount and
+	 * watches for it.
+	 */
+	if (READ_ONCE(sbi->s_failed))
+		return;
+	if (!buffer_uptodate(sbi->s_sbh)) {
+		beamfs_fail(sbi->s_sb, "dirty_super", -EIO);
+		return;
+	}
 
 	fsb = (struct beamfs_super_block *)sbi->s_sbh->b_data;
 
@@ -985,7 +1030,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	/* Read block 0 - superblock */
-	bh = sb_bread(sb, 0);
+	bh = beamfs_bread(sb, 0, "superblock");
 	if (!bh) {
 		errorf(fc, "beamfs: unable to read superblock");
 		return -EIO;

@@ -20,6 +20,9 @@
 
 int beamfs_write_inode_raw(struct inode *inode)
 {
+	if (beamfs_failed(inode->i_sb))
+		return -EIO;
+
 	struct super_block      *sb  = inode->i_sb;
 	struct beamfs_sb_info    *sbi = BEAMFS_SB(sb);
 	struct beamfs_inode_info *fi  = BEAMFS_I(inode);
@@ -33,7 +36,7 @@ int beamfs_write_inode_raw(struct inode *inode)
 		 + (inode->i_ino - 1) / inodes_per_block;
 	offset = (inode->i_ino - 1) % inodes_per_block;
 
-	bh = sb_bread(sb, block);
+	bh = beamfs_bread(sb, block, "directory");
 	if (!bh)
 		return -EIO;
 
@@ -208,7 +211,7 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		mark_inode_dirty(dir);
 	}
 
-	ibh = sb_bread(sb, indirect_blk);
+	ibh = beamfs_bread(sb, indirect_blk, "directory");
 	if (!ibh)
 		return -EIO;
 	ptrs = (__le64 *)ibh->b_data;
@@ -312,7 +315,7 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 			}
 		}
 
-		bh = sb_bread(sb, block_no);
+		bh = beamfs_bread(sb, block_no, "directory");
 		if (!bh) {
 			ret = -EIO;
 			goto out;
@@ -468,7 +471,7 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 		if (!block_no)
 			break;
 
-		bh = sb_bread(sb, block_no);
+		bh = beamfs_bread(sb, block_no, "directory");
 		if (!bh)
 			continue;
 
@@ -796,7 +799,7 @@ static int beamfs_dir_is_empty(struct inode *inode)
 		if (!block_no)
 			break;
 
-		bh = sb_bread(sb, block_no);
+		bh = beamfs_bread(sb, block_no, "directory");
 		if (!bh)
 			continue;
 
@@ -1081,7 +1084,7 @@ static const char *beamfs_get_link(struct dentry *dentry,
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 
-	bh = sb_bread(sb, phys);
+	bh = beamfs_bread(sb, phys, "directory");
 	if (!bh) {
 		kfree(buf);
 		return ERR_PTR(-EIO);

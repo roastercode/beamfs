@@ -133,7 +133,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 					 (BEAMFS_RS_PARITY / 2)];
 			unsigned long bit_local;
 
-			bh = sb_bread(sb, disk_blk);
+			bh = beamfs_bread(sb, disk_blk, "bitmap");
 			if (!bh) {
 				pr_err("beamfs: cannot read bitmap blk %llu (k=%u)\n",
 				       disk_blk, k);
@@ -248,7 +248,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 	}
 
 	for (block = 0; block * inodes_per_block < total_inodes; block++) {
-		bh = sb_bread(sb, inode_table_blk + block);
+		bh = beamfs_bread(sb, inode_table_blk + block, "bitmap");
 		if (!bh) {
 			pr_warn("beamfs: cannot read inode table block %lu at mount\n",
 				inode_table_blk + block);
@@ -368,6 +368,9 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 			      unsigned long bit_global,
 			      struct inode *owner)
 {
+	if (beamfs_failed(sb))
+		return -EIO;
+
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct buffer_head *bh;
 	u32 k;
@@ -478,6 +481,14 @@ void beamfs_destroy_bitmap(struct super_block *sb)
  */
 u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 {
+	/*
+	 * A failed volume takes no more writes. See beamfs_fail: the
+	 * device is gone, its buffers cannot be read back, and marking
+	 * them dirty is what generic/338 catches with dm-error.
+	 */
+	if (beamfs_failed(sb))
+		return 0;
+
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
 
@@ -598,6 +609,14 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 {
+	/*
+	 * A failed volume takes no more writes. See beamfs_fail: the
+	 * device is gone, its buffers cannot be read back, and marking
+	 * them dirty is what generic/338 catches with dm-error.
+	 */
+	if (beamfs_failed(sb))
+		return;
+
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
 
@@ -679,6 +698,14 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
  */
 u64 beamfs_alloc_inode_num(struct super_block *sb)
 {
+	/*
+	 * A failed volume takes no more writes. See beamfs_fail: the
+	 * device is gone, its buffers cannot be read back, and marking
+	 * them dirty is what generic/338 catches with dm-error.
+	 */
+	if (beamfs_failed(sb))
+		return 0;
+
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long bit;
 

@@ -20,6 +20,11 @@
  * which is the kind of thing a second architecture is for.
  */
 #include <linux/mempool.h>
+/*
+ * sb_bread and mark_buffer_dirty, for the wrappers below and for the
+ * many callers that reach them through this header.
+ */
+#include <linux/buffer_head.h>
 
 /*
  * On-disk format lives in its own header so the userspace tools can
@@ -82,6 +87,25 @@ struct beamfs_sb_info {
 	unsigned long            *s_bitmap_needs_encode;
 	bool                      s_super_needs_encode;
 	spinlock_t                s_lock;     /* Superblock lock */
+
+	/*
+	 * Set once the volume has failed, and never cleared.
+	 *
+	 * A filesystem whose device has gone away must stop writing to
+	 * it. Without this, beamfs kept marking buffers dirty on a device
+	 * that answered every request with EIO -- and the kernel says so:
+	 * mark_buffer_dirty starts with WARN_ON_ONCE(!buffer_uptodate),
+	 * because a buffer that could not be read holds nothing worth
+	 * writing back. generic/338 replaces the device with dm-error and
+	 * watches for exactly that.
+	 *
+	 * Checking buffer_uptodate at each of the thirty-nine
+	 * mark_buffer_dirty sites would silence the warning and treat the
+	 * symptom. The volume is what failed, so the volume is what
+	 * records it: one flag, tested where writes begin, and the mount
+	 * goes read-only so the VFS stops sending more.
+	 */
+	bool                      s_failed;
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
 
@@ -464,6 +488,45 @@ int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
 /* Scratch pages, from the mount's reserve. Never NULL under GFP_NOFS. */
 void *beamfs_scratch_get(struct super_block *sb);
 void  beamfs_scratch_put(struct super_block *sb, void *p);
+
+/*
+ * Record that the volume has failed and take it read-only.
+ *
+ * Safe to call more than once and from any context; the first caller
+ * logs, the rest are ignored.
+ */
+void beamfs_fail(struct super_block *sb, const char *where, int err);
+
+/*
+ * sb_bread, and mark the volume failed when it comes back empty.
+ *
+ * Forty-seven sites read blocks and each handles its own NULL with an
+ * EIO. That is right locally and blind globally: nothing recorded that
+ * the device had stopped answering, so the next write went ahead and
+ * dirtied a buffer nobody could read -- the WARN_ON_ONCE inside
+ * mark_buffer_dirty, which generic/338 provokes with dm-error.
+ *
+ * One wrapper, so a read that fails is a volume that has failed, and
+ * every write path already tests beamfs_failed().
+ */
+static inline struct buffer_head *beamfs_bread(struct super_block *sb,
+					       sector_t block,
+					       const char *where)
+{
+	struct buffer_head *bh = sb_bread(sb, block);
+
+	if (!bh)
+		beamfs_fail(sb, where, -EIO);
+	return bh;
+}
+
+/* Has the volume already failed? Writes must not start if it has. */
+static inline bool beamfs_failed(struct super_block *sb)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	return sbi && READ_ONCE(sbi->s_failed);
+}
 
 /* dirent.c -- variable-length directory entries, and parity over them */
 u32  beamfs_dirent_place(u32 off, u16 len);

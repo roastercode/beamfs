@@ -81,7 +81,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		if (!block_no)
 			break;
 
-		bh = sb_bread(sb, block_no);
+		bh = beamfs_bread(sb, block_no, "directory");
 		if (!bh)
 			continue;
 
@@ -187,7 +187,7 @@ struct dentry *beamfs_lookup(struct inode *dir,
 		if (!block_no)
 			break;
 
-		bh = sb_bread(sb, block_no);
+		bh = beamfs_bread(sb, block_no, "directory");
 		if (!bh)
 			continue;
 

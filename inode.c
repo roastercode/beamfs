@@ -68,7 +68,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 		 + (ino - 1) / inodes_per_block;
 	offset = (ino - 1) % inodes_per_block;
 
-	bh = sb_bread(sb, block);
+	bh = beamfs_bread(sb, block, "inode table");
 	if (!bh) {
 		pr_err("beamfs: unable to read inode block %lu\n", block);
 		iget_failed(inode);

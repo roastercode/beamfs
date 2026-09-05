@@ -110,7 +110,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh)
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return;
 
-	pbh = sb_bread(sb, region_blk);
+	pbh = beamfs_bread(sb, region_blk, "indirect parity");
 	if (!pbh) {
 		pr_err_ratelimited("beamfs: cannot read parity block %llu for indirect %llu\n",
 				   (unsigned long long)region_blk,
@@ -176,7 +176,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return 0;
 
-	pbh = sb_bread(sb, region_blk);
+	pbh = beamfs_bread(sb, region_blk, "indirect parity");
 	if (!pbh)
 		return 0;   /* parity unreadable: do not fail the read on it */
 
