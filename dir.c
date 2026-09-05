@@ -38,6 +38,23 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 	u32            start_off;
 	int            ret = 0;
 
+	/*
+	 * ctx->pos is a byte offset into the directory, and any value is
+	 * legal.
+	 *
+	 * It used to be (block + 1) << 16 | offset, which cannot express
+	 * a position below 65536 as anything but block -1: seekdir to a
+	 * cookie this filesystem never issued -- which is exactly what
+	 * t_readdir_3 does -- started the walk outside every block and
+	 * returned nothing. "Unexpected EOF while reading dir",
+	 * reproducible at thirty files and above.
+	 *
+	 * ext2 treats pos as the offset it is: block = pos / blocksize,
+	 * offset = pos % blocksize, and a position past the end simply
+	 * finds no entries. Same here, with 3824-byte blocks. Positions
+	 * 0 and 1 stay reserved for dot and dotdot, so the first real
+	 * entry sits at 2 and the arithmetic starts one step in.
+	 */
 	if (ctx->pos == INT_MAX)
 		return 0;
 
@@ -46,21 +63,14 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 			return 0;
 	}
 
-	/*
-	 * The cookie carries a byte offset now, not a slot number.
-	 *
-	 * Slots existed because every entry was 268 bytes whatever its
-	 * name; with variable-length entries there is no slot to count.
-	 * Sixteen bits is more than the 3824 bytes a block holds, so the
-	 * layout of the cookie is unchanged and telldir/seekdir keep
-	 * working across the format change.
-	 */
 	if (ctx->pos <= 2) {
 		start_block = 0;
 		start_off   = 0;
 	} else {
-		start_block = (int)((ctx->pos >> 16) & 0x7FFF) - 1;
-		start_off   = (u32)(ctx->pos & 0xFFFF);
+		u64 p = (u64)ctx->pos - 2;
+
+		start_block = (int)(p / BEAMFS_DATA_INLINE_BYTES);
+		start_off   = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
 	}
 
 	payload = beamfs_scratch_get(sb);
@@ -85,12 +95,6 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		if (!bh)
 			continue;
 
-		/*
-		 * Decode before reading anything. A flipped inode number
-		 * points a name at the wrong file and a flipped length
-		 * walks the parser into the next entry; both were silent
-		 * before this block carried parity.
-		 */
 		_ret = beamfs_dirent_decode(sb, bh, payload);
 		brelse(bh);
 		if (_ret < 0) {
@@ -101,6 +105,32 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		}
 
 		offset = (block_idx == start_block) ? start_off : 0;
+
+		/*
+		 * Slide to a record boundary.
+		 *
+		 * seekdir can land mid-record, and reading a header from
+		 * the middle of a name yields nonsense. Walk from the top
+		 * of the block to the first record at or after the
+		 * requested offset -- ext2_validate_entry does the same,
+		 * for the same reason.
+		 */
+		if (offset != 0 && offset < BEAMFS_DATA_INLINE_BYTES) {
+			u32 scan = 0;
+
+			while (scan < offset) {
+				u32 nxt;
+
+				de = (struct beamfs_dir_entry *)(payload + scan);
+				if (!beamfs_dirent_valid(de, scan))
+					break;
+				nxt = beamfs_dirent_next(de, scan);
+				if (nxt == BEAMFS_DIRENT_NOSPACE || nxt <= scan)
+					break;
+				scan = nxt;
+			}
+			offset = scan;
+		}
 
 		while (offset < BEAMFS_DATA_INLINE_BYTES) {
 			u32 next;
@@ -138,29 +168,13 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 			offset = next;
 
 			/*
-			 * Advance after emitting, and for every record --
-			 * not only the ones handed to the caller.
-			 *
-			 * The cookie has to name where reading resumes, so
-			 * it must point past what was just returned. Set
-			 * before dir_emit, it named the entry being
-			 * emitted, and a seekdir to a position obtained
-			 * from telldir returned that entry a second time.
-			 * Skipping it for records that are not emitted --
-			 * free ones, dot and dotdot -- left the cookie
-			 * pointing into the middle of the block for the
-			 * next call, which read the same ground again and
-			 * then ran out: t_readdir_3 calls that "Unexpected
-			 * EOF while reading dir".
-			 *
-			 * ext2 does the same thing at the bottom of its
-			 * loop, unconditionally.
+			 * Advance after emitting, and for every record, so
+			 * the cookie names where reading resumes rather
+			 * than the entry just returned.
 			 */
-			ctx->pos = ((loff_t)(block_idx + 1) << 16) | offset;
+			ctx->pos = 2 + (loff_t)block_idx *
+					BEAMFS_DATA_INLINE_BYTES + offset;
 		}
-
-		start_block = block_idx + 1;
-		start_off   = 0;
 	}
 
 	ctx->pos = INT_MAX;
