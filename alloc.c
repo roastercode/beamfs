@@ -370,19 +370,11 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct buffer_head *bh;
-	u8 *bdata;
-	unsigned long max_bit;
-	unsigned long block_first_bit;
-	unsigned long block_last_bit;
-	unsigned long bit, scan;
 	u32 k;
-	u32 i, b;
 
 	if (!sbi->s_bitmap_blkhs || !sbi->s_block_bitmap)
 		return -EINVAL;
-
-	max_bit = sbi->s_nblocks;
-	if (bit_global >= max_bit)
+	if (bit_global >= sbi->s_nblocks)
 		return -EINVAL;
 
 	k = (u32)(bit_global / BEAMFS_BITS_PER_BITMAP_BLOCK);
@@ -394,87 +386,49 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 		return -EINVAL;
 
 	/*
-	 * Acquire bh buffer lock BEFORE touching bh->b_data.
-	 * Without this, memset() + reconstruction race against
-	 * concurrent BDI writeback that reads bh->b_data while
-	 * I/O is in flight, producing torn writes on disk
-	 * (sec. 3.10 bitmap drift, RCA 2026-05-16: under writeback
-	 * cache=writethrough qemu, 100 file create + 50 unlink burst
-	 * triggered a 4 KiB block being persisted with bit clear
-	 * even though the in-memory bitmap had it set, because the
-	 * BDI flusher started DMA on the bh between memset() and
-	 * the reconstruction loop).
+	 * Rebuild the block's on-disk image now, under the lock.
 	 *
-	 * lock_buffer() can sleep; this function MUST therefore be
-	 * called OUTSIDE sbi->s_lock (spinlock). Callers refactored
-	 * to release s_lock before invoking us.
+	 * A deferred version of this lived here for a day: mark the block
+	 * as needing a rebuild, do it in sync_fs, one rebuild per block
+	 * touched instead of one per bit. It measured 25% faster on
+	 * writes and a factor of four on deletes, and it was wrong.
+	 *
+	 * The needs_encode flag and the buffer's dirty bit are two states
+	 * and the kernel knows only the second. Between mark_buffer_dirty
+	 * below and sync_fs getting round to the rebuild, the flusher can
+	 * write the buffer with its old contents and clear dirty; sync_fs
+	 * then rebuilds an image nobody will ever write. fsck found
+	 * 122368 blocks still marked used after 400 MiB was written and
+	 * deleted, doubling with every cycle, while df reported the
+	 * volume empty. The bitmap in memory was right and the one on
+	 * disk was a lie.
+	 *
+	 * Three thousand eight hundred bytes walked and sixteen RS
+	 * encodes, on every allocation and every free. That is what
+	 * correctness costs here. Bringing it down means changing fewer
+	 * bits per rebuild, not letting the buffer reach the disk stale.
 	 */
 	lock_buffer(bh);
-
-	bdata = (u8 *)bh->b_data;
-	memset(bdata, 0, BEAMFS_BLOCK_SIZE);
-
-	block_first_bit = (unsigned long)k * BEAMFS_BITS_PER_BITMAP_BLOCK;
-	block_last_bit  = block_first_bit + BEAMFS_BITS_PER_BITMAP_BLOCK;
-	if (block_last_bit > max_bit)
-		block_last_bit = max_bit;
+	beamfs_bitmap_encode_one_locked(sbi, k, bh);
+	clear_bit(k, sbi->s_bitmap_needs_encode);
+	mark_buffer_dirty(bh);
 
 	/*
-	 * Note that this block's image is stale and stop there.
+	 * Bind to the owner inode so VFS writeback flushes this bitmap
+	 * block BEFORE the owner inode is marked clean. The VFS flushes
+	 * the inode's metadata buffer list in __writeback_single_inode
+	 * before write_inode, which establishes the bitmap-before-inode
+	 * ordering that prevents the boot-time double-free: without it,
+	 * boot N could persist an inode pointer without persisting the
+	 * matching bitmap clear, leaving boot N+1 to mount a bitmap
+	 * declaring a block free while an inode still referenced it.
 	 *
-	 * Rebuilding it means walking 3824 bytes bit by bit and running
-	 * sixteen RS encodes, and it was done on every allocation and
-	 * every free -- one full rebuild per data block touched. The bit
-	 * that changed is already in s_block_bitmap, which is the
-	 * authority; the on-disk image only has to be right when the
-	 * buffer reaches the disk, and beamfs_bitmap_encode_pending()
-	 * makes it so from sync_fs.
-	 *
-	 * mark_buffer_dirty still happens here, so the VFS sees the block
-	 * as needing writeback exactly as before and the
-	 * bitmap-before-inode ordering below is untouched.
+	 * owner is NULL on the mount path, where the caller drives a
+	 * synchronous sync_dirty_buffer itself, and on the free path from
+	 * beamfs_free_data_blocks.
 	 */
-	set_bit(k, sbi->s_bitmap_needs_encode);
-	(void)bdata;
-	(void)bit;
-	(void)scan;
-	(void)i;
-	(void)b;
-	(void)block_first_bit;
-	(void)block_last_bit;
-
-	mark_buffer_dirty(bh);
-	/* Bind to owner inode so VFS writeback flushes this bitmap
-	 * block BEFORE the owner inode is marked clean. The VFS
-	 * flushes the inode's metadata buffer list in
-	 * __writeback_single_inode before write_inode, which
-	 * establishes the bitmap-before-inode ordering required to
-	 * prevent the sec. 3.10 boot-time
-	 * double_free symptom: without this, boot N could persist
-	 * an inode pointer without persisting the matching bitmap
-	 * clear, leaving boot N+1 to mount a bitmap declaring the
-	 * block free while an inode still referenced it. owner is
-	 * NULL on the mount path (RS auto-correction in
-	 * beamfs_setup_bitmap), where the caller already drives a
-	 * synchronous sync_dirty_buffer.
-	 */
-	if (owner && !(inode_state_read_once(owner) & I_FREEING)) {
-		/*
-		 * Attaching the buffer to the inode's metadata list hands
-		 * it to __writeback_single_inode, which writes it without
-		 * ever calling sync_fs. Deferring the rebuild is only safe
-		 * while nothing else can write the buffer; this path can,
-		 * so the image has to be correct before the handover.
-		 *
-		 * The rebuild still happens once per block that moved
-		 * rather than once per bit, because the bit is cleared
-		 * here and the next allocation in the same block sets it
-		 * again.
-		 */
-		beamfs_bitmap_encode_one_locked(sbi, k, bh);
-		clear_bit(k, sbi->s_bitmap_needs_encode);
+	if (owner && !(inode_state_read_once(owner) & I_FREEING))
 		mmb_mark_buffer_dirty(bh, &BEAMFS_I(owner)->i_metadata_bhs);
-	}
 
 	unlock_buffer(bh);
 	return 0;

@@ -88,8 +88,34 @@ static void beamfs_put_super(struct super_block *sb)
 		 * stale. Doing it here costs one pass over blocks that are
 		 * usually already clean.
 		 */
+		/*
+		 * Rebuild, then write, then release -- in that order.
+		 *
+		 * The rebuild was here and the write was not, so
+		 * beamfs_destroy_bitmap released the buffers with brelse
+		 * and the images died in memory. Every block freed since
+		 * the last sync stayed marked used on disk: fsck reported
+		 * 122368 used-but-unreferenced blocks after one write of
+		 * 400 MiB and its deletion, and the count doubled with each
+		 * cycle. df was right and the disk was not.
+		 *
+		 * The superblock was written here from the start, which is
+		 * why the free count looked correct while the bitmap
+		 * underneath it did not.
+		 */
 		beamfs_bitmap_encode_pending(sb);
 		beamfs_super_encode_pending(sbi);
+
+		if (sbi->s_bitmap_blkhs) {
+			u32 k;
+
+			for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+				struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
+
+				if (bh && buffer_dirty(bh))
+					sync_dirty_buffer(bh);
+			}
+		}
 		if (sbi->s_sbh && buffer_dirty(sbi->s_sbh))
 			sync_dirty_buffer(sbi->s_sbh);
 
