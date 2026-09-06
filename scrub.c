@@ -225,6 +225,23 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 	 * One page copied per indirect block visited, against a sweep
 	 * that walks at one block per interval.
 	 */
+	/*
+	 * Check the indirect block itself before reading it.
+	 *
+	 * The sweep walked every data block an inode owns and never
+	 * looked at the blocks holding the pointers, which carry their
+	 * own parity scheme -- ind_parity, not the sixteen RS codewords
+	 * a data block uses. A corrupted pointer array is worse than a
+	 * corrupted data block: it loses everything below it.
+	 */
+	if (beamfs_ind_parity_verify(sb, ibh)) {
+		pr_err_ratelimited("beamfs: sweep: indirect block %llu fails its parity\n",
+				   (unsigned long long)blk);
+		sbi->s_scrub_uncorrectable++;
+		brelse(ibh);
+		return 0;
+	}
+
 	ptrs = kmemdup(ibh->b_data, BEAMFS_BLOCK_SIZE, GFP_NOFS);
 	brelse(ibh);
 	if (!ptrs)
@@ -248,6 +265,11 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 			continue;
 
 		ret = beamfs_scrub_check_block(sb, child, &corrected);
+		if (ret == -EUCLEAN)
+			pr_err_ratelimited("beamfs: sweep: block %llu is a leaf under indirect %llu (depth %u, slot %llu)\n",
+					   (unsigned long long)child,
+					   (unsigned long long)blk, depth,
+					   (unsigned long long)j);
 		visited++;
 		sbi->s_scrub_blocks++;
 		if (corrected)
