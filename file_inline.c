@@ -1348,19 +1348,20 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	if (!tmp)
 		return -ENOMEM;
 	/*
-	 * Under the buffer lock, like every other reader of a coded
-	 * block.
+	 * No lock_buffer here, and the reason is in the callers.
 	 *
-	 * The write path holds lock_buffer across the memcpy that lays
-	 * the payload down and the RS encode that follows. A read that
-	 * copies without the lock catches that halfway -- payload from
-	 * after the write, parity from before -- and reports damage on a
-	 * block nothing has damaged. This is the data read path, so it
-	 * runs more often than any of the others.
+	 * Three of the five hold it already -- writeback_range,
+	 * zero_tail_block and the RMW path all lock the buffer before
+	 * decoding into it -- so taking it again deadlocks on the first
+	 * decode, which on this filesystem means the rootfs mount. That
+	 * was tried and the node never reached a login prompt.
+	 *
+	 * The two callers that do not hold it are read_folio_range and
+	 * fiemap, where a torn read is possible and shows up as a
+	 * spurious uncorrectable rather than as damage. Fixing that means
+	 * locking in those two callers, not here.
 	 */
-	lock_buffer(bh);
 	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
-	unlock_buffer(bh);
 
 	beamfs_rs_decode_region(
 		tmp, BEAMFS_SUBBLOCK_TOTAL,
