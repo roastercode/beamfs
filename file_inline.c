@@ -1347,7 +1347,20 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	tmp = beamfs_scratch_get(sb);
 	if (!tmp)
 		return -ENOMEM;
+	/*
+	 * Under the buffer lock, like every other reader of a coded
+	 * block.
+	 *
+	 * The write path holds lock_buffer across the memcpy that lays
+	 * the payload down and the RS encode that follows. A read that
+	 * copies without the lock catches that halfway -- payload from
+	 * after the write, parity from before -- and reports damage on a
+	 * block nothing has damaged. This is the data read path, so it
+	 * runs more often than any of the others.
+	 */
+	lock_buffer(bh);
 	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
+	unlock_buffer(bh);
 
 	beamfs_rs_decode_region(
 		tmp, BEAMFS_SUBBLOCK_TOTAL,

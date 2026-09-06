@@ -184,10 +184,26 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 
 	memset(results, 0, sizeof(results));
 
+	/*
+	 * Under the buffer lock, like the sweep.
+	 *
+	 * beamfs_dirent_encode holds lock_buffer across the memmove that
+	 * spreads the records into codeword slots and the RS encode that
+	 * follows. Copying without the lock catches that halfway: payload
+	 * from after the write, parity from before, uncorrectable by
+	 * construction and reported as damage on a block nothing has
+	 * damaged.
+	 *
+	 * Five callers reach here -- readdir, lookup, add_dirent,
+	 * del_dirent, dir_is_empty -- and any of them can run while
+	 * another writes the same directory.
+	 */
+	lock_buffer(bh);
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		memcpy(dst + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 		       (u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
 		       BEAMFS_SUBBLOCK_DATA);
+	unlock_buffer(bh);
 
 	ret = beamfs_rs_decode_region(dst, BEAMFS_SUBBLOCK_DATA,
 				      (u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,

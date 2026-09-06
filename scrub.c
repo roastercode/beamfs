@@ -85,10 +85,31 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 * shared through the block device page cache, and a scrub has no
 	 * business modifying what a concurrent reader sees.
 	 */
+	/*
+	 * Under the buffer lock, or the snapshot is of two blocks.
+	 *
+	 * Writers hold lock_buffer across memcpy plus rs_encode_region --
+	 * the payload changes, then the sixteen parity fields catch up.
+	 * Copying without the lock catches that halfway and hands the
+	 * decoder a payload from after the write with parity from before,
+	 * which is uncorrectable by construction.
+	 *
+	 * That is what the sweep kept reporting: block 1110 failing all
+	 * sixteen codewords while fsck called the same volume clean, and
+	 * blocks 1062 and 1631 failing only the subblocks that held data.
+	 * Twenty such reports appeared the moment new data blocks started
+	 * being encoded on allocation, because there were simply more
+	 * writes to collide with.
+	 *
+	 * The lock is held for a 3824-byte copy and nothing else. The
+	 * decode runs afterwards, on the copy.
+	 */
+	lock_buffer(bh);
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		memcpy(staging + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 		       (u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
 		       BEAMFS_SUBBLOCK_DATA);
+	unlock_buffer(bh);
 
 	ret = beamfs_rs_decode_region(staging, BEAMFS_SUBBLOCK_DATA,
 				      (u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
