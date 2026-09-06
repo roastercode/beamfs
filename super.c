@@ -74,6 +74,7 @@ static int beamfs_statfs(struct dentry *dentry, struct kstatfs *buf)
  */
 static void beamfs_put_super(struct super_block *sb)
 {
+	beamfs_dbg_report();
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
 	if (sbi) {

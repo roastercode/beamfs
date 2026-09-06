@@ -293,6 +293,26 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	if (positions)
 		memcpy(data_orig, data, len);
 
+	/* Mode "apply": corrects data and parity in place. eras_pos = NULL
+	 * forces the kernel into the apply branch (decode_rs.c line 315).
+	 *
+	 * Per-CPU: get_cpu_ptr disables preemption while decode runs in
+	 * the CPU-local rs_control. decode_rs8 is pure computation, no
+	 * allocs, no sleeps -- preempt-disable is safe.
+	 */
+	{
+		struct rs_control **ctrl_p = get_cpu_ptr(beamfs_rs_ctrl_pcpu);
+		struct rs_control *ctrl = *ctrl_p;
+
+		if (!ctrl) {
+			put_cpu_ptr(beamfs_rs_ctrl_pcpu);
+			return -EINVAL;
+		}
+		nerr = decode_rs8(ctrl, data, par, len,
+				  NULL, 0, NULL, 0, NULL);
+		put_cpu_ptr(beamfs_rs_ctrl_pcpu);
+	}
+
 	if (nerr < 0) {
 		/*
 		 * Silent here, on purpose.

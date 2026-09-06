@@ -497,6 +497,9 @@ void  beamfs_scratch_put(struct super_block *sb, void *p);
  */
 void beamfs_fail(struct super_block *sb, const char *where, int err);
 
+/* Sonde temporaire : blocs alloues et non liberes. */
+void beamfs_dbg_report(void);
+
 /*
  * sb_bread, and mark the volume failed when it comes back empty.
  *

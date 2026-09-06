@@ -27,6 +27,58 @@
 #include <linux/vmalloc.h>
 #include "beamfs.h"
 
+/*
+ * Sonde : qui alloue, qui libere, pour quel inode.
+ * Retiree une fois la fuite de generic/464 comprise.
+ */
+static DEFINE_SPINLOCK(beamfs_dbg_lock);
+#define BEAMFS_DBG_MAX 512
+static struct { u64 blk; unsigned long ino; } beamfs_dbg_live[BEAMFS_DBG_MAX];
+static unsigned int beamfs_dbg_n;
+
+static void beamfs_dbg_alloc_note(u64 blk, unsigned long ino)
+{
+	unsigned long f;
+
+	spin_lock_irqsave(&beamfs_dbg_lock, f);
+	if (beamfs_dbg_n < BEAMFS_DBG_MAX) {
+		beamfs_dbg_live[beamfs_dbg_n].blk = blk;
+		beamfs_dbg_live[beamfs_dbg_n].ino = ino;
+		beamfs_dbg_n++;
+	}
+	spin_unlock_irqrestore(&beamfs_dbg_lock, f);
+}
+
+static void beamfs_dbg_free_note(u64 blk)
+{
+	unsigned long f;
+	unsigned int k;
+
+	spin_lock_irqsave(&beamfs_dbg_lock, f);
+	for (k = 0; k < beamfs_dbg_n; k++) {
+		if (beamfs_dbg_live[k].blk == blk) {
+			beamfs_dbg_live[k] = beamfs_dbg_live[--beamfs_dbg_n];
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&beamfs_dbg_lock, f);
+}
+
+void beamfs_dbg_report(void)
+{
+	unsigned long f;
+	unsigned int k;
+
+	spin_lock_irqsave(&beamfs_dbg_lock, f);
+	pr_info("beamfs/dbg: %u blocs alloues non liberes\n", beamfs_dbg_n);
+	for (k = 0; k < beamfs_dbg_n && k < 12; k++)
+		pr_info("beamfs/dbg:   bloc %llu ino %lu\n",
+			(unsigned long long)beamfs_dbg_live[k].blk,
+			beamfs_dbg_live[k].ino);
+	spin_unlock_irqrestore(&beamfs_dbg_lock, f);
+}
+EXPORT_SYMBOL(beamfs_dbg_report);
+
 
 /* ------------------------------------------------------------------ */
 /* Block bitmap                                                        */
@@ -604,6 +656,8 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 	 */
 	beamfs_write_bitmap_block(sb, bit, owner);
 
+	beamfs_dbg_alloc_note((u64)(sbi->s_data_start + bit),
+			      owner ? owner->i_ino : 0);
 	return (u64)(sbi->s_data_start + bit);
 }
 
@@ -667,6 +721,7 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 {
+	beamfs_dbg_free_note(block);
 	/*
 	 * A failed volume takes no more writes. See beamfs_fail: the
 	 * device is gone, its buffers cannot be read back, and marking
