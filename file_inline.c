@@ -1725,10 +1725,28 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 *
 	 * ext2 draws the same line: create = flags & IOMAP_WRITE.
 	 */
-	if (flags & IOMAP_WRITE)
+	if (flags & IOMAP_WRITE) {
+		struct beamfs_inode_info *fi = BEAMFS_I(inode);
+
+		/*
+		 * Allocation is serialised by i_alloc_mutex, and this is
+		 * an allocation site.
+		 *
+		 * The two other callers take it; this one did not, so two
+		 * threads writing the same logical block each allocated a
+		 * physical one and the second overwrote the first's
+		 * pointer. The overwritten block stayed marked used with
+		 * nothing referencing it -- 36 leaked out of 317559
+		 * allocations under generic/344, which runs holetest with
+		 * 256 threads on one sparse file. A narrow window, hit
+		 * often enough by 256 threads.
+		 */
+		mutex_lock(&fi->i_alloc_mutex);
 		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
-	else
+		mutex_unlock(&fi->i_alloc_mutex);
+	} else {
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+	}
 	if (ret < 0)
 		return ret;
 
