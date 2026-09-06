@@ -673,11 +673,25 @@ void beamfs_fail(struct super_block *sb, const char *where, int err)
 	if (cmpxchg(&sbi->s_failed, false, true))
 		return;			/* someone else was first */
 
-	pr_err("beamfs: volume failed in %s (%d), going read-only\n",
+	pr_err("beamfs: volume failed in %s (%d), refusing further writes\n",
 	       where, err);
 
-	if (!sb_rdonly(sb))
-		sb->s_flags |= SB_RDONLY;
+	/*
+	 * s_failed is enough, and SB_RDONLY is not ours to set.
+	 *
+	 * ext4 says so in as many words -- "We don't set SB_RDONLY because
+	 * that requires sb->s_umount" -- and this path holds no such lock.
+	 * Worse, get_tree_bdev returns -EBUSY when the flags of an
+	 * existing superblock differ from the ones asked for, so a volume
+	 * marked read-only here could not be mounted rw again while its
+	 * superblock lived. generic/338 failed one volume with dm-error
+	 * and every test after it got "No space left on device" from a
+	 * mount that had quietly refused: nine failures from one.
+	 *
+	 * Every write path already tests beamfs_failed(). The VFS keeps
+	 * sending work and gets EIO for it, which is what a failed device
+	 * should produce, and the next mount starts from a zeroed sb_info.
+	 */
 }
 
 void *beamfs_scratch_get(struct super_block *sb)

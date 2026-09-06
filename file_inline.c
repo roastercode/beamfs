@@ -1704,7 +1704,31 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		iomap->length = length;
 	}
 
-	ret = beamfs_inline_lookup_phys(inode, b, &phys);
+	/*
+	 * A write allocates here, not at writeback.
+	 *
+	 * Only lookup_phys was called, for every caller, so a write to an
+	 * unallocated block was told IOMAP_HOLE and accepted into the page
+	 * cache; the allocation happened later in the flusher, where an
+	 * ENOSPC has nobody left to report to. A volume at 100% took a
+	 * 10 MiB write at 5.5 GB/s -- nothing reached the disk, and the
+	 * application was told it had.
+	 *
+	 * That is silent data loss, on a filesystem whose whole purpose is
+	 * that data survives.
+	 *
+	 * It also explains the EFBIG that ended generic/015 and
+	 * generic/269: dd kept writing past the end of a full 1 GiB volume
+	 * until the file hit the 134480396-block ceiling of the
+	 * indirection tree -- 479 GiB of file on a gigabyte of disk --
+	 * because no write ever failed.
+	 *
+	 * ext2 draws the same line: create = flags & IOMAP_WRITE.
+	 */
+	if (flags & IOMAP_WRITE)
+		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+	else
+		ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	if (ret < 0)
 		return ret;
 
