@@ -2809,16 +2809,35 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 	 * xfs_file_write_checks exists for this, and says so in a
 	 * comment: "that assigns ki_pos for O_APPEND".
 	 */
+	/*
+	 * inode_lock, like every other buffered write in the tree.
+	 *
+	 * generic_file_write_iter takes it for ext2; ext4 and XFS take
+	 * it by hand. Without it a truncate -- do_truncate holds
+	 * inode_lock through setattr -- runs while this write is still
+	 * populating the page cache of the same inode: i_size is written
+	 * by both sides in no order, truncate_setsize drops folios this
+	 * write is still creating, and the block tree is freed under a
+	 * mapping iomap_begin has already handed out.
+	 *
+	 * generic/464 makes that the common case: sixteen processes doing
+	 * pwrite -ftc on two hundred files chosen at random.
+	 *
+	 * i_alloc_mutex serialises the tree walks. It does not serialise
+	 * the write against the truncate; that is what the inode lock is
+	 * for.
+	 */
+	inode_lock(inode);
 	ret = generic_write_checks(iocb, from);
 	if (ret <= 0)
-		return ret;
+		goto out;
 
 	before = i_size_read(inode);
 
 	ret = iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
 					&beamfs_inline_write_ops, NULL);
 	if (ret <= 0)
-		return ret;
+		goto out;
 
 	/*
 	 * iomap_write_iter() states the division of labour outright:
@@ -2843,7 +2862,15 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 	inode_set_mtime_to_ts(inode, current_time(inode));
 	mark_inode_dirty(inode);
 
-	return generic_write_sync(iocb, ret);
+out:
+	inode_unlock(inode);
+	/*
+	 * Outside the lock, as ext4 does: it may wait on the device and
+	 * has no business holding the inode while it does.
+	 */
+	if (ret > 0)
+		ret = generic_write_sync(iocb, ret);
+	return ret;
 }
 
 /* ------------------------------------------------------------------------- */
