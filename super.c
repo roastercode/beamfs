@@ -400,7 +400,20 @@ static void beamfs_evict_inode(struct inode *inode)
 	 * number back to the bitmap.
 	 */
 	if (!inode->i_nlink) {
+		/*
+		 * Under the allocator's mutex, like every other walk of
+		 * the indirection tree.
+		 *
+		 * Eviction is not obviously concurrent with anything --
+		 * the inode has no references left -- but the tree it
+		 * walks is the same one the allocator writes, and the
+		 * blocks it returns go back to a bitmap other inodes are
+		 * drawing from. Taking the lock costs nothing on a path
+		 * that runs once per inode and removes the question.
+		 */
+		mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
 		beamfs_free_data_blocks(inode);
+		mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		inode->i_mode = 0;
 		beamfs_write_inode_raw(inode);
 	}

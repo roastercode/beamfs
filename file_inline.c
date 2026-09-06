@@ -2178,11 +2178,26 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		u64    phys = 0;
 		u8    *src;
 
-		mutex_lock(&fi->i_alloc_mutex);
-		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
-		mutex_unlock(&fi->i_alloc_mutex);
-		if (ret < 0)
-			break;
+		{
+			u64 before = 0;
+
+			mutex_lock(&fi->i_alloc_mutex);
+			(void)beamfs_inline_lookup_phys(inode, b, &before);
+			ret = beamfs_inline_lookup_or_alloc_phys(inode, b,
+								 &phys);
+			mutex_unlock(&fi->i_alloc_mutex);
+			if (ret < 0)
+				break;
+			/*
+			 * Sonde : un bloc deja mappe qui change d adresse
+			 * signifie que le precedent vient d etre perdu.
+			 */
+			if (before && phys && before != phys)
+				pr_err("beamfs/leak: ino=%llu iblock=%llu %llu -> %llu\n",
+				       (unsigned long long)inode->i_ino, (unsigned long long)b,
+				       (unsigned long long)before,
+				       (unsigned long long)phys);
+		}
 
 		/*
 		 * Never lock the same buffer twice in one pass.
@@ -2941,11 +2956,21 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (zero_offset >= BEAMFS_DATA_INLINE_BYTES)
 		return 0;
 
-	mutex_lock(&fi->i_alloc_mutex);
-	ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
-	mutex_unlock(&fi->i_alloc_mutex);
-	if (ret < 0)
-		return ret;
+	{
+		u64 before = 0;
+
+		mutex_lock(&fi->i_alloc_mutex);
+		(void)beamfs_inline_lookup_phys(inode, b, &before);
+		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+		mutex_unlock(&fi->i_alloc_mutex);
+		if (ret < 0)
+			return ret;
+		if (before && phys && before != phys)
+			pr_err("beamfs/leak: zero_tail ino=%llu iblock=%llu %llu -> %llu\n",
+			       (unsigned long long)inode->i_ino, (unsigned long long)b,
+			       (unsigned long long)before,
+			       (unsigned long long)phys);
+	}
 	if (phys == 0)
 		return 0; /* HOLE: nothing to zero, sparse semantics */
 
@@ -3076,7 +3101,28 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 					return ret;
 			}
 
+			/*
+			 * The same mutex the allocator takes.
+			 *
+			 * Truncate walks the same indirection tree that
+			 * lookup_or_alloc_phys writes into, and took no
+			 * lock at all. The trace caught it: pid 3212
+			 * freeing block 0xe09 at 196.057356 between pid
+			 * 3112 allocating it at 196.042955 and allocating
+			 * it again at 196.058203 -- one writer's pointer
+			 * overwritten by another's, and the block left
+			 * marked used with nothing referencing it.
+			 *
+			 * generic/464 runs sixteen processes doing
+			 * pwrite -ftc against two hundred files chosen at
+			 * random, so a truncate on one file races an
+			 * allocation on another constantly. The leak
+			 * varied from 1 to 734 blocks between runs, which
+			 * is what a race looks like when you count it.
+			 */
+			mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
 			beamfs_inline_free_blocks_from(inode, b_first_freed);
+			mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		} else if (new_size > old_size) {
 			/* Sparse extension: just adjust i_size. read_folio
 			 * returns zero for unallocated (HOLE) blocks.
