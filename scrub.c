@@ -105,14 +105,26 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 * decode runs afterwards, on the copy.
 	 */
 	lock_buffer(bh);
-	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
-		memcpy(staging + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-		       (u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       BEAMFS_SUBBLOCK_DATA);
+	/*
+	 * The whole block, parity included.
+	 *
+	 * decode_rs8 corrects data and parity in place -- it writes to
+	 * both buffers it is given. Copying only the payload and pointing
+	 * the decoder at bh->b_data for the parity means every read
+	 * rewrites the shared buffer's parity bytes. A block read often
+	 * enough degrades until it will not decode at all, which is what
+	 * the sweep kept reporting on blocks fsck called clean, and why
+	 * the count grew as the volume got busier.
+	 *
+	 * The data path has done this correctly all along: "Decode
+	 * RS(255,239) subblocks into a private scratch buffer, never into
+	 * bh->b_data."
+	 */
+	memcpy(staging, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
 	unlock_buffer(bh);
 
-	ret = beamfs_rs_decode_region(staging, BEAMFS_SUBBLOCK_DATA,
-				      (u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
+	ret = beamfs_rs_decode_region(staging, BEAMFS_SUBBLOCK_TOTAL,
+				      staging + BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_SUBBLOCK_TOTAL,
 				      BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_DATA_INLINE_SUBBLOCKS,
@@ -179,13 +191,14 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 * rewrite itself endlessly and wear the medium for nothing.
 	 */
 	if (n_corrected) {
-		unsigned int k;
-
 		lock_buffer(bh);
-		for (k = 0; k < BEAMFS_DATA_INLINE_SUBBLOCKS; k++)
-			memcpy((u8 *)bh->b_data + (size_t)k * BEAMFS_SUBBLOCK_TOTAL,
-			       staging + (size_t)k * BEAMFS_SUBBLOCK_DATA,
-			       BEAMFS_SUBBLOCK_DATA);
+		/*
+		 * The whole block. staging holds the corrected codewords
+		 * in their on-disk layout now -- data and parity both, at
+		 * a 255-byte stride -- because that is what decode_rs8
+		 * produces and what the block has to go back as.
+		 */
+		memcpy((u8 *)bh->b_data, staging, BEAMFS_BLOCK_SIZE);
 		set_buffer_uptodate(bh);
 		unlock_buffer(bh);
 		mark_buffer_dirty(bh);

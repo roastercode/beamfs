@@ -199,14 +199,26 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 	 * another writes the same directory.
 	 */
 	lock_buffer(bh);
-	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
-		memcpy(dst + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-		       (u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       BEAMFS_SUBBLOCK_DATA);
+	/*
+	 * The whole block, parity included.
+	 *
+	 * decode_rs8 corrects data and parity in place -- it writes to
+	 * both buffers it is given. Copying only the payload and pointing
+	 * the decoder at bh->b_data for the parity means every read
+	 * rewrites the shared buffer's parity bytes. A block read often
+	 * enough degrades until it will not decode at all, which is what
+	 * the sweep kept reporting on blocks fsck called clean, and why
+	 * the count grew as the volume got busier.
+	 *
+	 * The data path has done this correctly all along: "Decode
+	 * RS(255,239) subblocks into a private scratch buffer, never into
+	 * bh->b_data."
+	 */
+	memcpy(dst, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
 	unlock_buffer(bh);
 
-	ret = beamfs_rs_decode_region(dst, BEAMFS_SUBBLOCK_DATA,
-				      (u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
+	ret = beamfs_rs_decode_region(dst, BEAMFS_SUBBLOCK_TOTAL,
+				      dst + BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_SUBBLOCK_TOTAL,
 				      BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_DATA_INLINE_SUBBLOCKS,
@@ -236,6 +248,23 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 					   i, BEAMFS_DATA_INLINE_SUBBLOCKS);
 			ret = -EUCLEAN;
 		}
+	}
+
+	/*
+	 * De-interleave what the decoder corrected.
+	 *
+	 * dst held the block in its on-disk layout for the decode --
+	 * decode_rs8 writes to both the data and the parity it is given,
+	 * so both had to be private. Callers want the 3824 payload bytes
+	 * contiguous, which is what the walk over records expects.
+	 */
+	if (ret >= 0) {
+		unsigned int k;
+
+		for (k = 0; k < BEAMFS_DATA_INLINE_SUBBLOCKS; k++)
+			memmove(dst + (size_t)k * BEAMFS_SUBBLOCK_DATA,
+				dst + (size_t)k * BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA);
 	}
 
 	return ret < 0 ? ret : (int)corrected;
