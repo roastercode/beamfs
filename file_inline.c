@@ -592,7 +592,36 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
-		beamfs_ind_parity_update(sb, dbh);
+		/*
+		 * A data block carries sixteen RS codewords, not indirect
+		 * parity.
+		 *
+		 * ind_parity_update files a CRC for this block number in
+		 * the separate parity region that covers indirect blocks.
+		 * A newly allocated data block was being registered there,
+		 * and its own sixteen codewords were left as the zeros
+		 * memset put down -- correct for a zero block, wrong the
+		 * moment anything is written into it and the parity is not
+		 * recomputed.
+		 *
+		 * The sweep found exactly that: subblocks holding data,
+		 * uncorrectable; subblocks still zero, fine. Encoding here
+		 * makes a fresh block valid on its own terms from the
+		 * start.
+		 */
+		{
+			int _e = beamfs_rs_encode_region(
+				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+			if (_e < 0)
+				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
+						   (unsigned long long)new_block,
+						   _e);
+		}
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
@@ -695,7 +724,36 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
-		beamfs_ind_parity_update(sb, dbh);
+		/*
+		 * A data block carries sixteen RS codewords, not indirect
+		 * parity.
+		 *
+		 * ind_parity_update files a CRC for this block number in
+		 * the separate parity region that covers indirect blocks.
+		 * A newly allocated data block was being registered there,
+		 * and its own sixteen codewords were left as the zeros
+		 * memset put down -- correct for a zero block, wrong the
+		 * moment anything is written into it and the parity is not
+		 * recomputed.
+		 *
+		 * The sweep found exactly that: subblocks holding data,
+		 * uncorrectable; subblocks still zero, fine. Encoding here
+		 * makes a fresh block valid on its own terms from the
+		 * start.
+		 */
+		{
+			int _e = beamfs_rs_encode_region(
+				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+			if (_e < 0)
+				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
+						   (unsigned long long)new_block,
+						   _e);
+		}
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
@@ -856,7 +914,36 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
-		beamfs_ind_parity_update(sb, dbh);
+		/*
+		 * A data block carries sixteen RS codewords, not indirect
+		 * parity.
+		 *
+		 * ind_parity_update files a CRC for this block number in
+		 * the separate parity region that covers indirect blocks.
+		 * A newly allocated data block was being registered there,
+		 * and its own sixteen codewords were left as the zeros
+		 * memset put down -- correct for a zero block, wrong the
+		 * moment anything is written into it and the parity is not
+		 * recomputed.
+		 *
+		 * The sweep found exactly that: subblocks holding data,
+		 * uncorrectable; subblocks still zero, fine. Encoding here
+		 * makes a fresh block valid on its own terms from the
+		 * start.
+		 */
+		{
+			int _e = beamfs_rs_encode_region(
+				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+			if (_e < 0)
+				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
+						   (unsigned long long)new_block,
+						   _e);
+		}
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
@@ -1062,7 +1149,36 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					     (unsigned long long)inode->i_ino, iblock_logical);
 		set_buffer_uptodate(dbh);
 		unlock_buffer(dbh);
-		beamfs_ind_parity_update(sb, dbh);
+		/*
+		 * A data block carries sixteen RS codewords, not indirect
+		 * parity.
+		 *
+		 * ind_parity_update files a CRC for this block number in
+		 * the separate parity region that covers indirect blocks.
+		 * A newly allocated data block was being registered there,
+		 * and its own sixteen codewords were left as the zeros
+		 * memset put down -- correct for a zero block, wrong the
+		 * moment anything is written into it and the parity is not
+		 * recomputed.
+		 *
+		 * The sweep found exactly that: subblocks holding data,
+		 * uncorrectable; subblocks still zero, fine. Encoding here
+		 * makes a fresh block valid on its own terms from the
+		 * start.
+		 */
+		{
+			int _e = beamfs_rs_encode_region(
+				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+			if (_e < 0)
+				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
+						   (unsigned long long)new_block,
+						   _e);
+		}
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
