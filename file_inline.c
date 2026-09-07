@@ -757,8 +757,22 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
+		/*
+		 * Under the buffer lock, like ext2 splicing a branch.
+		 *
+		 * This stores a pointer into a shared indirect block. Without
+		 * the lock the store races the flusher submitting that same
+		 * buffer: the pointer reaches disk half-written, or a
+		 * concurrent installer's store is lost. generic/464 lost
+		 * blocks whose final event was exactly this store into an L1
+		 * shared across inodes, with no free and no truncate after.
+		 * ind_parity_update reads b_data, so it belongs inside the
+		 * lock too.
+		 */
+		lock_buffer(ibh);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh);
+		unlock_buffer(ibh);
 		mark_buffer_dirty(ibh);
 		brelse(ibh);
 
@@ -947,8 +961,22 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
+		/*
+		 * Under the buffer lock, like ext2 splicing a branch.
+		 *
+		 * This stores a pointer into a shared indirect block. Without
+		 * the lock the store races the flusher submitting that same
+		 * buffer: the pointer reaches disk half-written, or a
+		 * concurrent installer's store is lost. generic/464 lost
+		 * blocks whose final event was exactly this store into an L1
+		 * shared across inodes, with no free and no truncate after.
+		 * ind_parity_update reads b_data, so it belongs inside the
+		 * lock too.
+		 */
+		lock_buffer(l1bh);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh);
+		unlock_buffer(l1bh);
 		mark_buffer_dirty(l1bh);
 		brelse(l1bh);
 
@@ -1182,8 +1210,22 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
+		/*
+		 * Under the buffer lock, like ext2 splicing a branch.
+		 *
+		 * This stores a pointer into a shared indirect block. Without
+		 * the lock the store races the flusher submitting that same
+		 * buffer: the pointer reaches disk half-written, or a
+		 * concurrent installer's store is lost. generic/464 lost
+		 * blocks whose final event was exactly this store into an L1
+		 * shared across inodes, with no free and no truncate after.
+		 * ind_parity_update reads b_data, so it belongs inside the
+		 * lock too.
+		 */
+		lock_buffer(l2bh);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh);
+		unlock_buffer(l2bh);
 		mark_buffer_dirty(l2bh);
 		brelse(l2bh);
 
