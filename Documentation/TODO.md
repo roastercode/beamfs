@@ -112,3 +112,53 @@ Patch submitted to linux-rdma@vger.kernel.org (June 2026).
 Acked-by from Haris Iqbal received. Jason Gunthorpe (maintainer)
 involved. Status: awaiting merge into rdma-next. Google buganizer
 issue closed as Infeasible (not Android scope).
+
+## 2026-09-07 — état xfstests après la semaine de correction
+
+### Résolus et prouvés
+- **generic/522** : passe en 1133 s (fsx soak, tracé de bout en bout,
+  aucune erreur). Ce n'était pas un défaut mais de la durée. Budget porté
+  à 1800 s dans beamfs-xfstests (LONG_TESTS). RÉSOLU.
+- **generic/473** : ne peut pas passer. La parité inline rend la carte
+  fiemap non-affine (addr avance de 4096 pendant que length vaut 3824),
+  donc un extent déborde toujours. Prouvé par le calcul de géométrie.
+  Limite de format, documentée, à mentionner dans la lettre de couverture.
+
+### Corrigés (generic/464, fuite de blocs), tous fondés sur trace
+Quatre défauts réels, chacun commité :
+1. i_alloc_mutex sur les cinq parcours de l'arbre (alloc + free_blocks_from
+   + free_data_blocks + evict). Commit 6bd9ca2.
+2. write_iter sous inode_lock — write vs truncate concurrents. Commit a179e6c.
+3. ind_parity_verify décode une COPIE, jamais bh->b_data. decode_rs8
+   corrige en place ; la parité de région périmée d'un bloc réalloué
+   ramenait l'ancien contenu. Commit 28c3f8b.
+4. installation d'un pointeur d'indirection (sind/dind/tind) sous
+   lock_buffer + ind_parity_update sous le verrou. Commit be0fa62.
+
+Effet mesuré : pics de 1400+ blocs perdus constants -> majorité d'essais
+propres, mais la fuite N'EST PAS éliminée (4 échecs sur 8 au dernier run,
+pic résiduel 1126). Sources multiples et indépendantes produisant le même
+symptôme fsck (used-but-unreferenced).
+
+### Ouverts, documentés pour reprise à froid
+- **generic/464, fuite résiduelle** : les essais qui échouent sont les
+  courts (<140 s), les longs passent. Chaque bloc perdu tracé se termine
+  par une installation de pointeur (inst/l1inst) sans free ni truncate
+  après. Méthode qui marche : trace_pipe (pas de perte) sur un run,
+  sondes inst/l1inst/l1read/alloc/free avec inode et site. À faire :
+  tracer PLUSIEURS runs consécutifs et corréler pour savoir si la source
+  restante est un chemin unique ou variable.
+- **generic/589** : comportement de montage ET de propagation
+  (shared/slave/private/bind) VÉRIFIÉ IDENTIQUE à ext4 côte à côte.
+  Le diff est un mpC compté une fois au lieu de deux dans une séquence
+  de propagation. Ni la fuite 464 (pas d'erreur fsstress dans le .full),
+  ni un défaut de montage démontrable. Cause exacte non trouvée.
+
+### Rappels de méthode (coûteux à réapprendre)
+- git stash drop efface les sondes non commitées : le build suivant
+  compile le code propre et on mesure sans instrumentation sans le voir.
+- Tampon ftrace en mémoire déborde sur un run 464 (>2.9M événements) :
+  utiliser trace_pipe drainé vers un fichier, qui bloque le producteur
+  plutôt que de perdre.
+- Ancres Python EOF : le code bouge, vérifier count==1 et relire le
+  texte réel (cat -A) avant chaque patch.
