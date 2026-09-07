@@ -202,10 +202,43 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		u8 *slot = (u8 *)pbh->b_data + offset;
 		int results[1];
 		int positions[BEAMFS_RS_PARITY / 2];
+		u8 *copy;
+
+		/*
+		 * Decode a copy, never bh->b_data.
+		 *
+		 * decode_rs8 corrects in place: it writes both the data
+		 * and the parity it is handed. Decoding the live indirect
+		 * block against the parity region rewrites that block --
+		 * and when the region's parity is stale, which it is the
+		 * moment a data block is reallocated as an indirect one
+		 * without the region being updated, the "correction"
+		 * drags the block back toward whatever it held before.
+		 *
+		 * generic/464 turned that into 500-block leaks: a fresh
+		 * L1 filled with 512 pointers was read once by another
+		 * process, verify decoded it against block 1934's old
+		 * parity, and the 512 pointers collapsed back to the two
+		 * the previous owner had left -- orphaning everything
+		 * below them.
+		 *
+		 * A verify has no business modifying the block it checks.
+		 * It decodes into scratch, reports what it finds, and
+		 * touches nothing. The only real corruption on a device
+		 * that flips no bits is stale parity, and the fix for that
+		 * is to keep the parity current, not to let the decoder
+		 * launder one block's contents into another's.
+		 */
+		copy = beamfs_scratch_get(sb);
+		if (!copy) {
+			brelse(pbh);
+			return 0;
+		}
+		memcpy(copy, block, BEAMFS_BLOCK_SIZE);
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 			int rc = beamfs_rs_decode_region(
-				(u8 *)block + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+				copy + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_DATA,
 				slot + (size_t)i * BEAMFS_RS_PARITY,
 				BEAMFS_RS_PARITY,
@@ -227,6 +260,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 					BEAMFS_SUBBLOCK_DATA);
 			}
 		}
+		beamfs_scratch_put(sb, copy);
 	}
 
 	brelse(pbh);
