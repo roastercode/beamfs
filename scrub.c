@@ -149,6 +149,49 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 					     (unsigned int)results[i]);
 		} else if (results[i] < 0) {
 			/*
+			 * Confirm by re-reading before crying wolf. The
+			 * sweep reads a block via sb_bread on the block
+			 * device while the owning inode may still be
+			 * flushing, and can catch data updated with parity
+			 * not yet written, or the reverse -- uncorrectable
+			 * on a block that is sound once the flush lands.
+			 * Every first-boot report of this kind decoded
+			 * clean offline, byte-identical on disk. A real
+			 * defect survives a re-read; a half-flushed block
+			 * does not.
+			 */
+			struct buffer_head *rbh;
+			int rc2 = -EUCLEAN;
+
+			if (bh) {
+				clear_buffer_uptodate(bh);
+				brelse(bh);
+				bh = NULL;
+			}
+			rbh = __bread(sb->s_bdev, phys, BEAMFS_BLOCK_SIZE);
+			if (rbh) {
+				int r2[BEAMFS_DATA_INLINE_SUBBLOCKS];
+				int p2[BEAMFS_DATA_INLINE_SUBBLOCKS *
+				       (BEAMFS_RS_PARITY / 2)];
+
+				lock_buffer(rbh);
+				memcpy(staging, (u8 *)rbh->b_data,
+				       BEAMFS_BLOCK_SIZE);
+				unlock_buffer(rbh);
+				beamfs_rs_decode_region(staging,
+					BEAMFS_SUBBLOCK_TOTAL,
+					staging + BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_SUBBLOCK_TOTAL,
+					BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_DATA_INLINE_SUBBLOCKS,
+					r2, p2, BEAMFS_RS_PARITY / 2,
+					"sweep-confirm");
+				rc2 = r2[i];
+				brelse(rbh);
+			}
+			if (rc2 >= 0)
+				continue;
+			/*
 			 * Say which block and which codeword. An
 			 * uncorrectable subblock is the event this
 			 * filesystem exists to report, and a line that
@@ -190,7 +233,13 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 * untouched block must not be dirtied, or a quiet volume would
 	 * rewrite itself endlessly and wear the medium for nothing.
 	 */
-	if (n_corrected) {
+	/*
+	 * bh is NULL when the confirm path above dropped it. A block with
+	 * both a corrected and an uncorrectable subblock skips write-back
+	 * this pass; it is damaged, and the next sweep retries from a
+	 * fresh read.
+	 */
+	if (n_corrected && bh) {
 		lock_buffer(bh);
 		/*
 		 * The whole block. staging holds the corrected codewords
@@ -205,7 +254,8 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	}
 
 	*corrected = n_corrected;
-	brelse(bh);
+	if (bh)
+		brelse(bh);
 
 out_free:
 	beamfs_scratch_put(sb, staging);
