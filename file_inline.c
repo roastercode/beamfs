@@ -773,7 +773,31 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh);
 		unlock_buffer(ibh);
-		mark_buffer_dirty(ibh);
+		/*
+		 * Attach the block to the inode and dirty the inode, the
+		 * way ext2_splice_branch ends:
+		 *
+		 *   mmb_mark_buffer_dirty(where->bh,
+		 *                         &EXT2_I(inode)->i_metadata_bhs);
+		 *   inode_set_ctime_current(inode);
+		 *   mark_inode_dirty(inode);
+		 *
+		 * A plain mark_buffer_dirty leaves the block on no inode's
+		 * metadata list, so __writeback_single_inode never flushes
+		 * it: the pointer is in memory, the buffer is dirty, and
+		 * nothing carries it to the disk. The three sites that
+		 * create a fresh indirect block already dirty the inode --
+		 * they change i_indirect -- and these three, installing
+		 * into a block that already exists, did not.
+		 *
+		 * That is the generic/464 leak: 28 blocks allocated by one
+		 * writer into one inode from this site, no free after, and
+		 * the flusher reallocating for the same inode seconds later
+		 * because the tree it read had none of them.
+		 */
+		mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
+		inode_set_ctime_current(inode);
+		mark_inode_dirty(inode);
 		brelse(ibh);
 
 		*phys_out = new_block;
@@ -977,7 +1001,31 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh);
 		unlock_buffer(l1bh);
-		mark_buffer_dirty(l1bh);
+		/*
+		 * Attach the block to the inode and dirty the inode, the
+		 * way ext2_splice_branch ends:
+		 *
+		 *   mmb_mark_buffer_dirty(where->bh,
+		 *                         &EXT2_I(inode)->i_metadata_bhs);
+		 *   inode_set_ctime_current(inode);
+		 *   mark_inode_dirty(inode);
+		 *
+		 * A plain mark_buffer_dirty leaves the block on no inode's
+		 * metadata list, so __writeback_single_inode never flushes
+		 * it: the pointer is in memory, the buffer is dirty, and
+		 * nothing carries it to the disk. The three sites that
+		 * create a fresh indirect block already dirty the inode --
+		 * they change i_indirect -- and these three, installing
+		 * into a block that already exists, did not.
+		 *
+		 * That is the generic/464 leak: 28 blocks allocated by one
+		 * writer into one inode from this site, no free after, and
+		 * the flusher reallocating for the same inode seconds later
+		 * because the tree it read had none of them.
+		 */
+		mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
+		inode_set_ctime_current(inode);
+		mark_inode_dirty(inode);
 		brelse(l1bh);
 
 		*phys_out = new_block;
@@ -1226,7 +1274,31 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh);
 		unlock_buffer(l2bh);
-		mark_buffer_dirty(l2bh);
+		/*
+		 * Attach the block to the inode and dirty the inode, the
+		 * way ext2_splice_branch ends:
+		 *
+		 *   mmb_mark_buffer_dirty(where->bh,
+		 *                         &EXT2_I(inode)->i_metadata_bhs);
+		 *   inode_set_ctime_current(inode);
+		 *   mark_inode_dirty(inode);
+		 *
+		 * A plain mark_buffer_dirty leaves the block on no inode's
+		 * metadata list, so __writeback_single_inode never flushes
+		 * it: the pointer is in memory, the buffer is dirty, and
+		 * nothing carries it to the disk. The three sites that
+		 * create a fresh indirect block already dirty the inode --
+		 * they change i_indirect -- and these three, installing
+		 * into a block that already exists, did not.
+		 *
+		 * That is the generic/464 leak: 28 blocks allocated by one
+		 * writer into one inode from this site, no free after, and
+		 * the flusher reallocating for the same inode seconds later
+		 * because the tree it read had none of them.
+		 */
+		mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
+		inode_set_ctime_current(inode);
+		mark_inode_dirty(inode);
 		brelse(l2bh);
 
 		*phys_out = new_block;
