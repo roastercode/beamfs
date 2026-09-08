@@ -13,6 +13,7 @@
 #include <linux/time.h>
 #include <linux/fs_dirent.h>
 #include "beamfs.h"
+#include "beamfs_trace.h"
 
 /* ------------------------------------------------------------------ */
 /* Helper: write a raw beamfs_inode to disk                             */
@@ -114,6 +115,8 @@ static int beamfs_write_inode_raw_flags(struct inode *inode, bool sync)
 	       sizeof(raw->i_reserved) - BEAMFS_RS_PARITY);
 	beamfs_rs_encode((u8 *)raw, BEAMFS_INODE_RS_DATA, raw->i_reserved);
 
+	trace_beamfs_write_inode(inode->i_ino, sync,
+				 (u64)le64_to_cpu(fi->i_indirect), 0);
 	mark_buffer_dirty(bh);
 	if (sync) {
 		sync_dirty_buffer(bh);

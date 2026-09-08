@@ -2465,6 +2465,33 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		{
 			u64 before = 0;
 
+			/*
+			 * Nothing to allocate for an inode being destroyed.
+			 *
+			 * __mark_inode_dirty returns without queueing when I_FREEING is
+			 * set -- fs-writeback.c:2687, "if (inode_state_read(inode) &
+			 * I_FREEING) goto out_unlock". So a block allocated here has its
+			 * pointer installed in a tree whose inode will never be written:
+			 * the bitmap says used, no inode references it, and fsck calls it
+			 * used-but-unreferenced.
+			 *
+			 * That is the generic/464 leak. Measured on a failing run: of
+			 * 24599 mark_inode_dirty calls from the tree paths, 18051 were on
+			 * inodes already carrying I_FREEING and were silently dropped;
+			 * every write_inode that did happen came from the flusher with
+			 * sync=0, none from unmount; and the inodes owning the lost blocks
+			 * were still 0xcd on disk -- never written at all.
+			 *
+			 * ext2 cannot hit this: ext2_get_block is called with create=0 on
+			 * the writeback path, and an evicting inode has had
+			 * truncate_inode_pages_final anyway, so it has no pages left to
+			 * write. beamfs allocates at writeback and has to check for
+			 * itself.
+			 */
+			if (inode_state_read_once(inode) & (I_FREEING | I_WILL_FREE | I_CLEAR)) {
+				ret = -EIO;
+				break;
+			}
 			mutex_lock(&fi->i_alloc_mutex);
 			(void)beamfs_inline_lookup_phys(inode, b, &before);
 			ret = beamfs_inline_lookup_or_alloc_phys(inode, b,

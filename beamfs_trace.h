@@ -71,6 +71,39 @@ TRACE_EVENT(beamfs_block_free,
 		  __entry->ino, __entry->blk, __entry->site)
 );
 
+TRACE_EVENT(beamfs_write_inode,
+	TP_PROTO(unsigned long ino, int sync, u64 indirect, int err),
+	TP_ARGS(ino, sync, indirect, err),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(int, sync)
+		__field(u64, indirect)
+		__field(int, err)
+	),
+	TP_fast_assign(
+		__entry->ino = ino;
+		__entry->sync = sync;
+		__entry->indirect = indirect;
+		__entry->err = err;
+	),
+	TP_printk("ino=%lu sync=%d i_indirect=%llu err=%d",
+		  __entry->ino, __entry->sync, __entry->indirect, __entry->err)
+);
+
+TRACE_EVENT(beamfs_inode_dirty,
+	TP_PROTO(unsigned long ino, unsigned long state),
+	TP_ARGS(ino, state),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(unsigned long, state)
+	),
+	TP_fast_assign(
+		__entry->ino = ino;
+		__entry->state = state;
+	),
+	TP_printk("ino=%lu state=0x%lx", __entry->ino, __entry->state)
+);
+
 #endif /* _BEAMFS_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH
