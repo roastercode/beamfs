@@ -15,6 +15,14 @@
 #include <linux/statfs.h>
 #include "beamfs.h"
 
+/*
+ * One translation unit defines the tracepoints; every other file just
+ * includes the header. super.c is as good a place as any and is always
+ * built.
+ */
+#define CREATE_TRACE_POINTS
+#include "beamfs_trace.h"
+
 /* Inode cache (slab allocator) */
 static struct kmem_cache *beamfs_inode_cachep;
 

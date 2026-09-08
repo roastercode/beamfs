@@ -23,6 +23,11 @@ beamfs-y := super.o      \
 
 # Strip absolute build paths from __FILE__ macros so the resulting .ko
 # binary does not embed TMPDIR (Yocto buildpaths QA fix).
+# Tracepoint definitions live in beamfs_trace.h next to the sources;
+# define_trace.h re-includes it by name, so the directory has to be on
+# the include path.
+ccflags-y += -I$(src)
+
 ccflags-y += -fmacro-prefix-map=$(src)/=
 ccflags-y += -fmacro-prefix-map=$(srctree)/=
 ccflags-y += -ffile-prefix-map=$(src)/=

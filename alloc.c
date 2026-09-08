@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include "beamfs.h"
+#include "beamfs_trace.h"
 
 
 
@@ -605,6 +606,8 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 	 */
 	beamfs_write_bitmap_block(sb, bit, owner);
 
+	trace_beamfs_block_alloc(owner ? owner->i_ino : 0,
+				 (u64)(sbi->s_data_start + bit), 0);
 	return (u64)(sbi->s_data_start + bit);
 }
 
@@ -718,6 +721,7 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 		spin_unlock(&sbi->s_lock);
 		return;
 	}
+	trace_beamfs_block_free(owner ? owner->i_ino : 0, block, 0);
 
 	/*
 	 * Pull the goal back to what was just freed, if it is behind.
