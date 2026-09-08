@@ -1998,7 +1998,22 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 		u64    phys = 0;
 		u8    *dst;
 
+		/*
+		 * The tree read under the allocator's mutex.
+		 *
+		 * lookup_phys walks i_direct and the indirect blocks while
+		 * writeback, truncate and eviction are free to rewrite them.
+		 * Reading a pointer mid-update returns a block number that
+		 * belongs to no one, or to another file once it has been
+		 * reallocated. ext2 holds truncate_mutex across the same walk.
+		 *
+		 * Held for the lookup only, released before the read that
+		 * follows: the block I/O may sleep and has no business
+		 * holding up the allocator.
+		 */
+		mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+		mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		if (ret < 0)
 			break;
 
@@ -2167,7 +2182,22 @@ static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
 		u64    phys = 0;
 		u8    *dst;
 
+		/*
+		 * The tree read under the allocator's mutex.
+		 *
+		 * lookup_phys walks i_direct and the indirect blocks while
+		 * writeback, truncate and eviction are free to rewrite them.
+		 * Reading a pointer mid-update returns a block number that
+		 * belongs to no one, or to another file once it has been
+		 * reallocated. ext2 holds truncate_mutex across the same walk.
+		 *
+		 * Held for the lookup only, released before the read that
+		 * follows: the block I/O may sleep and has no business
+		 * holding up the allocator.
+		 */
+		mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
+		mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		if (ret < 0)
 			break;
 
