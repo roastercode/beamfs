@@ -162,3 +162,39 @@ symptôme fsck (used-but-unreferenced).
   plutôt que de perdre.
 - Ancres Python EOF : le code bouge, vérifier count==1 et relire le
   texte réel (cat -A) avant chaque patch.
+
+## 2026-09-07 (suite) — sweep uncorrectable au boot : RÉSOLU
+
+Les 23 "sweep uncorrectable" au boot étaient des FAUX POSITIFS
+transitoires, prouvé par trois vérifications indépendantes :
+- fsck valide l'image entière (5 passes OK) ;
+- le décodeur de référence hors ligne rend 0 uncorrectable sur les
+  blocs incriminés (5111, 14127, 9805) ;
+- ces blocs sont bit-pour-bit identiques entre l'image et le disque VM.
+
+Cause : le sweep lit le bdev via sb_bread EN PARALLÈLE du writeback du
+rootfs au boot, et attrape des blocs à moitié synchronisés (données à
+jour, parité pas encore, ou l'inverse). À froid, trois passages complets
+du sweep : 0 incident.
+
+Correction (commit 629020d) : relecture-confirmation. Sur un premier
+échec de décodage, le sweep drop le buffer caché, relit frais via
+__bread, redécode, et ne journalise/compte que si le second décodage
+échoue aussi. Comportement d'un scrubber matériel. Validé : 3 boots
+successifs, sweep uncorrectable=0 à chaque fois.
+
+### Chantier de fond noté (version ultérieure)
+Le sweep lit le bdev en parallèle du writeback. La correction propre
+serait de le faire balayer via beamfs_iget (vue cohérente VFS,
+possibilité de sauter les inodes I_DIRTY/en writeback) plutôt que
+sb_bread direct. La relecture-confirmation masque le symptôme
+correctement ; iget traiterait la racine. Non bloquant.
+
+## Bilan xfstests fin de semaine
+- 522 : PASS (1133s), budget outil 1800s. RÉSOLU.
+- 473 : impossible (format inline non-affine). Documenté.
+- sweep uncorrectable boot : RÉSOLU (629020d).
+- 464 : 4 correctifs réels, fuite réduite (majorité propre), source
+  résiduelle documentée. OUVERT.
+- 589 : montage/propagation identique à ext4 vérifié. Cause exacte
+  non trouvée. OUVERT.
