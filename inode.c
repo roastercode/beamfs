@@ -140,9 +140,32 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 
 		{
 			int positions[BEAMFS_RS_PARITY / 2];
+			struct beamfs_inode fixed;
 
-			nerr = beamfs_rs_decode((u8 *)raw, BEAMFS_INODE_RS_DATA,
-					       raw->i_reserved,
+			/*
+			 * Decode a copy, not the shared buffer.
+			 *
+			 * decode_rs8 corrects in place, and raw points into
+			 * the inode table block, which holds several inodes.
+			 * Correcting there rewrites a buffer other inodes are
+			 * read from, and the mark_buffer_dirty below then
+			 * carries the result to disk -- a speculative fix
+			 * graved before the CRC has confirmed it, on a block
+			 * that may simply have been mid-write.
+			 *
+			 * The same shape as beamfs_ind_parity_verify had, and
+			 * as the data read path avoids: "never into
+			 * bh->b_data. decode_rs8 mutates both data and parity."
+			 *
+			 * Decode into a private copy, confirm with the CRC,
+			 * and only then write the corrected inode back under
+			 * the buffer lock. A correction that does not pass the
+			 * CRC touches nothing.
+			 */
+			memcpy(&fixed, raw, sizeof(fixed));
+			nerr = beamfs_rs_decode((u8 *)&fixed,
+					       BEAMFS_INODE_RS_DATA,
+					       fixed.i_reserved,
 					       positions,
 					       BEAMFS_RS_PARITY / 2,
 				"inode");
@@ -153,14 +176,20 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 				return ERR_PTR(-EIO);
 			}
 
-			crc = beamfs_crc32(raw, offsetof(struct beamfs_inode, i_crc32));
-			if (crc != le32_to_cpu(raw->i_crc32)) {
+			crc = beamfs_crc32(&fixed,
+					   offsetof(struct beamfs_inode, i_crc32));
+			if (crc != le32_to_cpu(fixed.i_crc32)) {
 				pr_err("beamfs: inode %lu CRC32 mismatch after RS correction\n",
 				       ino);
 				brelse(bh);
 				iget_failed(inode);
 				return ERR_PTR(-EIO);
 			}
+
+			/* Confirmed: publish the correction. */
+			lock_buffer(bh);
+			memcpy(raw, &fixed, sizeof(fixed));
+			unlock_buffer(bh);
 
 			/* Log the RS event with position list for entropy. nerr is
 			 * the total symbol count (data + parity); positions[] holds
