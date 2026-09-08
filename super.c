@@ -17,8 +17,8 @@
 
 /*
  * One translation unit defines the tracepoints; every other file just
- * includes the header. super.c is as good a place as any and is always
- * built.
+ * includes the header. This one carries the definition because it is
+ * always built.
  */
 #define CREATE_TRACE_POINTS
 #include "beamfs_trace.h"
