@@ -267,3 +267,21 @@ voir si le bloc est soumis puis perdu, ou jamais soumis.
 Un volume qui perd des blocs sous charge concurrente ordinaire, sans
 injection de fautes, ne peut pas servir de référence pour mesurer
 l'effet d'un faisceau : on ne distinguerait pas les deux causes.
+
+## Règle de diagnostic (2026-09-08)
+
+Face à une erreur, épuiser les moyens disponibles jusqu'à la cause
+exacte, AVANT toute correction et AVANT toute annonce.
+
+- Capturer tout ce qui est capturable en un seul run. Un filtre choisi
+  d'avance sur l'hypothèse du moment ne peut que confirmer ou infirmer
+  une idée à la fois, et fait perdre un cycle par question.
+- Répéter jusqu'à reproduction certaine. Un run non concluant n'est pas
+  un résultat et ne doit jamais être présenté comme tel.
+- Croiser les niveaux : filesystem, page cache, writeback, périphérique
+  bloc, contenu disque bit à bit.
+- Ne dire "c'est trouvé" que quand la chaîne causale est complète et
+  vérifiée. Sinon : "voici un fait, voici ce qu'il reste à établir".
+- Un fait qui contredit l'hypothèse a priorité sur l'hypothèse.
+- Si le diagnostic bute sur l'outillage plutôt que sur le défaut,
+  réparer l'outillage d'abord.
