@@ -18,7 +18,35 @@
 /* Helper: write a raw beamfs_inode to disk                             */
 /* ------------------------------------------------------------------ */
 
-int beamfs_write_inode_raw(struct inode *inode)
+/*
+ * The inode has to reach the medium the way the bitmap does.
+ *
+ * beamfs_write_bitmap_block encodes and dirties a bitmap block on every
+ * allocation and every free, and put_super/sync_fs then sync_dirty_buffer
+ * every one of them: the bitmap is on disk whatever the flusher does.
+ * The inode had only mark_buffer_dirty, and beamfs_write_inode ignored
+ * wbc->sync_mode entirely, so a WB_SYNC_ALL from unmount returned
+ * without waiting for anything.
+ *
+ * That asymmetry is the generic/464 leak. Measured on the failing
+ * volume: the bitmap block was written, twenty-four of twenty-five
+ * inodes seen in the trace were still 0xcd -- never written at all --
+ * and 112 blocks were marked used in the bitmap with no inode left to
+ * reference them. The volume mounted with 201 files totalling zero
+ * bytes.
+ *
+ * ext2 ends __ext2_write_inode with:
+ *
+ *     mark_buffer_dirty(bh);
+ *     if (do_sync) {
+ *             sync_dirty_buffer(bh);
+ *             ...
+ *     }
+ *
+ * and ext2_write_inode passes wbc->sync_mode == WB_SYNC_ALL. This does
+ * the same.
+ */
+static int beamfs_write_inode_raw_flags(struct inode *inode, bool sync)
 {
 	if (beamfs_failed(inode->i_sb))
 		return -EIO;
@@ -87,9 +115,21 @@ int beamfs_write_inode_raw(struct inode *inode)
 	beamfs_rs_encode((u8 *)raw, BEAMFS_INODE_RS_DATA, raw->i_reserved);
 
 	mark_buffer_dirty(bh);
+	if (sync) {
+		sync_dirty_buffer(bh);
+		if (buffer_req(bh) && !buffer_uptodate(bh)) {
+			brelse(bh);
+			return -EIO;
+		}
+	}
 	brelse(bh);
 
 	return 0;
+}
+
+int beamfs_write_inode_raw(struct inode *inode)
+{
+	return beamfs_write_inode_raw_flags(inode, false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1117,7 +1157,8 @@ const struct inode_operations beamfs_symlink_inode_operations = {
 
 int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
-	return beamfs_write_inode_raw(inode);
+	return beamfs_write_inode_raw_flags(inode,
+					    wbc->sync_mode == WB_SYNC_ALL);
 }
 
 /* ------------------------------------------------------------------ */
