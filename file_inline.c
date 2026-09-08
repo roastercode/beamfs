@@ -3178,18 +3178,52 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		else
 			slot_first = 0;
 
-		for (j = slot_first; j < nptrs; j++) {
-			u64 blk = le64_to_cpu(ptrs[j]);
+		/*
+		 * Under the buffer lock, as the install side is.
+		 *
+		 * Zeroing a pointer is a store into a shared indirect
+		 * block, no different from installing one: the flusher
+		 * can be submitting that same buffer while the loop runs,
+		 * and a slot cleared halfway through the write reaches
+		 * the disk as neither the old value nor zero. The three
+		 * install sites take the lock; the two free sites did not.
+		 *
+		 * beamfs_free_block sleeps -- write_bitmap_block takes
+		 * lock_buffer on a bitmap block -- so the pointers are
+		 * collected under the lock first and freed after it, one
+		 * pass each, rather than sleeping with the buffer held.
+		 */
 
-			if (blk) {
-				beamfs_free_block(sb, blk, inode);
-				ptrs[j] = 0;
+		{
+			u64 *doomed;
+			u64 n_doomed = 0;
+
+			doomed = kvmalloc_array(nptrs, sizeof(*doomed),
+						GFP_NOFS);
+			if (!doomed) {
+				brelse(ibh);
+				return;
 			}
-		}
 
-		beamfs_ind_parity_update(sb, ibh);
-		mark_buffer_dirty(ibh);
-		brelse(ibh);
+			lock_buffer(ibh);
+			for (j = slot_first; j < nptrs; j++) {
+				u64 blk = le64_to_cpu(ptrs[j]);
+
+				if (blk) {
+					doomed[n_doomed++] = blk;
+					ptrs[j] = 0;
+				}
+			}
+			beamfs_ind_parity_update(sb, ibh);
+			unlock_buffer(ibh);
+			mmb_mark_buffer_dirty(ibh,
+					      &BEAMFS_I(inode)->i_metadata_bhs);
+			brelse(ibh);
+
+			for (j = 0; j < n_doomed; j++)
+				beamfs_free_block(sb, doomed[j], inode);
+			kvfree(doomed);
+		}
 
 		/* If we freed the entire indirect range, drop the indirect
 		 * block itself.

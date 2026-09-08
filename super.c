@@ -244,6 +244,17 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 		return false;
 	}
 
+	/*
+	 * Clear the slots under the buffer lock, the way the install
+	 * sites do.
+	 *
+	 * Zeroing a pointer is a store into a shared indirect block: the
+	 * flusher can be submitting that buffer while the loop runs. But
+	 * the work between reads sleeps -- the recursion, and
+	 * free_one_block through the bitmap -- so the lock cannot be held
+	 * across it. Decide first, then take the lock only to write the
+	 * slots that are going away.
+	 */
 	for (j = 0; j < nptrs; j++) {
 		__le64 *ptrs = (__le64 *)ibh->b_data;
 		u64 child = le64_to_cpu(ptrs[j]);
@@ -255,7 +266,9 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 		if (depth > 1) {
 			if (beamfs_free_ind_range(sb, child, depth - 1,
 						  child_base, first)) {
+				lock_buffer(ibh);
 				ptrs[j] = 0;
+				unlock_buffer(ibh);
 				dirtied = true;
 			} else {
 				survivors++;
@@ -269,7 +282,9 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 		}
 
 		beamfs_free_one_block(sb, child);
+		lock_buffer(ibh);
 		ptrs[j] = 0;
+		unlock_buffer(ibh);
 		dirtied = true;
 	}
 
