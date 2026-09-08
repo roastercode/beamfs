@@ -183,12 +183,16 @@ __bread, redécode, et ne journalise/compte que si le second décodage
 échoue aussi. Comportement d'un scrubber matériel. Validé : 3 boots
 successifs, sweep uncorrectable=0 à chaque fois.
 
-### Chantier de fond noté (version ultérieure)
-Le sweep lit le bdev en parallèle du writeback. La correction propre
-serait de le faire balayer via beamfs_iget (vue cohérente VFS,
-possibilité de sauter les inodes I_DIRTY/en writeback) plutôt que
-sb_bread direct. La relecture-confirmation masque le symptôme
-correctement ; iget traiterait la racine. Non bloquant.
+### Chantier de fond : FAIT (95a4eb1)
+Le sweep lisait le bdev en parallèle du writeback. Corrigé : ilookup()
+au début de scrub_one_inode -- l'inode n'est balayé que s'il n'est pas
+en cache, ou s'il est au repos (ni I_DIRTY_ALL, ni I_SYNC, ni I_NEW,
+ni I_FREEING/I_WILL_FREE, ni mappé en écriture). ilookup ne lit jamais
+le disque, donc pas de récursion dans le FS.
+
+Validé : 0 uncorrectable au boot ET sous charge xfstests, 7/7 tests de
+contrôle passent (001 002 006 013 076 313 676), 0 autre incident.
+La relecture-confirmation (629020d) reste comme seconde barrière.
 
 ## Bilan xfstests fin de semaine
 - 522 : PASS (1133s), budget outil 1800s. RÉSOLU.
@@ -198,3 +202,21 @@ correctement ; iget traiterait la racine. Non bloquant.
   résiduelle documentée. OUVERT.
 - 589 : montage/propagation identique à ext4 vérifié. Cause exacte
   non trouvée. OUVERT.
+
+## 2026-09-07 — édifice assaini avant reprise de 464
+
+Corrections de cohérence posées cette session, toutes validées :
+- 629020d : sweep confirme par relecture avant de reporter
+- 379b577 : read_folio_range et write_read_folio_range lisent l'arbre
+  sous i_alloc_mutex (cohérence de lecture ; ext2 tient truncate_mutex
+  sur le même parcours). Partiel assumé : le mutex couvre le lookup,
+  pas l'intervalle jusqu'à l'usage du bloc — le tenir sur l'I/O serait
+  coûteux et risqué.
+- 95a4eb1 : sweep saute les inodes occupés (racine des faux positifs)
+
+Note : generic/076 échouait en séquence après 464 — conséquence de la
+fuite 464 laissant le scratch incohérent, pas un défaut propre ni un
+défaut de l'outil de lancement (montages=0 vérifié avant chaque test,
+scratch propre). Il passe dès que la séquence ne contient pas 464.
+
+Reste ouvert : la fuite résiduelle 464, et 589.
