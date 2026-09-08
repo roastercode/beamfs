@@ -220,3 +220,50 @@ défaut de l'outil de lancement (montages=0 vérifié avant chaque test,
 scratch propre). Il passe dès que la séquence ne contient pas 464.
 
 Reste ouvert : la fuite résiduelle 464, et 589.
+
+## 2026-09-08 — 464 : ce qui est établi, et ce qui reste
+
+### Harnais de capture (beamfs-xfstests, tools/beamfs-trace.sh)
+Déployé en /usr/bin sur le nœud. Résout les échecs de mécanique qui
+avaient coûté plusieurs journées : setsid pour survivre à la session
+ssh, écriture sur le disque réel (pas le tmpfs de 982 Mo), détection
+du trace_printk à newline mal échappée, corrélation faite sur le nœud.
+  usage : sudo beamfs-trace.sh 464 4
+  sortie : /var/beamfs-trace/{run,lost,sum}N.txt
+
+### Établi par la trace, définitivement
+- Allocateur SAIN : 0 double allocation sur 1,5M d'événements.
+- Pointeurs CORRECTS en mémoire : install puis relectures voient la
+  bonne valeur, même buffer_head, même blocknr, dirty=1.
+- Chemin d'écriture CORRECT en isolation : un fichier de 40 blocs
+  (12 directs + indirect + 28) écrit ses 41 blocs, fsck propre.
+- Les blocs perdus sont des blocs de données neufs (memset à zéro,
+  visibles en zéros sur disque) dont le bloc d'indirection parent
+  n'a jamais été écrit (motif cdcd = jamais touché depuis mkfs).
+- Un même slot d'un ibh est installé deux fois à quelques secondes
+  d'écart : l'écrivain pose le pointeur, le flusher relit val=0 et
+  réalloue. Entre les deux, aucune troncature.
+
+### Correctifs posés cette session (tous validés, tous commités)
+- 629020d sweep : confirme par relecture
+- 379b577 lecteurs d'arbre sous i_alloc_mutex
+- 95a4eb1 sweep : saute les inodes occupés (racine des faux positifs)
+- bbac7a8 installation de pointeur : mmb_mark_buffer_dirty + mark_inode_dirty
+- 13d6c8b iget : décodage RS de l'inode dans une copie
+Plus, sessions précédentes : i_alloc_mutex sur les 5 parcours,
+inode_lock sur write_iter, verify non destructif, lock_buffer sur les
+3 installations.
+
+### Ce qui reste
+La fuite ne se manifeste que sous la concurrence de 464 (16 processus,
+write + append + writeback + truncate sur 200 fichiers). 13 à 40 blocs
+par run fautif, ~50% des runs. Piste non épuisée : pourquoi un ibh
+marqué dirty, rattaché à i_metadata_bhs, survit à writeback_inodes_sb
++ sync_inodes_sb + deux sync_blockdev sans être écrit. Prochaine sonde :
+block_rq_issue croisé avec les numéros d'ibh, sous charge 464, pour
+voir si le bloc est soumis puis perdu, ou jamais soumis.
+
+### Non publiable en l'état
+Un volume qui perd des blocs sous charge concurrente ordinaire, sans
+injection de fautes, ne peut pas servir de référence pour mesurer
+l'effet d'un faisceau : on ne distinguerait pas les deux causes.
