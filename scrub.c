@@ -377,6 +377,45 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	unsigned int i;
 	umode_t mode;
 
+	/*
+	 * Skip an inode somebody is writing.
+	 *
+	 * The sweep reads the inode table and the data blocks straight
+	 * off the block device, in parallel with the writeback that is
+	 * updating them. It can see a block with its payload written and
+	 * its parity not yet, or the reverse, and report uncorrectable on
+	 * something no reader would ever see in that state. Every such
+	 * report checked out clean once the writer was done: fsck passed
+	 * the image, the offline decoder found nothing, and the bytes on
+	 * disk were identical to the ones that had just been rejected.
+	 *
+	 * Re-reading the block confirms the ones that settle between two
+	 * reads, but a file being appended to continuously -- a system log
+	 * during a test run -- is never settled, and both reads land in
+	 * the same window.
+	 *
+	 * ilookup returns the inode only if it is already in cache; it
+	 * never reads from disk, so it cannot recurse into the filesystem.
+	 * An inode nobody has open is not being written and is safe to
+	 * sweep. One that is dirty or under writeback is skipped and comes
+	 * round again on the next pass, which is what a scrubber should do
+	 * with a moving target.
+	 */
+	{
+		struct inode *vi = ilookup(sb, ino);
+
+		if (vi) {
+			unsigned long st = inode_state_read_once(vi);
+			bool busy = (st & (I_DIRTY_ALL | I_SYNC |
+					   I_NEW | I_FREEING | I_WILL_FREE)) ||
+				    mapping_writably_mapped(vi->i_mapping);
+
+			iput(vi);
+			if (busy)
+				return;
+		}
+	}
+
 	inodes_per_block = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
 	block  = le64_to_cpu(sbi->s_beamfs_sb->s_inode_table_blk)
 		 + (ino - 1) / inodes_per_block;
