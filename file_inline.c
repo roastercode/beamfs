@@ -3426,57 +3426,19 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 			unlock_buffer(ibh);
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
+			brelse(ibh);
 
 			for (j = 0; j < n_doomed; j++)
 				beamfs_free_block(sb, doomed[j], inode);
 			kvfree(doomed);
-
-			/*
-			 * Forget the buffer, do not merely release it.
-			 *
-			 * brelse drops the reference and leaves the buffer
-			 * dirty on this inode's metadata list. The block is
-			 * about to be free, so that list now holds a buffer
-			 * for a block somebody else will be given -- and
-			 * sb_getblk hands back the same buffer_head to
-			 * whoever gets it. The new owner zeroes it, installs
-			 * its pointers, and the buffer is on two lists: its
-			 * own, and this inode's, where it has no business.
-			 * Evicting this inode then calls mmb_invalidate,
-			 * which detaches every buffer on the list -- taking
-			 * the new owner's pointers with it, with nothing left
-			 * to write them.
-			 *
-			 * That is generic/464. One capture: block 3324, one
-			 * buffer, slot 26 written with 21961 and read back as
-			 * zero 380 ms later by a second writer, no free and no
-			 * truncate in between. Another: 512 pointers into
-			 * block 1485, 446 read back as zero, 446 blocks lost.
-			 *
-			 * bforget clears the dirty bit and removes the buffer
-			 * from the list before the block goes. ext2 does the
-			 * same in ext2_free_branches, bforget(bh) ahead of
-			 * ext2_free_blocks, and for the same reason.
-			 */
-			bforget(ibh);
 		}
 
 		/* If we freed the entire indirect range, drop the indirect
 		 * block itself.
 		 */
 		if (slot_first == 0) {
-			struct buffer_head *dead =
-				sb_find_get_block(sb, indirect_blk);
-
 			beamfs_free_block(sb, indirect_blk, inode);
 			fi->i_indirect = 0;
-			/*
-			 * The indirect block itself, same reasoning: it was
-			 * attached to this inode by every pointer install, and
-			 * it must leave that list before it is handed out.
-			 */
-			if (dead)
-				bforget(dead);
 		}
 	}
 

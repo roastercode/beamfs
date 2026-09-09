@@ -298,6 +298,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 
 	if (dirtied)
 		mark_buffer_dirty(ibh);
+	brelse(ibh);
 
 	/*
 	 * Free the block only once nothing points out of it. A block with
@@ -306,17 +307,8 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 	 */
 	if (survivors == 0) {
 		beamfs_free_one_block(sb, blk);
-		/*
-		 * Forget it rather than release it: a freed block's buffer
-		 * left dirty on an inode's metadata list is handed to the
-		 * next owner by sb_getblk, and evicting this inode then
-		 * detaches it out from under them. See the note in
-		 * beamfs_inline_free_blocks_from.
-		 */
-		bforget(ibh);
 		return true;
 	}
-	brelse(ibh);
 	return false;
 }
 
