@@ -811,6 +811,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(ibh);
+		trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+					indirect_slot, le64_to_cpu(ptrs[indirect_slot]),
+					new_block, 1);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh);
 		unlock_buffer(ibh);
@@ -958,31 +961,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l1bh);
-			/*
-			 * Under the buffer lock, as the install sites are.
-			 *
-			 * Splicing a child into its parent is a store into a
-			 * shared indirect block, no different from installing
-			 * a data pointer -- but the three install sites take
-			 * lock_buffer and these three did not. Two writers on
-			 * one parent then lose a slot between them, and the
-			 * subtree under it is orphaned.
-			 *
-			 * Measured on generic/464: block 3324 held two stores
-			 * from two processes on one buffer, slot 26 written
-			 * with 21961 and read back as zero 380 ms later with
-			 * nothing in between, and slot 9 the same. Those two
-			 * blocks were exactly the two fsck reported lost.
-			 *
-			 * ind_parity_update stays outside: it takes the parity
-			 * block's own lock and reads through beamfs_bread,
-			 * both of which sleep, and holding this buffer across
-			 * that is how the flusher deadlocked against itself
-			 * before.
-			 */
-			lock_buffer(ibh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
-			unlock_buffer(ibh);
 			beamfs_ind_parity_update(sb, ibh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
@@ -1100,6 +1079,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(l1bh);
+		trace_beamfs_slot_store(inode->i_ino, l1bh->b_blocknr,
+					l2_slot, le64_to_cpu(ptrs[l2_slot]),
+					new_block, 2);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh);
 		unlock_buffer(l1bh);
@@ -1246,31 +1228,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l1bh);
-			/*
-			 * Under the buffer lock, as the install sites are.
-			 *
-			 * Splicing a child into its parent is a store into a
-			 * shared indirect block, no different from installing
-			 * a data pointer -- but the three install sites take
-			 * lock_buffer and these three did not. Two writers on
-			 * one parent then lose a slot between them, and the
-			 * subtree under it is orphaned.
-			 *
-			 * Measured on generic/464: block 3324 held two stores
-			 * from two processes on one buffer, slot 26 written
-			 * with 21961 and read back as zero 380 ms later with
-			 * nothing in between, and slot 9 the same. Those two
-			 * blocks were exactly the two fsck reported lost.
-			 *
-			 * ind_parity_update stays outside: it takes the parity
-			 * block's own lock and reads through beamfs_bread,
-			 * both of which sleep, and holding this buffer across
-			 * that is how the flusher deadlocked against itself
-			 * before.
-			 */
-			lock_buffer(ibh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
-			unlock_buffer(ibh);
 			beamfs_ind_parity_update(sb, ibh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
@@ -1337,31 +1295,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l2bh);
-			/*
-			 * Under the buffer lock, as the install sites are.
-			 *
-			 * Splicing a child into its parent is a store into a
-			 * shared indirect block, no different from installing
-			 * a data pointer -- but the three install sites take
-			 * lock_buffer and these three did not. Two writers on
-			 * one parent then lose a slot between them, and the
-			 * subtree under it is orphaned.
-			 *
-			 * Measured on generic/464: block 3324 held two stores
-			 * from two processes on one buffer, slot 26 written
-			 * with 21961 and read back as zero 380 ms later with
-			 * nothing in between, and slot 9 the same. Those two
-			 * blocks were exactly the two fsck reported lost.
-			 *
-			 * ind_parity_update stays outside: it takes the parity
-			 * block's own lock and reads through beamfs_bread,
-			 * both of which sleep, and holding this buffer across
-			 * that is how the flusher deadlocked against itself
-			 * before.
-			 */
-			lock_buffer(l1bh);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
-			unlock_buffer(l1bh);
 			beamfs_ind_parity_update(sb, l1bh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
@@ -1479,6 +1413,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(l2bh);
+		trace_beamfs_slot_store(inode->i_ino, l2bh->b_blocknr,
+					l3_slot, le64_to_cpu(ptrs[l3_slot]),
+					new_block, 3);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh);
 		unlock_buffer(l2bh);
@@ -3664,7 +3601,7 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 			 * is what a race looks like when you count it.
 			 */
 			mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
-		beamfs_inline_free_blocks_from(inode, b_first_freed);
+			beamfs_inline_free_blocks_from(inode, b_first_freed);
 			mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		} else if (new_size > old_size) {
 			/* Sparse extension: just adjust i_size. read_folio
