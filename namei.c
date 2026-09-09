@@ -680,6 +680,7 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode)
 		return ERR_PTR(-EIO);
 	}
 	mark_inode_dirty(inode);
+	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 	return inode;
 }
 
@@ -1160,8 +1161,38 @@ const struct inode_operations beamfs_symlink_inode_operations = {
 
 int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
-	return beamfs_write_inode_raw_flags(inode,
-					    wbc->sync_mode == WB_SYNC_ALL);
+	bool sync = wbc->sync_mode == WB_SYNC_ALL;
+	int ret, mret;
+
+	/*
+	 * Flush the inode's metadata buffers, not just the inode.
+	 *
+	 * The indirect blocks are attached to i_metadata_bhs by
+	 * mmb_mark_buffer_dirty on every pointer install. Nothing empties
+	 * that list except beamfs_fsync -- and generic/464 never calls
+	 * fsync. ext2 has the same list but its indirect blocks also live
+	 * in the block device's page cache, which sync_blockdev empties at
+	 * unmount; a buffer only on the private list is written by nobody.
+	 *
+	 * That is the leak. An overnight run caught it 107 times over 2414
+	 * loops: the owning inode was on disk in every single case, but
+	 * carrying an old state -- inode 41 took 1037 mark_inode_dirty
+	 * calls and reached write_inode once. __writeback_single_inode
+	 * reads and clears I_DIRTY before calling ->write_inode, so every
+	 * pointer installed during that window leaves the inode looking
+	 * clean, and its indirect block sits dirty on a list no one walks.
+	 *
+	 * Writing the buffers here, on the same call that writes the
+	 * inode, keeps the two together: whatever i_indirect points at is
+	 * on the medium by the time the inode naming it is.
+	 */
+	ret = beamfs_write_inode_raw_flags(inode, sync);
+
+	mret = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+	if (!ret)
+		ret = mret;
+
+	return ret;
 }
 
 /* ------------------------------------------------------------------ */

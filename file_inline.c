@@ -652,6 +652,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
+		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 
 		*phys_out = new_block;
 		return 0;
@@ -684,6 +685,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
+			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* Read indirect to look up / install the slot. */
@@ -826,6 +828,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
+		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(ibh);
 
 		*phys_out = new_block;
@@ -871,6 +874,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			brelse(ibh);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
+			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* --- Stage 2: level-1 indirect block --- */
@@ -1057,6 +1061,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
+		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(l1bh);
 
 		*phys_out = new_block;
@@ -1101,6 +1106,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			brelse(ibh);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
+			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* --- Stage 2: level-1 indirect block --- */
@@ -1333,6 +1339,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
+		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(l2bh);
 
 		*phys_out = new_block;
@@ -3039,6 +3046,7 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 		inode_set_ctime_current(inode);
 	inode_set_mtime_to_ts(inode, current_time(inode));
 	mark_inode_dirty(inode);
+	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 
 out:
 	inode_unlock(inode);
@@ -3296,6 +3304,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		fi->i_tindirect = 0;
 
 	mark_inode_dirty(inode);
+	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 }
 
 /*
@@ -3519,6 +3528,7 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 
 	setattr_copy(idmap, inode, attr);
 	mark_inode_dirty(inode);
+	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 	return 0;
 }
 
