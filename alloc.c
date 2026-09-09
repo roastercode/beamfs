@@ -743,6 +743,14 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 	spin_unlock(&sbi->s_lock);
 
 	/* See alloc_block: reconstruct on-disk bitmap outside lock. */
+	/*
+	 * A freed block's pointer may legitimately vanish, and a freed
+	 * indirect block's slots go with it. Tell the checker before the
+	 * block is handed to anybody else, or every ordinary truncate
+	 * reads as a violation.
+	 */
+	beamfs_tc_forget_child(sb, block);
+	beamfs_tc_forget_parent(sb, block);
 	beamfs_write_bitmap_block(sb, bit, owner);
 }
 

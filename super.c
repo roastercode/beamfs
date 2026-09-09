@@ -87,6 +87,7 @@ static void beamfs_put_super(struct super_block *sb)
 	if (sbi) {
 		/* Stop the sweep before the structures it reads go away. */
 		beamfs_scrub_exit(sb);
+		beamfs_tc_exit(sbi);
 
 		/*
 		 * Belt and braces. The VFS calls sync_fs before put_super,
@@ -1353,6 +1354,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 */
 	beamfs_clock_anchor(sb);
 
+	beamfs_tc_init(sbi);
 	ret = beamfs_scrub_init(sb);
 	if (ret) {
 		pr_warn("beamfs: scrubber did not start (%d); correction on read is unaffected\n",

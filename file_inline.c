@@ -800,6 +800,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
 					indirect_slot, le64_to_cpu(ptrs[indirect_slot]),
 					new_block, 1);
+		beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
+				(u32)indirect_slot, le64_to_cpu(ptrs[indirect_slot]), new_block);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh);
 		unlock_buffer(ibh);
@@ -917,6 +919,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
+			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
+					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
@@ -1033,6 +1037,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		trace_beamfs_slot_store(inode->i_ino, l1bh->b_blocknr,
 					l2_slot, le64_to_cpu(ptrs[l2_slot]),
 					new_block, 2);
+		beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
+				(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), new_block);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh);
 		unlock_buffer(l1bh);
@@ -1149,6 +1155,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
+			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
+					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
@@ -1195,6 +1203,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_ind_parity_update(sb, l2bh);
 			mark_buffer_dirty(l2bh);
 			brelse(l2bh);
+			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
+					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
 			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
@@ -1311,6 +1321,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		trace_beamfs_slot_store(inode->i_ino, l2bh->b_blocknr,
 					l3_slot, le64_to_cpu(ptrs[l3_slot]),
 					new_block, 3);
+		beamfs_tc_store(sb, inode->i_ino, l2bh->b_blocknr,
+				(u32)l3_slot, le64_to_cpu(ptrs[l3_slot]), new_block);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh);
 		unlock_buffer(l2bh);

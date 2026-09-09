@@ -5,7 +5,7 @@
 
 obj-$(CONFIG_BEAMFS_FS) += beamfs.o
 
-beamfs-y := super.o      \
+beamfs-y := treecheck.o super.o      \
             inode.o      \
             dir.o        \
             dirent.o     \
@@ -26,6 +26,13 @@ beamfs-y := super.o      \
 # Tracepoint definitions live in beamfs_trace.h next to the sources;
 # define_trace.h re-includes it by name, so the directory has to be on
 # the include path.
+# The tree checker is a build-time choice like the others: it records
+# every live indirect pointer and reports a slot that loses one at the
+# instant it happens. Off unless asked for.
+ifeq ($(BEAMFS_DEBUG_TREE),1)
+ccflags-y += -DCONFIG_BEAMFS_DEBUG_TREE
+endif
+
 ccflags-y += -I$(src)
 
 ccflags-y += -fmacro-prefix-map=$(src)/=

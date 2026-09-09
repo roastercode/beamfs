@@ -9,6 +9,7 @@
 #ifndef _BEAMFS_H
 #define _BEAMFS_H
 
+#include <linux/hashtable.h>
 #include <linux/fs.h>
 #include <linux/fs_context.h>
 #include <linux/types.h>
@@ -33,6 +34,17 @@
 #include "beamfs_format.h"
 
 struct beamfs_sb_info {
+#ifdef CONFIG_BEAMFS_DEBUG_TREE
+	/*
+	 * Every live indirect pointer, so a store that finds a slot at
+	 * zero where one was recorded is caught where it happens rather
+	 * than counted by fsck twenty seconds later.
+	 */
+	DECLARE_HASHTABLE(s_tc, 14);
+	spinlock_t        s_tc_lock;
+	unsigned int      s_tc_entries;
+	unsigned int      s_tc_violations;
+#endif
 	/* Block allocator */
 	unsigned long    *s_block_bitmap;  /* In-memory free block bitmap */
 
@@ -484,6 +496,22 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+
+#ifdef CONFIG_BEAMFS_DEBUG_TREE
+void beamfs_tc_init(struct beamfs_sb_info *sbi);
+void beamfs_tc_exit(struct beamfs_sb_info *sbi);
+void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
+		     u32 slot, u64 old, u64 child);
+void beamfs_tc_forget_child(struct super_block *sb, u64 child);
+void beamfs_tc_forget_parent(struct super_block *sb, u64 parent);
+#else
+static inline void beamfs_tc_init(struct beamfs_sb_info *sbi) { }
+static inline void beamfs_tc_exit(struct beamfs_sb_info *sbi) { }
+static inline void beamfs_tc_store(struct super_block *sb, unsigned long ino,
+				   u64 parent, u32 slot, u64 old, u64 child) { }
+static inline void beamfs_tc_forget_child(struct super_block *sb, u64 child) { }
+static inline void beamfs_tc_forget_parent(struct super_block *sb, u64 parent) { }
+#endif
 
 /* Scratch pages, from the mount's reserve. Never NULL under GFP_NOFS. */
 void *beamfs_scratch_get(struct super_block *sb);
