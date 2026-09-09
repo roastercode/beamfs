@@ -46,7 +46,7 @@ config BEAMFS_FS
 
 config BEAMFS_DEBUG_TREE
 	bool "beamfs: check the indirect tree invariant at every store"
-	depends on BEAMFS
+	depends on BEAMFS_FS
 	help
 	  Record every pointer installed in an indirect block and check
 	  each later store to the same slot against that record. A slot
