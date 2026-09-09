@@ -310,3 +310,19 @@ Avant toute conclusion tirée d'une exécution :
 Faire les choses complètement du premier coup, pas par tâtonnement :
 lire le code avant de patcher, vérifier l'ancre avant de l'appliquer,
 contrôler l'artefact avant de le tester.
+
+### Retour visuel obligatoire (2026-09-09)
+
+Tout ce qui tourne plus de quelques secondes affiche sa progression au
+fur et à mesure, sur le même terminal, sans attendre la fin.
+
+- Une boucle affiche son numéro AVANT de commencer, son résultat après.
+- Une erreur affiche ce qui a échoué et depuis combien de temps, pas un
+  code de retour nu.
+- Une commande distante qui échoue rapporte stderr, pas seulement rc.
+- Un programme muet pendant plusieurs minutes est indistinguable d'un
+  programme bloqué : la personne qui regarde n'a aucun moyen de le
+  savoir, et finit par tuer un travail qui allait aboutir.
+
+Cela vaut pour les scripts comme pour les binaires : println! puis
+flush, ou echo, mais jamais rien.
