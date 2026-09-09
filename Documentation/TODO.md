@@ -285,3 +285,28 @@ exacte, AVANT toute correction et AVANT toute annonce.
 - Un fait qui contredit l'hypothèse a priorité sur l'hypothèse.
 - Si le diagnostic bute sur l'outillage plutôt que sur le défaut,
   réparer l'outillage d'abord.
+
+### Vérifier avant de conclure (2026-09-09)
+
+Un test ne prouve rien si l'artefact testé n'est pas celui qu'on croit.
+Avant toute conclusion tirée d'une exécution :
+
+- **Vérifier que le binaire ou le module contient la modification.**
+  `cargo build` qui affiche "Finished in 0.00s" n'a rien recompilé ;
+  `strings binaire | grep <chaîne ajoutée>` et la comparaison des dates
+  source/binaire coûtent deux secondes. Deux fois aujourd'hui une
+  demi-heure a été perdue sur un artefact périmé : un module beamfs sans
+  ses sondes après un `git stash drop`, un binaire xfstests sans le
+  correctif après un cargo qui n'a pas recompilé.
+- **Vérifier la cible.** Quel nœud, quel volume, quel montage. Une
+  campagne lancée sur le nœud par défaut alors qu'on travaille sur un
+  autre depuis la veille ne mesure rien.
+- **Projeter la durée.** Une commande qui tourne deux heures ne se lance
+  pas en avant-plan dans le terminal de quelqu'un. Détaché, journal dans
+  /tmp, et le terminal reste libre.
+- **Nettoyer l'état laissé par l'essai précédent.** Montage occupé,
+  processus résiduel, fichier sentinelle : chacun a coûté un cycle.
+
+Faire les choses complètement du premier coup, pas par tâtonnement :
+lire le code avant de patcher, vérifier l'ancre avant de l'appliquer,
+contrôler l'artefact avant de le tester.
