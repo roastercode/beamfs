@@ -240,6 +240,36 @@ flusher à servir deux superblocs.
 
 ---
 
+## 10 bis. La variance rend les mesures de dix essais inutilisables
+
+Mesuré le 2026-09-09, sur **code strictement identique** (diff vide
+entre les deux séries, commit 0995c00) :
+
+    série 1  : 8 succès / 10
+    série 2  : 2 succès / 10
+
+La variance sur code identique couvre donc 2 à 8 sur dix. Tous les
+écarts attribués ce jour-là à des correctifs — 8 vs 5 vs 4 vs 3 — sont
+plus petits que cette variance. **Aucun de ces quatre points ne mesurait
+un effet du code.** Trois correctifs ont été annulés sur cette base et
+doivent être réévalués sur leur mérite technique, pas sur ces chiffres.
+
+Conséquence de méthode : trente à cinquante essais par point, et
+systématiquement deux séries sur code identique pour établir la variance
+avant toute comparaison. Deux à trois heures par point, pas vingt-cinq
+minutes.
+
+Ce qui diffère entre les deux séries, à vérifier avant tout le reste :
+la charge de la machine. La série à 8/10 tournait pendant que d'autres
+campagnes occupaient spartian ; celle à 2/10 sur une machine au repos.
+Sur la VM, la charge est passée de 12,46 à 0,90 pendant la série
+elle-même. Un test de course dont le résultat dépend du timing de
+l'hôte ne se compare pas d'une série à l'autre sans contrôler ce
+timing.
+
+Cette variance est en soi une piste : identifier ce qui la produit
+apprendrait plus sur le défaut qu'un correctif de plus.
+
 ## 11. Taux mesurés par commit
 
 | Commit | Contenu | `464` |
