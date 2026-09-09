@@ -501,14 +501,18 @@ int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
 void beamfs_tc_init(struct beamfs_sb_info *sbi);
 void beamfs_tc_exit(struct beamfs_sb_info *sbi);
 void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
-		     u32 slot, u64 old, u64 child);
+		     u32 slot, u64 old, u64 child, const char *who);
+void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot);
 void beamfs_tc_forget_child(struct super_block *sb, u64 child);
 void beamfs_tc_forget_parent(struct super_block *sb, u64 parent);
 #else
 static inline void beamfs_tc_init(struct beamfs_sb_info *sbi) { }
 static inline void beamfs_tc_exit(struct beamfs_sb_info *sbi) { }
 static inline void beamfs_tc_store(struct super_block *sb, unsigned long ino,
-				   u64 parent, u32 slot, u64 old, u64 child) { }
+				   u64 parent, u32 slot, u64 old, u64 child,
+				   const char *who) { }
+static inline void beamfs_tc_clear(struct super_block *sb, u64 parent,
+				   u32 slot) { }
 static inline void beamfs_tc_forget_child(struct super_block *sb, u64 child) { }
 static inline void beamfs_tc_forget_parent(struct super_block *sb, u64 parent) { }
 #endif

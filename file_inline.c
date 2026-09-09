@@ -801,7 +801,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					indirect_slot, le64_to_cpu(ptrs[indirect_slot]),
 					new_block, 1);
 		beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
-				(u32)indirect_slot, le64_to_cpu(ptrs[indirect_slot]), new_block);
+				(u32)indirect_slot, le64_to_cpu(ptrs[indirect_slot]), new_block,
+			__func__);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh);
 		unlock_buffer(ibh);
@@ -920,7 +921,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
-					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk);
+					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
+				__func__);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
@@ -1038,7 +1040,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					l2_slot, le64_to_cpu(ptrs[l2_slot]),
 					new_block, 2);
 		beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
-				(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), new_block);
+				(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), new_block,
+			__func__);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh);
 		unlock_buffer(l1bh);
@@ -1156,7 +1159,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			mark_buffer_dirty(l1bh);
 			brelse(l1bh);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
-					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk);
+					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
+				__func__);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
 			mark_buffer_dirty(ibh);
@@ -1204,7 +1208,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			mark_buffer_dirty(l2bh);
 			brelse(l2bh);
 			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
-					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk);
+					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk,
+				__func__);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
 			beamfs_ind_parity_update(sb, l1bh);
 			mark_buffer_dirty(l1bh);
@@ -1322,7 +1327,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					l3_slot, le64_to_cpu(ptrs[l3_slot]),
 					new_block, 3);
 		beamfs_tc_store(sb, inode->i_ino, l2bh->b_blocknr,
-				(u32)l3_slot, le64_to_cpu(ptrs[l3_slot]), new_block);
+				(u32)l3_slot, le64_to_cpu(ptrs[l3_slot]), new_block,
+			__func__);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh);
 		unlock_buffer(l2bh);
@@ -3265,6 +3271,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 
 				if (blk) {
 					doomed[n_doomed++] = blk;
+					beamfs_tc_clear(sb, ibh->b_blocknr, (u32)j);
 					ptrs[j] = 0;
 				}
 			}

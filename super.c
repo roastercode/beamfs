@@ -276,6 +276,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 			if (beamfs_free_ind_range(sb, child, depth - 1,
 						  child_base, first)) {
 				lock_buffer(ibh);
+				beamfs_tc_clear(sb, ibh->b_blocknr, (u32)j);
 				ptrs[j] = 0;
 				unlock_buffer(ibh);
 				dirtied = true;
@@ -292,6 +293,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 
 		beamfs_free_one_block(sb, child);
 		lock_buffer(ibh);
+		beamfs_tc_clear(sb, ibh->b_blocknr, (u32)j);
 		ptrs[j] = 0;
 		unlock_buffer(ibh);
 		dirtied = true;

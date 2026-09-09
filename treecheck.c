@@ -41,6 +41,7 @@ struct beamfs_tc_entry {
 	u32 slot;
 	u64 child;
 	unsigned long ino;
+	const char *who;
 };
 
 /*
@@ -90,7 +91,7 @@ void beamfs_tc_exit(struct beamfs_sb_info *sbi)
  * the defect, reported here with the task and the stack that found it.
  */
 void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
-		     u32 slot, u64 old, u64 child)
+		     u32 slot, u64 old, u64 child, const char *who)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct beamfs_tc_entry *e, *found = NULL;
@@ -108,14 +109,16 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 	if (found && found->child && old == 0) {
 		sbi->s_tc_violations++;
 		spin_unlock(&sbi->s_tc_lock);
-		pr_err("beamfs/treecheck: LOST POINTER parent=%llu slot=%u held %llu (ino=%lu), read as 0, now %llu (ino=%lu)\n",
+		pr_err("beamfs/treecheck: LOST POINTER parent=%llu slot=%u held %llu (ino=%lu, put there by %s), read as 0, now %llu (ino=%lu, by %s)\n",
 		       (unsigned long long)parent, slot,
 		       (unsigned long long)found->child, found->ino,
-		       (unsigned long long)child, ino);
+		       found->who ? found->who : "?",
+		       (unsigned long long)child, ino, who);
 		WARN_ONCE(1, "beamfs: indirect slot lost its pointer\n");
 		spin_lock(&sbi->s_tc_lock);
 		found->child = child;
 		found->ino = ino;
+		found->who = who;
 		spin_unlock(&sbi->s_tc_lock);
 		return;
 	}
@@ -123,6 +126,7 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 	if (found) {
 		found->child = child;
 		found->ino = ino;
+		found->who = who;
 		spin_unlock(&sbi->s_tc_lock);
 		return;
 	}
@@ -137,6 +141,7 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 	e->slot = slot;
 	e->child = child;
 	e->ino = ino;
+	e->who = who;
 
 	spin_lock(&sbi->s_tc_lock);
 	hash_add(sbi->s_tc, &e->node, key);
@@ -188,6 +193,28 @@ void beamfs_tc_forget_parent(struct super_block *sb, u64 parent)
 			hash_del(&e->node);
 			sbi->s_tc_entries--;
 			kfree(e);
+		}
+	}
+	spin_unlock(&sbi->s_tc_lock);
+}
+
+/*
+ * A slot deliberately set to zero.
+ *
+ * Truncate zeroes slots it has freed the children of. Without telling
+ * the checker, the next store into that slot reads as a lost pointer.
+ */
+void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	struct beamfs_tc_entry *e;
+	u32 key = beamfs_tc_key(parent, slot);
+
+	spin_lock(&sbi->s_tc_lock);
+	hash_for_each_possible(sbi->s_tc, e, node, key) {
+		if (e->parent == parent && e->slot == slot) {
+			e->child = 0;
+			break;
 		}
 	}
 	spin_unlock(&sbi->s_tc_lock);
