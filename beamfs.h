@@ -503,6 +503,8 @@ void beamfs_tc_exit(struct beamfs_sb_info *sbi);
 void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 		     u32 slot, u64 old, u64 child, const char *who);
 void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot);
+void beamfs_tc_zeroed(struct super_block *sb, unsigned long ino, u64 parent,
+		      const char *who);
 void beamfs_tc_forget_child(struct super_block *sb, u64 child);
 void beamfs_tc_forget_parent(struct super_block *sb, u64 parent);
 #else
@@ -513,6 +515,8 @@ static inline void beamfs_tc_store(struct super_block *sb, unsigned long ino,
 				   const char *who) { }
 static inline void beamfs_tc_clear(struct super_block *sb, u64 parent,
 				   u32 slot) { }
+static inline void beamfs_tc_zeroed(struct super_block *sb, unsigned long ino,
+				    u64 parent, const char *who) { }
 static inline void beamfs_tc_forget_child(struct super_block *sb, u64 child) { }
 static inline void beamfs_tc_forget_parent(struct super_block *sb, u64 parent) { }
 #endif

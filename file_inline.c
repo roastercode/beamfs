@@ -676,6 +676,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(ibh);
+			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
@@ -869,6 +870,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(ibh);
+			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
@@ -914,6 +916,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(l1bh);
+			beamfs_tc_zeroed(sb, inode->i_ino, l1bh->b_blocknr, __func__);
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
@@ -1107,6 +1110,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(ibh);
+			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
@@ -1152,6 +1156,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(l1bh);
+			beamfs_tc_zeroed(sb, inode->i_ino, l1bh->b_blocknr, __func__);
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
@@ -1201,6 +1206,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				return -EIO;
 			}
 			lock_buffer(l2bh);
+			beamfs_tc_zeroed(sb, inode->i_ino, l2bh->b_blocknr, __func__);
 			memset(l2bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l2bh);
 			unlock_buffer(l2bh);

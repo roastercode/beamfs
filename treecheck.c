@@ -220,4 +220,55 @@ void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot)
 	spin_unlock(&sbi->s_tc_lock);
 }
 
+/*
+ * A block about to be memset as a fresh indirect block.
+ *
+ * Every memset in the allocator follows sb_getblk on a block the
+ * allocator has just handed out, so the block should hold nothing. If
+ * the checker still has live pointers recorded for it, the allocator
+ * gave out a block that is in service, and the memset is about to erase
+ * a subtree.
+ *
+ * generic/464 writes with pwrite -b 65536 on a truncated file, so each
+ * write rebuilds the whole tree; the lost slots come out at a fixed
+ * stride of 17, which is exactly 65536 / 3824, the logical blocks one
+ * write covers. Slots vanishing in groups at a fixed stride is what a
+ * whole block being zeroed looks like, not what a race on one slot
+ * looks like.
+ */
+void beamfs_tc_zeroed(struct super_block *sb, unsigned long ino, u64 parent,
+		      const char *who)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	struct beamfs_tc_entry *e;
+	struct hlist_node *tmp;
+	unsigned int bkt, live = 0;
+	u64 first = 0;
+	u32 first_slot = 0;
+
+	spin_lock(&sbi->s_tc_lock);
+	hash_for_each_safe(sbi->s_tc, bkt, tmp, e, node) {
+		if (e->parent != parent)
+			continue;
+		if (e->child && !live) {
+			first = e->child;
+			first_slot = e->slot;
+		}
+		if (e->child)
+			live++;
+		hash_del(&e->node);
+		sbi->s_tc_entries--;
+		kfree(e);
+	}
+	spin_unlock(&sbi->s_tc_lock);
+
+	if (live) {
+		sbi->s_tc_violations++;
+		pr_err("beamfs/treecheck: ZEROED IN SERVICE block=%llu had %u live pointer(s) (slot %u held %llu), zeroed by %s for ino=%lu\n",
+		       (unsigned long long)parent, live, first_slot,
+		       (unsigned long long)first, who, ino);
+		WARN_ONCE(1, "beamfs: an indirect block in service was zeroed\n");
+	}
+}
+
 #endif /* CONFIG_BEAMFS_DEBUG_TREE */
