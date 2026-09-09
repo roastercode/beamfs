@@ -652,7 +652,6 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
-		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 
 		*phys_out = new_block;
 		return 0;
@@ -680,12 +679,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
 			beamfs_ind_parity_update(sb, ibh);
-			mark_buffer_dirty(ibh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(ibh);
 
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
-			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* Read indirect to look up / install the slot. */
@@ -828,7 +842,6 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
-		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(ibh);
 
 		*phys_out = new_block;
@@ -870,11 +883,26 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
 			beamfs_ind_parity_update(sb, ibh);
-			mark_buffer_dirty(ibh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(ibh);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
-			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* --- Stage 2: level-1 indirect block --- */
@@ -915,11 +943,32 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
 			beamfs_ind_parity_update(sb, l1bh);
-			mark_buffer_dirty(l1bh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
-			mark_buffer_dirty(ibh);
+			/* Splicing a child into its parent is an install like
+			 * any other: the parent goes on the inode's list too,
+			 * or it is dirty on nobody's.
+			 */
+			mmb_mark_buffer_dirty(ibh,
+					      &BEAMFS_I(inode)->i_metadata_bhs);
 		}
 		brelse(ibh);
 
@@ -1061,7 +1110,6 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
-		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(l1bh);
 
 		*phys_out = new_block;
@@ -1102,11 +1150,26 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
 			beamfs_ind_parity_update(sb, ibh);
-			mark_buffer_dirty(ibh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(ibh);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
-			trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		}
 
 		/* --- Stage 2: level-1 indirect block --- */
@@ -1147,11 +1210,32 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
 			beamfs_ind_parity_update(sb, l1bh);
-			mark_buffer_dirty(l1bh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh);
-			mark_buffer_dirty(ibh);
+			/* Splicing a child into its parent is an install like
+			 * any other: the parent goes on the inode's list too,
+			 * or it is dirty on nobody's.
+			 */
+			mmb_mark_buffer_dirty(ibh,
+					      &BEAMFS_I(inode)->i_metadata_bhs);
 		}
 		brelse(ibh);
 
@@ -1193,11 +1277,32 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			set_buffer_uptodate(l2bh);
 			unlock_buffer(l2bh);
 			beamfs_ind_parity_update(sb, l2bh);
-			mark_buffer_dirty(l2bh);
+			/*
+			 * Attach it to the inode as the install sites do.
+			 *
+			 * A fresh indirect block is dirtied here and its first
+			 * pointer installed a few lines further down, and the
+			 * install attaches it. But sb_getblk here and sb_bread
+			 * there need not hand back the same buffer: if this one
+			 * is evicted in between, it goes with nothing written,
+			 * on no inode's list for anyone to flush.
+			 *
+			 * generic/464 loses exactly that. Inode 150 in one
+			 * capture: four pointers installed into indirect block
+			 * 33190, i_indirect written to disk naming it, and 33190
+			 * itself still 0xcd -- never written at all -- so fsck
+			 * finds four blocks marked used that nothing references.
+			 */
+			mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			brelse(l2bh);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
 			beamfs_ind_parity_update(sb, l1bh);
-			mark_buffer_dirty(l1bh);
+			/* Splicing a child into its parent is an install like
+			 * any other: the parent goes on the inode's list too,
+			 * or it is dirty on nobody's.
+			 */
+			mmb_mark_buffer_dirty(l1bh,
+					      &BEAMFS_I(inode)->i_metadata_bhs);
 		}
 		brelse(l1bh);
 
@@ -1339,7 +1444,6 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
-		trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 		brelse(l2bh);
 
 		*phys_out = new_block;
@@ -3046,7 +3150,6 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 		inode_set_ctime_current(inode);
 	inode_set_mtime_to_ts(inode, current_time(inode));
 	mark_inode_dirty(inode);
-	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 
 out:
 	inode_unlock(inode);
@@ -3304,7 +3407,6 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		fi->i_tindirect = 0;
 
 	mark_inode_dirty(inode);
-	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 }
 
 /*
@@ -3528,7 +3630,6 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 
 	setattr_copy(idmap, inode, attr);
 	mark_inode_dirty(inode);
-	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
 	return 0;
 }
 
