@@ -179,13 +179,13 @@ enum fsck_read_status fsck_read_inode(struct fsck_reader *r, uint64_t ino,
 	if (out->i_mode == 0)
 		return FSCK_READ_CLEAN;
 
-	if (crc32(out, offsetof(struct beamfs_inode, i_crc32)) == out->i_crc32)
+	if (crc32_inode(out) == out->i_crc32)
 		return FSCK_READ_CLEAN;
 
 	rc = rs_decode_subblock(r->rs, (uint8_t *)out, BEAMFS_INODE_RS_DATA,
 				out->i_reserved, positions);
 	if (rc == RS_UNCORRECTABLE ||
-	    crc32(out, offsetof(struct beamfs_inode, i_crc32)) != out->i_crc32) {
+	    crc32_inode(out) != out->i_crc32) {
 		r->uncorrectable++;
 		return FSCK_READ_UNCORRECTABLE;
 	}

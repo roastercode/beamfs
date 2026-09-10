@@ -121,7 +121,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 		return ERR_PTR(-ESTALE);
 	}
 
-	crc = beamfs_crc32(raw, offsetof(struct beamfs_inode, i_crc32));
+	crc = beamfs_inode_crc(raw);
 	if (crc != le32_to_cpu(raw->i_crc32)) {
 		u32 scheme = le32_to_cpu(
 			BEAMFS_SB(sb)->s_beamfs_sb->s_data_protection_scheme);
@@ -176,8 +176,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 				return ERR_PTR(-EIO);
 			}
 
-			crc = beamfs_crc32(&fixed,
-					   offsetof(struct beamfs_inode, i_crc32));
+			crc = beamfs_inode_crc(&fixed);
 			if (crc != le32_to_cpu(fixed.i_crc32)) {
 				pr_err("beamfs: inode %lu CRC32 mismatch after RS correction\n",
 				       ino);

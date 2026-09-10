@@ -378,6 +378,26 @@ void beamfs_rs_exit_tables(void);
 __u32 beamfs_crc32(const void *buf, size_t len);
 
 /*
+ * beamfs_inode_crc -- checksum over everything the inode's parity
+ * protects, which is the head and the pointers but not i_crc32 itself.
+ *
+ * Staged into a contiguous buffer, the way beamfs_crc32_sb does it: the
+ * covered bytes are not contiguous on disk and computing over them in
+ * two calls would need a seeded primitive that beamfs_crc32 does not
+ * offer. 172 bytes on the stack, once per inode read or write.
+ */
+static inline __u32 beamfs_inode_crc(const struct beamfs_inode *raw)
+{
+	__u8 staging[BEAMFS_INODE_CRC_BYTES];
+
+	memcpy(staging, raw, BEAMFS_INODE_CRC_HEAD_LEN);
+	memcpy(staging + BEAMFS_INODE_CRC_HEAD_LEN,
+	       (const __u8 *)raw + BEAMFS_INODE_CRC_TAIL_OFF,
+	       BEAMFS_INODE_CRC_TAIL_LEN);
+	return beamfs_crc32(staging, sizeof(staging));
+}
+
+/*
  * beamfs_data_selfid -- 64-bit identity digest of (ino, iblock), stored in
  * the block tail pad when DATA_SELFID is active. Two independent CRC32s,
  * one per dimension, concatenated: reuses the single hashing primitive

@@ -527,7 +527,7 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 		if (raw.i_mode == 0)
 			continue; /* free slot, not validated (matches ext2/e2fsck convention) */
 
-		crc = crc32(&raw, offsetof(struct beamfs_inode, i_crc32));
+		crc = crc32_inode(&raw);
 		if (crc != raw.i_crc32) {
 			int rc = rs_decode_subblock(rs, (uint8_t *)&raw, BEAMFS_INODE_RS_DATA,
 						    raw.i_reserved, positions);
@@ -537,7 +537,7 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 					(unsigned long long)ino);
 				continue;
 			}
-			crc = crc32(&raw, offsetof(struct beamfs_inode, i_crc32));
+			crc = crc32_inode(&raw);
 			if (crc != raw.i_crc32) {
 				uncorrectable_inodes++;
 				fprintf(stderr, "fsck.beamfs: pass 3: inode %llu CRC32 still wrong after RS correction\n",

@@ -96,8 +96,7 @@ static int beamfs_write_inode_raw_flags(struct inode *inode, bool sync)
 	 * machines this has run on, and a volume no big-endian host could
 	 * mount. sparse called it: "incorrect type in assignment".
 	 */
-	raw->i_crc32 = cpu_to_le32(beamfs_crc32(raw,
-				   offsetof(struct beamfs_inode, i_crc32)));
+	raw->i_crc32 = cpu_to_le32(beamfs_inode_crc(raw));
 
 	/*
 	 * Compute RS parity over the first BEAMFS_INODE_RS_DATA bytes

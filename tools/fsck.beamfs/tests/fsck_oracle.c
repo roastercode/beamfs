@@ -246,7 +246,7 @@ static void write_inode(int fd, const struct beamfs_super_block *sb,
 	off_t off = (off_t)blk * BEAMFS_BLOCK_SIZE
 		  + (off_t)idx * sizeof(struct beamfs_inode);
 
-	in->i_crc32 = crc32(in, offsetof(struct beamfs_inode, i_crc32));
+	in->i_crc32 = crc32_inode(in);
 	rs_encode_subblock(rs, (uint8_t *)in, BEAMFS_INODE_RS_DATA,
 			   in->i_reserved);
 	pwrite_at(fd, off, in, sizeof(*in));

@@ -92,6 +92,39 @@ typedef uint32_t u32;
 #define BEAMFS_RS_PARITY     16
 #define BEAMFS_INODE_RS_DATA offsetof(struct beamfs_inode, i_reserved)  /* 172 bytes */
 #define BEAMFS_INODE_RS_PAR  16  /* parity bytes stored in i_reserved[0..15] */
+
+/*
+ * Inode checksum coverage.
+ *
+ * i_crc32 sits at offset 48 and the block pointers begin at 52, so a
+ * checksum over [0, offsetof(i_crc32)) covers none of them: ninety-six
+ * bytes of i_direct, i_indirect, i_dindirect and i_tindirect with
+ * nothing watching. Reed-Solomon does protect them -- its range is
+ * [0, 172) -- but the decode is only entered when the CRC disagrees,
+ * so a flipped pointer bit is never corrected and never reported.
+ *
+ * That is the wrong thing to leave unguarded here. A corrupted pointer
+ * does not damage the file that owns it; it aims that file at somebody
+ * else's blocks, which is how one upset becomes two damaged files.
+ *
+ * Coverage is therefore the head [0, 48) and the tail [52, 172), the
+ * same shape the superblock has always used: crc32_sb stages its
+ * covered bytes past s_crc32 and s_uuid so its checksum spans
+ * everything its parity spans. The inode now matches.
+ *
+ * Volumes written before this carry a checksum over the head alone and
+ * cannot be told apart by inspection, so the change is gated on
+ * BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL: an older kernel refuses a
+ * new volume rather than reading every inode as damaged.
+ */
+#define BEAMFS_INODE_CRC_HEAD_LEN  offsetof(struct beamfs_inode, i_crc32)
+#define BEAMFS_INODE_CRC_TAIL_OFF  (offsetof(struct beamfs_inode, i_crc32) \
+				    + sizeof(__le32))
+#define BEAMFS_INODE_CRC_TAIL_LEN  (BEAMFS_INODE_RS_DATA \
+				    - BEAMFS_INODE_CRC_TAIL_OFF)
+#define BEAMFS_INODE_CRC_BYTES     (BEAMFS_INODE_CRC_HEAD_LEN \
+				    + BEAMFS_INODE_CRC_TAIL_LEN)
+
 #define BEAMFS_SUBBLOCK_DATA 239
 #define BEAMFS_SUBBLOCK_TOTAL (BEAMFS_SUBBLOCK_DATA + BEAMFS_RS_PARITY)
 
@@ -755,6 +788,15 @@ enum beamfs_ind_parity_mode {
  * format would otherwise have to lie about what it supports.
  */
 #define BEAMFS_FEATURE_INCOMPAT_DIR_RS            BIT_ULL(15)
+
+/*
+ * BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL: i_crc32 covers the block
+ * pointers as well as the head of the inode. See the coverage macros
+ * above. Incompatible rather than read-only compatible: a kernel
+ * without it computes a different checksum and would read every inode
+ * on the volume as damaged.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL    BIT_ULL(16)
 
 /*
  * A directory entry, on disk, under DIR_RS.

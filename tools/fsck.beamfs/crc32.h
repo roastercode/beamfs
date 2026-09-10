@@ -13,6 +13,8 @@
 #ifndef FSCK_BEAMFS_CRC32_H
 #define FSCK_BEAMFS_CRC32_H
 
+#include <string.h>
+#include "beamfs_format.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +32,22 @@ uint32_t crc32_internal(uint32_t seed, const void *buf, size_t len);
  * Equivalent to crc32_internal(0xFFFFFFFF, buf, len) ^ 0xFFFFFFFF.
  */
 uint32_t crc32(const void *buf, size_t len);
+
+/*
+ * The inode's checksum, over the head and the block pointers both.
+ * Byte-identical to the kernel's beamfs_inode_crc.
+ */
+static inline uint32_t crc32_inode(const struct beamfs_inode *raw)
+{
+	uint8_t staging[BEAMFS_INODE_CRC_BYTES];
+
+	memcpy(staging, raw, BEAMFS_INODE_CRC_HEAD_LEN);
+	memcpy(staging + BEAMFS_INODE_CRC_HEAD_LEN,
+	       (const uint8_t *)raw + BEAMFS_INODE_CRC_TAIL_OFF,
+	       BEAMFS_INODE_CRC_TAIL_LEN);
+	return crc32(staging, sizeof(staging));
+}
+
 
 /*
  * crc32_sb -- CRC32 over the meaningful regions of the
