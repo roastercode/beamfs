@@ -62,8 +62,10 @@ struct fsck_pass6_result {
 	unsigned int link_count_wrong;
 	/* Allocated, but no directory reaches it. */
 	unsigned int orphaned_inodes;
-	/* i_size larger than the blocks the inode owns. */
-	unsigned int size_beyond_blocks;
+	/* i_size larger than the blocks the inode owns. Reported, not a
+	 * verdict: a file mid-write and a sparse file both look like
+	 * this and neither is damaged. */
+	unsigned int size_ahead_of_blocks;
 
 	/* Left unwalked rather than followed into nonsense. */
 	unsigned int unreadable_inodes;

@@ -390,18 +390,29 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 		owned = count_blocks(&p, &in, ino);
 
 		/*
-		 * Size against allocation.
+		 * Size against allocation, reported and not counted.
+		 *
+		 * A file being written has i_size ahead of its blocks for
+		 * as long as the writeback has not caught up, and that is
+		 * an ordinary state rather than damage: generic/464
+		 * unmounts mid-write on purpose, and treating the gap as
+		 * an inconsistency failed three trials in five against a
+		 * filesystem that was doing exactly what it should.
+		 *
+		 * A sparse file is the same shape for a different reason
+		 * -- a hole occupies no block and i_size counts it -- and
+		 * neither can be told from a truncated allocation by
+		 * looking at the inode. So it is worth saying out loud
+		 * under -v and worth nothing as a verdict.
 		 *
 		 * A symlink stores its target inside the inode when it
-		 * fits, so its size says nothing about blocks. Anything
-		 * else claiming more bytes than its blocks can hold
-		 * reads past its own data.
+		 * fits, so its size says nothing about blocks at all.
 		 */
 		if ((mode & S_FMT) != S_LNK) {
 			need = (le64toh(in.i_size) + BEAMFS_DATA_INLINE_BYTES - 1)
 			     / BEAMFS_DATA_INLINE_BYTES;
 			if (need > owned) {
-				p.r.size_beyond_blocks++;
+				p.r.size_ahead_of_blocks++;
 				note(&p, "fsck.beamfs: pass 6: inode %llu claims %llu bytes, needing %llu block(s), but owns %llu\n",
 				     (unsigned long long)ino,
 				     (unsigned long long)le64toh(in.i_size),
@@ -461,8 +472,7 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 	if (p.r.root_bad || p.r.shared_blocks)
 		rc = FSCK_PASS6_UNCORRECTED;
 	else if (p.r.bad_dirents || p.r.dangling_entries || p.r.duplicate_names ||
-		 p.r.link_count_wrong || p.r.orphaned_inodes ||
-		 p.r.size_beyond_blocks)
+		 p.r.link_count_wrong || p.r.orphaned_inodes)
 		rc = FSCK_PASS6_UNCORRECTED;
 	return rc;
 }
@@ -489,9 +499,9 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 	if (r->orphaned_inodes)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u allocated inode(s) no directory reaches\n",
 			r->orphaned_inodes);
-	if (r->size_beyond_blocks)
-		fprintf(stderr, "fsck.beamfs: pass 6: %u inode(s) claiming more bytes than their blocks hold\n",
-			r->size_beyond_blocks);
+	if (r->size_ahead_of_blocks)
+		fprintf(stderr, "fsck.beamfs: pass 6: %u inode(s) whose size runs ahead of their blocks -- ordinary for a file being written or a sparse one, not counted as damage\n",
+			r->size_ahead_of_blocks);
 	if (r->unreadable_indirect || r->unreadable_dirblocks || r->unreadable_inodes)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u inode(s), %u indirect block(s) and %u directory block(s) were beyond correction and left unwalked\n",
 			r->unreadable_inodes, r->unreadable_indirect,
@@ -502,7 +512,7 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 
 	if (!r->shared_blocks && !r->root_bad && !r->bad_dirents &&
 	    !r->dangling_entries && !r->duplicate_names && !r->link_count_wrong &&
-	    !r->orphaned_inodes && !r->size_beyond_blocks)
+	    !r->orphaned_inodes)
 		printf("fsck.beamfs: pass 6: directories, links and block ownership OK (%u inode(s))\n",
 		       r->allocated_inodes);
 }
