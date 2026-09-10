@@ -251,6 +251,20 @@ static int pass1_superblock(struct fsck_opts *o)
 		return FSCK_CORRECTED;
 	}
 
+	/*
+	 * fsck says it and keeps going, where the kernel refuses.
+	 *
+	 * A checker that will not look at an old volume is no help to
+	 * somebody trying to get data off one, and only the inode
+	 * passes are affected -- they would report every inode as
+	 * damaged against parity that is correct. Naming the reason
+	 * once, and outside verbose, is better than a thousand decoder
+	 * errors with no explanation.
+	 */
+	if (!(sb.s_feat_incompat & BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL))
+		fprintf(stderr,
+			"fsck.beamfs: this volume predates INODE_CRC_FULL: i_crc32 covers the head of the inode and not the block pointers, so the inode passes below report damage that is not there\n");
+
 	if (o->verbose)
 		printf("fsck.beamfs: pass 1: superblock OK\n");
 	return FSCK_OK;

@@ -1205,6 +1205,28 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 			goto out_brelse;
 		}
 
+		/*
+		 * A volume written before the inode checksum covered the
+		 * block pointers.
+		 *
+		 * Its i_crc32 spans the head of the inode alone, so this
+		 * kernel would compute a different value for every inode
+		 * on it and read the whole table as damaged -- thousands
+		 * of RS decodes against parity that is correct, and a
+		 * mount that appears to work while reporting corruption
+		 * everywhere.
+		 *
+		 * Refusing with the reason is the kinder failure. The
+		 * volume is not damaged and its data is intact; it needs
+		 * a rewrite, not a repair, and saying so is more use
+		 * than a page of decoder errors.
+		 */
+		if (!(le64_to_cpu(fsb->s_feat_incompat) &
+		      BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL)) {
+			errorf(fc, "beamfs: this volume predates INODE_CRC_FULL -- its inode checksums do not cover the block pointers, so a corrupted pointer would go uncorrected. Copy the data off and remake the volume.");
+			goto out_brelse;
+		}
+
 		if (unknown_incompat) {
 			errorf(fc, "beamfs: unsupported incompat features 0x%016llx",
 			       unknown_incompat);
