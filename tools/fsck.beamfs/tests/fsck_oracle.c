@@ -460,6 +460,184 @@ static void case_dangling(void)
 	       "expected dangling=1, got dangling=%ld lost=%ld", v.dangling, v.lost);
 }
 
+
+
+/*
+ * Write an indirect block and the parity that describes it.
+ *
+ * The parity lives in its own region, not inside the block, so writing
+ * the block alone leaves the region holding zeroes -- and a case that
+ * then flips a bit is testing a block nothing protects rather than the
+ * recovery it meant to test. An earlier version did exactly that and
+ * reported a failure against a checker that had nothing to work with.
+ */
+static void write_indirect(int fd, const struct beamfs_super_block *sb,
+			   uint64_t blk, const uint64_t *ptrs,
+			   struct rs_codec *rs)
+{
+	uint8_t raw[BEAMFS_BLOCK_SIZE];
+	uint8_t par[BEAMFS_BLOCK_SIZE];
+	uint64_t idx, byte_off, region_blk;
+	uint32_t off;
+	size_t stride;
+	unsigned int i;
+
+	memset(raw, 0, sizeof(raw));
+	memcpy(raw, ptrs, sizeof(uint64_t) * BEAMFS_INDIRECT_PTRS);
+	pwrite_at(fd, (off_t)blk * BEAMFS_BLOCK_SIZE, raw, sizeof(raw));
+
+	if (sb->s_ind_parity_blk == 0 || sb->s_ind_parity_len == 0)
+		return;
+
+	stride = (sb->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC)
+	       ? BEAMFS_IND_PARITY_CRC_BYTES : BEAMFS_IND_PARITY_RS_BYTES;
+	idx = blk - sb->s_data_start_blk;
+	byte_off = idx * stride;
+	region_blk = sb->s_ind_parity_blk + byte_off / BEAMFS_BLOCK_SIZE;
+	off = (uint32_t)(byte_off % BEAMFS_BLOCK_SIZE);
+	if (off + stride > BEAMFS_BLOCK_SIZE ||
+	    region_blk >= sb->s_ind_parity_blk + sb->s_ind_parity_len)
+		return;
+
+	pread_at(fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, par, sizeof(par));
+	if (sb->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
+		uint32_t *slot = (uint32_t *)(par + off);
+
+		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
+			slot[i] = crc32(raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_SUBBLOCK_DATA);
+	} else {
+		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
+			rs_encode_subblock(rs,
+					   raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+					   BEAMFS_SUBBLOCK_DATA,
+					   par + off + (size_t)i * BEAMFS_RS_PARITY);
+	}
+	pwrite_at(fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, par, sizeof(par));
+}
+
+/*
+ * Flip one bit inside a named field of an inode, on the medium.
+ *
+ * Written after the inode is complete, so the CRC and parity on disk
+ * describe the undamaged inode and the flip is genuine medium damage --
+ * recoverable, and the checker must recover it rather than report it.
+ */
+static void flip_bit_in_field(int fd, const struct beamfs_super_block *sb,
+			      uint64_t ino, size_t field_off)
+{
+	uint32_t per = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
+	uint64_t blk = sb->s_inode_table_blk + (ino - 1) / per;
+	uint64_t idx = (ino - 1) % per;
+	off_t off = (off_t)blk * BEAMFS_BLOCK_SIZE
+		  + (off_t)idx * sizeof(struct beamfs_inode)
+		  + (off_t)field_off;
+	uint8_t byte;
+
+	pread_at(fd, off, &byte, 1);
+	byte ^= 0x01;
+	pwrite_at(fd, off, &byte, 1);
+}
+
+/*
+ * A file whose pointer field @which is the one under test.
+ *
+ * Blocks are marked used so the volume is healthy in every respect
+ * except the bit that gets flipped: a case that leaves a real leak
+ * behind cannot tell a phantom from the genuine article.
+ */
+static uint64_t build_file(int fd, const struct beamfs_super_block *sb,
+			   uint64_t ino, uint64_t base, int level,
+			   struct rs_codec *rs)
+{
+	struct beamfs_inode in;
+	uint64_t ind, child, data;
+	uint64_t ptrs[BEAMFS_INDIRECT_PTRS];
+
+	memset(&in, 0, sizeof(in));
+	in.i_mode = 0x8000 | 0644;
+	in.i_nlink = 1;
+	in.i_size = BEAMFS_DATA_INLINE_BYTES;
+
+	if (level == 0) {
+		data = base;
+		in.i_direct[0] = data;
+		set_block_used(fd, sb, data, true, rs);
+		write_inode(fd, sb, ino, &in, rs);
+		return data;
+	}
+
+	/*
+	 * One indirect block holding one data pointer, and for the
+	 * deeper levels an indirect block holding a pointer to that.
+	 * The shape matters more than the size: what is being tested is
+	 * whether a flip in the field naming the top of this is caught.
+	 */
+	data = base;
+	set_block_used(fd, sb, data, true, rs);
+
+	ind = base + 1;
+	memset(ptrs, 0, sizeof(ptrs));
+	ptrs[0] = data;
+	write_indirect(fd, sb, ind, ptrs, rs);
+	set_block_used(fd, sb, ind, true, rs);
+
+	child = ind;
+	for (int L = 1; L < level; L++) {
+		uint64_t up = base + 1 + (uint64_t)L;
+
+		memset(ptrs, 0, sizeof(ptrs));
+		ptrs[0] = child;
+		write_indirect(fd, sb, up, ptrs, rs);
+		set_block_used(fd, sb, up, true, rs);
+		child = up;
+	}
+
+	if (level == 1)
+		in.i_indirect = child;
+	else if (level == 2)
+		in.i_dindirect = child;
+	else
+		in.i_tindirect = child;
+
+	write_inode(fd, sb, ino, &in, rs);
+	return child;
+}
+
+/*
+ * One bit flipped in one pointer field, on an otherwise healthy volume.
+ *
+ * The checksum has to notice, Reed-Solomon has to correct it, and the
+ * checker has to report nothing. Run once per field: a coverage range
+ * that is right for i_direct and wrong for i_tindirect passes every
+ * test that only looks at i_direct.
+ */
+static void case_pointer_field(const char *label, size_t field_off, int level,
+			       uint64_t base)
+{
+	struct beamfs_super_block sb;
+	struct rs_codec *rs = rs_init();
+	struct verdict v;
+	int fd;
+
+	fresh();
+	fd = open(image, O_RDWR);
+	if (fd < 0 || !rs)
+		die("cannot open %s", image);
+	read_sb(fd, &sb);
+
+	build_file(fd, &sb, 3, sb.s_data_start_blk + base, level, rs);
+	link_into_root(fd, &sb, 3, "victim", rs);
+	flip_bit_in_field(fd, &sb, 3, field_off);
+	close(fd);
+	rs_free(rs);
+
+	v = check();
+	report(label, v.lost == 0 && v.dangling == 0,
+	       "one recoverable bit in this field: expected 0/0, got lost=%ld dangling=%ld",
+	       v.lost, v.dangling);
+}
+
 /*
  * A correctable error in an inode the checker must see through.
  *
@@ -521,50 +699,49 @@ static void case_correctable_inode(void)
 }
 
 /*
- * A correctable error in an indirect block.
+ * A correctable error in an indirect block itself.
  *
- * The indirect walk read these with a bare read() and followed
- * whatever it found. A flipped bit sent it somewhere else and orphaned
- * the subtree beneath -- hundreds of blocks reported lost, none of them
- * lost. This needs a file large enough to have an indirect block, so it
- * reports skipped rather than passing on a volume without one.
+ * Not in the pointer to it -- in the block. The walk read these with a
+ * bare read() and no check of any kind, then followed every pointer it
+ * found, so one flipped bit sent it somewhere else and orphaned the
+ * subtree beneath: hundreds of blocks reported lost with nothing wrong
+ * with any of them.
+ *
+ * An earlier version of this case looked for a file on a fresh volume
+ * large enough to have an indirect block, found none, and reported
+ * skipped on every run. Skipped is not passed. It builds one.
  */
 static void case_correctable_indirect(void)
 {
 	struct beamfs_super_block sb;
-	struct beamfs_inode in;
+	struct rs_codec *rs = rs_init();
 	struct verdict v;
-	uint64_t ind = 0, ino;
+	uint64_t ind;
 	uint8_t byte;
-	off_t off;
 	int fd;
 
 	fresh();
 	fd = open(image, O_RDWR);
-	if (fd < 0)
+	if (fd < 0 || !rs)
 		die("cannot open %s", image);
 	read_sb(fd, &sb);
 
-	for (ino = 1; ino <= 64 && !ind; ino++) {
-		read_inode(fd, &sb, ino, &in);
-		if (in.i_mode != 0 && in.i_indirect != 0)
-			ind = in.i_indirect;
-	}
-	if (!ind) {
-		close(fd);
-		printf("  %-38s skipped -- no file on a fresh volume is large enough\n",
-		       "correctable indirect error");
-		return;
-	}
+	ind = build_file(fd, &sb, 3, sb.s_data_start_blk + 900, 1, rs);
+	link_into_root(fd, &sb, 3, "big", rs);
 
-	off = (off_t)ind * BEAMFS_BLOCK_SIZE;
-	pread_at(fd, off, &byte, 1);
+	/*
+	 * The indirect block's parity lives in the parity region, not in
+	 * the block, so flipping a byte here is damage the region can
+	 * describe -- if the checker consults it.
+	 */
+	pread_at(fd, (off_t)ind * BEAMFS_BLOCK_SIZE, &byte, 1);
 	byte ^= 0x01;
-	pwrite_at(fd, off, &byte, 1);
+	pwrite_at(fd, (off_t)ind * BEAMFS_BLOCK_SIZE, &byte, 1);
 	close(fd);
+	rs_free(rs);
 
 	v = check();
-	report("correctable indirect error", v.lost == 0 && v.dangling == 0,
+	report("correctable indirect block", v.lost == 0 && v.dangling == 0,
 	       "expected 0/0, got lost=%ld dangling=%ld", v.lost, v.dangling);
 }
 
@@ -675,6 +852,18 @@ int main(int argc, char **argv)
 		if (!strcmp(only, "both"))        case_both();
 		if (!strcmp(only, "inode"))       case_correctable_inode();
 		if (!strcmp(only, "indirect"))    case_correctable_indirect();
+		if (!strcmp(only, "direct"))
+			case_pointer_field("bit in i_direct[0]",
+					   offsetof(struct beamfs_inode, i_direct), 0, 700);
+		if (!strcmp(only, "ind1"))
+			case_pointer_field("bit in i_indirect",
+					   offsetof(struct beamfs_inode, i_indirect), 1, 720);
+		if (!strcmp(only, "ind2"))
+			case_pointer_field("bit in i_dindirect",
+					   offsetof(struct beamfs_inode, i_dindirect), 2, 740);
+		if (!strcmp(only, "ind3"))
+			case_pointer_field("bit in i_tindirect",
+					   offsetof(struct beamfs_inode, i_tindirect), 3, 760);
 		if (!strcmp(only, "range"))       case_out_of_range_pointer();
 		printf("\n%u case(s), %u failed\n", cases_run, cases_failed);
 		return cases_failed ? 1 : 0;
@@ -686,6 +875,21 @@ int main(int argc, char **argv)
 	case_dangling();
 	case_both();
 	case_correctable_inode();
+
+	/*
+	 * Every pointer field, not just the one that was convenient.
+	 * The offsets come from the struct rather than from arithmetic
+	 * here, so a field moving does not silently stop being tested.
+	 */
+	case_pointer_field("bit in i_direct[0]",
+			   offsetof(struct beamfs_inode, i_direct), 0, 700);
+	case_pointer_field("bit in i_indirect",
+			   offsetof(struct beamfs_inode, i_indirect), 1, 720);
+	case_pointer_field("bit in i_dindirect",
+			   offsetof(struct beamfs_inode, i_dindirect), 2, 740);
+	case_pointer_field("bit in i_tindirect",
+			   offsetof(struct beamfs_inode, i_tindirect), 3, 760);
+
 	case_correctable_indirect();
 	case_out_of_range_pointer();
 

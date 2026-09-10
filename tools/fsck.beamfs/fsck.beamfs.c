@@ -442,8 +442,8 @@ static int pass2_bitmap(const struct fsck_opts *o)
  * enforces in file_inline.c -- not one landing on some other
  * in-range block.
  */
-static void walk_indirect_tree(int fd, uint64_t block_no, int level,
-			       uint64_t data_start, uint64_t nblocks,
+static void walk_indirect_tree(struct fsck_reader *rd, uint64_t block_no,
+			       int level, uint64_t data_start, uint64_t nblocks,
 			       void (*mark)(void *ctx, uint64_t phys),
 			       void *ctx, unsigned int *bad_pointers)
 {
@@ -457,14 +457,25 @@ static void walk_indirect_tree(int fd, uint64_t block_no, int level,
 	if (mark)
 		mark(ctx, block_no);
 
-	if (lseek(fd, (off_t)block_no * BEAMFS_BLOCK_SIZE, SEEK_SET) < 0 ||
-	    read(fd, ptrs, sizeof(ptrs)) != (ssize_t)sizeof(ptrs)) {
+	/*
+	 * Through the reader, and refusing to walk what it cannot vouch
+	 * for.
+	 *
+	 * This read the block with a bare read() and followed every
+	 * pointer it found, so one flipped bit sent the walk somewhere
+	 * else and orphaned the subtree beneath it -- reported as blocks
+	 * lost, with nothing lost. The reader checks the block against
+	 * the parity region and corrects it; a block past correction is
+	 * counted and left alone, because following pointers out of it
+	 * is how one bad block becomes a report of hundreds.
+	 */
+	if (fsck_read_indirect(rd, block_no, ptrs) == FSCK_READ_UNCORRECTABLE) {
 		(*bad_pointers)++;
 		return;
 	}
 
 	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
-		uint64_t child = ptrs[i];
+		uint64_t child = ptrs[i];   /* already host order */
 
 		if (child == 0)
 			continue;
@@ -476,7 +487,7 @@ static void walk_indirect_tree(int fd, uint64_t block_no, int level,
 			if (mark)
 				mark(ctx, child);
 		} else {
-			walk_indirect_tree(fd, child, level - 1, data_start,
+			walk_indirect_tree(rd, child, level - 1, data_start,
 					   nblocks, mark, ctx, bad_pointers);
 		}
 	}
@@ -486,6 +497,7 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 {
 	struct beamfs_super_block sb;
 	struct rs_codec *rs;
+	struct fsck_reader rd3;
 	uint32_t inodes_per_block;
 	uint64_t total_inodes;
 	uint64_t data_start, nblocks;
@@ -513,6 +525,17 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 		return FSCK_UNCORRECTED;
 	}
 
+	/*
+	 * A reader for the tree walk. pass 3 decodes inodes itself and
+	 * keeps doing so; what changes is that the blocks it follows out
+	 * of them are checked against their parity instead of being
+	 * read raw and believed.
+	 */
+	if (fsck_reader_open(&rd3, o->fd) == FSCK_READ_UNCORRECTABLE) {
+		fprintf(stderr, "fsck.beamfs: pass 3: superblock unreadable\n");
+		return FSCK_ERROR;
+	}
+
 	rs = rs_init();
 	if (!rs) {
 		fprintf(stderr, "fsck.beamfs: pass 3: rs_init failed\n");
@@ -535,6 +558,7 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 				(unsigned long long)ino, (unsigned long long)block,
 				strerror(errno));
 			rs_free(rs);
+	fsck_reader_close(&rd3);
 			return FSCK_ERROR;
 		}
 
@@ -638,13 +662,13 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 		}
 
 		if (raw.i_indirect)
-			walk_indirect_tree(o->fd, raw.i_indirect, 1, data_start,
+			walk_indirect_tree(&rd3, raw.i_indirect, 1, data_start,
 					   nblocks, NULL, NULL, &bad_pointer_inodes);
 		if (raw.i_dindirect)
-			walk_indirect_tree(o->fd, raw.i_dindirect, 2, data_start,
+			walk_indirect_tree(&rd3, raw.i_dindirect, 2, data_start,
 					   nblocks, NULL, NULL, &bad_pointer_inodes);
 		if (raw.i_tindirect)
-			walk_indirect_tree(o->fd, raw.i_tindirect, 3, data_start,
+			walk_indirect_tree(&rd3, raw.i_tindirect, 3, data_start,
 					   nblocks, NULL, NULL, &bad_pointer_inodes);
 
 		if (inode_dirty && o->repair) {
@@ -653,11 +677,13 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 				fprintf(stderr, "fsck.beamfs: pass 3: write-back inode %llu failed: %s\n",
 					(unsigned long long)ino, strerror(errno));
 				rs_free(rs);
+	fsck_reader_close(&rd3);
 				return FSCK_ERROR;
 			}
 		}
 	}
 	rs_free(rs);
+	fsck_reader_close(&rd3);
 
 	if (uncorrectable_inodes > 0 || bad_pointer_inodes > 0) {
 		fprintf(stderr, "fsck.beamfs: pass 3: %u inode(s) RS-uncorrectable, %u out-of-range pointer(s)\n",
@@ -853,13 +879,13 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 			unsigned int dummy_bad = 0; /* pass 3 already reports these */
 
 			if (raw.i_indirect)
-				walk_indirect_tree(o->fd, raw.i_indirect, 1, data_start,
+				walk_indirect_tree(&rd, raw.i_indirect, 1, data_start,
 						   nblocks, mark_reference, &rctx, &dummy_bad);
 			if (raw.i_dindirect)
-				walk_indirect_tree(o->fd, raw.i_dindirect, 2, data_start,
+				walk_indirect_tree(&rd, raw.i_dindirect, 2, data_start,
 						   nblocks, mark_reference, &rctx, &dummy_bad);
 			if (raw.i_tindirect)
-				walk_indirect_tree(o->fd, raw.i_tindirect, 3, data_start,
+				walk_indirect_tree(&rd, raw.i_tindirect, 3, data_start,
 						   nblocks, mark_reference, &rctx, &dummy_bad);
 		}
 	}
