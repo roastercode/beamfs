@@ -123,14 +123,23 @@ static void claim(struct p6 *p, uint64_t phys, uint64_t ino)
 	p->owner[idx] = ino;
 }
 
-/* Walk an indirect subtree, claiming every block for @ino. */
-static void claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
+/*
+ * Walk an indirect subtree, claiming every block for @ino.
+ *
+ * Returns how many blocks the subtree holds, itself included. The count
+ * is the point as much as the claiming: without it an inode's block
+ * total stopped at twelve direct and one indirect, so every file past
+ * 45 KiB looked like it claimed more bytes than its blocks could hold.
+ * On a Yocto rootfs that was 1426 reports, none of them real.
+ */
+static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 {
 	uint64_t ptrs[BEAMFS_INDIRECT_PTRS];
+	uint64_t n = 1;
 	unsigned int i;
 
 	if (blk == 0)
-		return;
+		return 0;
 	claim(p, blk, ino);
 
 	if (fsck_read_indirect(p->rd, blk, ptrs) == FSCK_READ_UNCORRECTABLE) {
@@ -138,16 +147,19 @@ static void claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 		 * failed its own parity is how one bad block becomes a
 		 * report of hundreds. */
 		p->r.unreadable_indirect++;
-		return;
+		return n;
 	}
 	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
 		if (ptrs[i] == 0)
 			continue;
-		if (level > 1)
-			claim_tree(p, ptrs[i], level - 1, ino);
-		else
+		if (level > 1) {
+			n += claim_tree(p, ptrs[i], level - 1, ino);
+		} else {
 			claim(p, ptrs[i], ino);
+			n++;
+		}
 	}
+	return n;
 }
 
 /* How many blocks an inode actually owns, and its size in blocks. */
@@ -159,21 +171,16 @@ static uint64_t count_blocks(struct p6 *p, const struct beamfs_inode *in,
 
 	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++)
 		if (in->i_direct[i]) {
-			claim(p, in->i_direct[i], ino);
+			claim(p, le64toh(in->i_direct[i]), ino);
 			n++;
 		}
-	if (in->i_indirect) {
-		claim_tree(p, in->i_indirect, 1, ino);
-		n++;
-	}
-	if (in->i_dindirect) {
-		claim_tree(p, in->i_dindirect, 2, ino);
-		n++;
-	}
-	if (in->i_tindirect) {
-		claim_tree(p, in->i_tindirect, 3, ino);
-		n++;
-	}
+	/* The subtree's own count, not one for the root of it: an
+	 * indirect block holding fifteen data pointers is sixteen
+	 * blocks, and counting it as one is what made every large file
+	 * look short of blocks. */
+	n += claim_tree(p, le64toh(in->i_indirect), 1, ino);
+	n += claim_tree(p, le64toh(in->i_dindirect), 2, ino);
+	n += claim_tree(p, le64toh(in->i_tindirect), 3, ino);
 	return n;
 }
 
@@ -204,15 +211,27 @@ static void walk_dir_block(struct p6 *p, uint64_t blk, uint64_t dir_ino,
 		unsigned int k;
 
 		/*
-		 * A record length of zero would loop forever, and one
-		 * that overruns the block walks into the next record's
-		 * middle. Either means the directory is unreadable from
-		 * here on; stopping is the only safe answer.
+		 * Zero is the end of the block, not damage.
+		 *
+		 * mkfs writes a trailing free record on the last block of
+		 * a directory and leaves the intermediate ones ending in
+		 * zeroes, and the kernel's walk stops there --
+		 * beamfs_dirent_valid returns false and the loop breaks.
+		 * A checker stricter than the reader reports fifty-three
+		 * malformed records on a healthy Yocto rootfs, which is
+		 * what this did.
+		 *
+		 * A length that is non-zero and still impossible is
+		 * another matter: it would step into the middle of the
+		 * next record, and the walk cannot continue past it.
 		 */
+		if (rec == 0)
+			return;
+
 		if (rec < BEAMFS_DIRENT_MIN_LEN || (rec & (BEAMFS_DIRENT_ALIGN - 1)) ||
 		    off + rec > BEAMFS_DATA_INLINE_BYTES) {
 			p->r.bad_dirents++;
-			note(p, "fsck.beamfs: pass 6: directory %llu block %llu: record length %u at offset %u is impossible\n",
+			note(p, "fsck.beamfs: pass 6: directory %llu block %llu: record length %u at offset %u cannot be stepped over\n",
 			     (unsigned long long)dir_ino, (unsigned long long)blk,
 			     rec, off);
 			return;
