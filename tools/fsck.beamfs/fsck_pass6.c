@@ -147,6 +147,15 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 		 * failed its own parity is how one bad block becomes a
 		 * report of hundreds. */
 		p->r.unreadable_indirect++;
+		/*
+		 * Named, not just counted. One indirect block past
+		 * correction orphans everything beneath it -- 273 blocks
+		 * from one block, on the volume this was written for --
+		 * and a count of one says nothing about which block to
+		 * look at or which inode lost its tree.
+		 */
+		note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu is beyond correction; the subtree under it is unreachable\n",
+		     (unsigned long long)blk, (unsigned long long)ino);
 		return n;
 	}
 	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {

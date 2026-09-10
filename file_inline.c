@@ -143,7 +143,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 {
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	struct super_block       *sb = inode->i_sb;
-	struct buffer_head       *ibh;
+	struct buffer_head *ibh = NULL;
 	__le64                   *ptrs;
 	u64                       indirect_blk;
 	u64                       indirect_slot;
@@ -197,7 +197,9 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		ibh = sb_bread(sb, indirect_blk);
+		/* Already held when this call created it. */
+		if (!ibh)
+			ibh = sb_bread(sb, indirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
 					   (unsigned long long)indirect_blk);
@@ -253,7 +255,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Coverage: 12 + 512 + 512*512 = 262668 iblocks ~= 1 GiB.
 		 */
 		u64 didx, l1_slot, l2_slot, dindirect_blk, l1_blk;
-		struct buffer_head *l1bh;
+		struct buffer_head *l1bh = NULL;
 
 		didx = iblock_logical - BEAMFS_MAX_IBLOCK_INDIRECT;
 		l1_slot = didx / BEAMFS_INDIRECT_PTRS;
@@ -301,7 +303,9 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		l1bh = sb_bread(sb, l1_blk);
+		/* Already held when this call created it. */
+		if (!l1bh)
+			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read dindirect L1 block %llu\n",
 					   (unsigned long long)l1_blk);
@@ -359,7 +363,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 */
 		u64 tidx, l1_slot, l2_slot, l3_slot;
 		u64 tindirect_blk, l1_blk, l2_blk;
-		struct buffer_head *l1bh, *l2bh;
+		struct buffer_head *l1bh = NULL, *l2bh = NULL;
 
 		tidx = iblock_logical - BEAMFS_MAX_IBLOCK_DINDIRECT;
 		l1_slot = tidx / (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS);
@@ -408,7 +412,9 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		l1bh = sb_bread(sb, l1_blk);
+		/* Already held when this call created it. */
+		if (!l1bh)
+			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
 					   (unsigned long long)l1_blk);
@@ -439,7 +445,9 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		l2bh = sb_bread(sb, l2_blk);
+		/* Already held when this call created it. */
+		if (!l2bh)
+			l2bh = sb_bread(sb, l2_blk);
 		if (!l2bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
 					   (unsigned long long)l2_blk);
@@ -563,7 +571,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	struct super_block       *sb = inode->i_sb;
-	struct buffer_head       *ibh;
+	struct buffer_head *ibh = NULL;
 	struct buffer_head       *dbh;
 	__le64                   *ptrs;
 	u64                       indirect_blk;
@@ -697,14 +705,36 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(ibh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
 		}
 
 		/* Read indirect to look up / install the slot. */
-		ibh = sb_bread(sb, indirect_blk);
+		/* Already held when this call created it. */
+		if (!ibh)
+			ibh = sb_bread(sb, indirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
 					  (unsigned long long)indirect_blk);
@@ -863,7 +893,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		u64 didx, l1_slot, l2_slot;
 		u64 dindirect_blk, l1_blk;
-		struct buffer_head *l1bh;
+		struct buffer_head *l1bh = NULL;
 
 		didx = iblock_logical - BEAMFS_MAX_IBLOCK_INDIRECT;
 		l1_slot = didx / BEAMFS_INDIRECT_PTRS;
@@ -905,7 +935,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(ibh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -966,7 +1016,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(l1bh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
@@ -982,7 +1052,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		brelse(ibh);
 
 		/* --- Stage 3: data block --- */
-		l1bh = sb_bread(sb, l1_blk);
+		/* Already held when this call created it. */
+		if (!l1bh)
+			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read L1 indirect block %llu\n",
 					   (unsigned long long)l1_blk);
@@ -1137,7 +1209,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		 */
 		u64 tidx, l1_slot, l2_slot, l3_slot;
 		u64 tindirect_blk, l1_blk, l2_blk;
-		struct buffer_head *l1bh, *l2bh;
+		struct buffer_head *l1bh = NULL, *l2bh = NULL;
 
 		tidx = iblock_logical - BEAMFS_MAX_IBLOCK_DINDIRECT;
 		l1_slot = tidx / (BEAMFS_INDIRECT_PTRS * BEAMFS_INDIRECT_PTRS);
@@ -1180,7 +1252,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(ibh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1241,7 +1333,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(l1bh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
@@ -1257,7 +1369,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		brelse(ibh);
 
 		/* --- Stage 3: level-2 indirect block --- */
-		l1bh = sb_bread(sb, l1_blk);
+		/* Already held when this call created it. */
+		if (!l1bh)
+			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L1 block %llu\n",
 					   (unsigned long long)l1_blk);
@@ -1312,7 +1426,27 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * finds four blocks marked used that nothing references.
 			 */
 			mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
-			brelse(l2bh);
+			/*
+			 * Held, not released and read back.
+			 *
+			 * This released the buffer here and read the same block
+			 * again a few lines down. Between the two it can be
+			 * evicted, and the read then comes from the medium --
+			 * where nothing has been written yet. The block returns
+			 * holding whatever was there before, and every pointer
+			 * installed into it afterwards lands in a block that is
+			 * never written at all.
+			 *
+			 * A frozen generic/464 volume shows the whole thing:
+			 * inode 36's indirect block 16469, named by the inode on
+			 * disk, 0xcd across 464 of its 512 slots, and 273 blocks
+			 * reported used and referenced by nothing.
+			 *
+			 * Attaching it to the inode was meant to close this. It
+			 * does not: the attach makes the buffer flushable, and
+			 * dropping the last reference still lets it go before
+			 * anything flushes it. Holding the reference closes it.
+			 */
 			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
 					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk,
 				__func__);
@@ -1328,7 +1462,9 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		brelse(l1bh);
 
 		/* --- Stage 4: data block --- */
-		l2bh = sb_bread(sb, l2_blk);
+		/* Already held when this call created it. */
+		if (!l2bh)
+			l2bh = sb_bread(sb, l2_blk);
 		if (!l2bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read tindirect L2 block %llu\n",
 					   (unsigned long long)l2_blk);
@@ -3315,13 +3451,15 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 	/* --- Single indirect block --- */
 	if (fi->i_indirect) {
 		u64                 indirect_blk = le64_to_cpu(fi->i_indirect);
-		struct buffer_head *ibh;
+		struct buffer_head *ibh = NULL;
 		__le64             *ptrs;
 		u64                 nptrs = BEAMFS_INDIRECT_PTRS;
 		u64                 slot_first;
 		u64                 j;
 
-		ibh = sb_bread(sb, indirect_blk);
+		/* Already held when this call created it. */
+		if (!ibh)
+			ibh = sb_bread(sb, indirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: truncate: failed to read indirect block %llu\n",
 					   (unsigned long long)indirect_blk);
