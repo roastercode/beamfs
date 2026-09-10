@@ -31,6 +31,8 @@
 
 #include "crc32.h"
 #include "rs_decode.h"
+#include "fsck_read.h"
+#include "fsck_pass6.h"
 #include "sb_layout.h"
 
 /*
@@ -712,6 +714,9 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	uint64_t  reference_bytes;
 	unsigned int referenced_but_free = 0;
 	unsigned int used_but_unreferenced = 0;
+	unsigned int excluded_inodes = 0;
+	struct fsck_reader rd;
+	enum fsck_read_status st;
 
 	if (lseek(o->fd, 0, SEEK_SET) < 0 ||
 	    read(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb)) {
@@ -730,6 +735,10 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		return FSCK_UNCORRECTED;
 	}
 
+	if (fsck_reader_open(&rd, o->fd) == FSCK_READ_UNCORRECTABLE) {
+		fprintf(stderr, "fsck.beamfs: pass 4: superblock unreadable\n");
+		return FSCK_ERROR;
+	}
 	reference_bytes = (nblocks + 7) / 8;
 	reference = calloc(1, reference_bytes);
 	if (!reference) {
@@ -744,19 +753,34 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	 * consistent with pass 3 having already reported it.
 	 */
 	for (ino = 1; ino <= total_inodes; ino++) {
-		uint64_t block  = sb.s_inode_table_blk + (ino - 1) / inodes_per_block;
-		uint64_t offset = (ino - 1) % inodes_per_block;
 		struct beamfs_inode raw;
-		off_t   pos = (off_t)block * BEAMFS_BLOCK_SIZE
-			    + (off_t)offset * sizeof(struct beamfs_inode);
 		int     i;
 
-		if (lseek(o->fd, pos, SEEK_SET) < 0 ||
-		    read(o->fd, &raw, sizeof(raw)) != (ssize_t)sizeof(raw)) {
-			fprintf(stderr, "fsck.beamfs: pass 4: cannot read inode %llu: %s\n",
-				(unsigned long long)ino, strerror(errno));
+		/*
+		 * Through the reader, so this pass sees the same inode pass 3 saw.
+		 *
+		 * It read the inode raw and pass 3 decoded it, so on a medium with
+		 * a correctable error the two passes walked different trees -- and
+		 * this is the pass that builds the reference set and reports
+		 * used-but-unreferenced. One flipped bit in one inode was enough
+		 * to have it mark blocks nobody uses and call the real ones lost.
+		 */
+		st = fsck_read_inode(&rd, ino, &raw);
+		if (st == FSCK_READ_IO) {
+			fprintf(stderr, "fsck.beamfs: pass 4: cannot read inode %llu\n",
+				(unsigned long long)ino);
+			fsck_reader_close(&rd);
 			free(reference);
 			return FSCK_ERROR;
+		}
+		if (st == FSCK_READ_UNCORRECTABLE) {
+			/*
+			 * Excluded rather than walked: its pointers are unknown,
+			 * and following them turns one bad inode into a report of
+			 * hundreds of lost blocks. pass 3 has already named it.
+			 */
+			excluded_inodes++;
+			continue;
 		}
 		if (raw.i_mode == 0)
 			continue;
@@ -917,6 +941,10 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	}
 	free(reference);
 
+	if (excluded_inodes || rd.corrected)
+		fprintf(stderr, "fsck.beamfs: pass 4: %u read(s) RS-corrected, %u inode(s) excluded\n",
+			rd.corrected, excluded_inodes);
+	fsck_reader_close(&rd);
 	if (referenced_but_free == 0 && used_but_unreferenced == 0) {
 		if (o->verbose)
 			printf("fsck.beamfs: pass 4: bitmap consistent with inode table\n");
@@ -1146,6 +1174,31 @@ static int run_passes(struct fsck_opts *o)
 		worst = rc;
 
 	rc = pass5_rs_journal(o);
+
+	/*
+	 * pass 6, after the block-level passes: it needs a superblock and a
+	 * bitmap it can trust, and it reports on the filesystem rather than
+	 * on its blocks.
+	 */
+	{
+		struct fsck_reader rd6;
+		struct fsck_pass6_opts p6o = { .verbose = o->verbose, .repair = o->repair };
+		struct fsck_pass6_result p6r;
+
+		if (fsck_reader_open(&rd6, o->fd) == FSCK_READ_UNCORRECTABLE) {
+			fprintf(stderr, "fsck.beamfs: pass 6: superblock unreadable\n");
+			worst = FSCK_UNCORRECTED;
+		} else {
+			int p6 = fsck_pass6(&rd6, &p6o, &p6r);
+
+			fsck_pass6_report(&p6r);
+			fsck_reader_close(&rd6);
+			if (p6 == FSCK_PASS6_ERROR)
+				worst = FSCK_ERROR;
+			else if (p6 == FSCK_PASS6_UNCORRECTED && worst < FSCK_UNCORRECTED)
+				worst = FSCK_UNCORRECTED;
+		}
+	}
 	if (rc == FSCK_ERROR || rc == FSCK_USAGE)
 		return rc;
 	if (rc > worst)

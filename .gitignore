@@ -1,67 +1,61 @@
-# build artifacts
-*.o
-*.ko
-*.ko.cmd
-*.mod
-*.mod.c
-*.cmd
-.tmp_versions/
-Module.symvers
-modules.order
 
-# editor
 *~
 .#*
 \#*#
-*.swp
-
-# papers build artifacts (keep tex/bib/figures, exclude generated)
+# big binary backups, ad-hoc
+# Bitbake transient artefacts (do not commit)
+# build artifacts
+# Claude must read context/context-recadrage.md FIRST in any new session.
+*.cmd
+context/*
+!context/00-MINDMAP.md
+!context/context-recadrage.md
+!context/pre-push-hook.sh
+!context/R14-INCIDENT-20260515.md
+!context/STATUS.md
+!context/TODO.md
+.DS_Store
+# editor
+# generated PDFs in papers/
+# Kernel build artifacts (deeper)
+*.ko
+*.ko.cmd
+.*.ko.cmd
+*.mod
+*.mod.c
+.*.mod.cmd
+modules.order
+Module.symvers
+*.o
+.*.o.cmd
+.*.o.d
+# OS / FS metadata
 papers/*/*.aux
 papers/*/*.bbl
 papers/*/*.bcf
 papers/*/*.blg
+# papers build artifacts (keep tex/bib/figures, exclude generated)
 papers/*/*.fdb_latexmk
 papers/*/*.fls
 papers/*/*.log
+papers/*/_minted-*/
 papers/*/*.out
+papers/*/paper.pdf
 papers/*/*.run.xml
 papers/*/*.synctex.gz
 papers/*/*.toc
-papers/*/_minted-*/
-
-# generated PDFs in papers/
-papers/*/paper.pdf
-
-# big binary backups, ad-hoc
+pn-buildlist
+# === RECADRAGE LINKAGE - DO NOT REMOVE ===
+# Rust build artefacts
+*.swp
+*.tar.bz2
 *.tar.gz
 *.tar.xz
-*.tar.bz2
-*.zip
-
-# OS / FS metadata
-.DS_Store
-Thumbs.db
-
-# Kernel build artifacts (deeper)
-.*.o.d
-.*.o.cmd
-.*.ko.cmd
-.*.mod.cmd
-# === RECADRAGE LINKAGE - DO NOT REMOVE ===
-# Claude must read context/context-recadrage.md FIRST in any new session.
-# This file is the operational contract for Claude on the BEAMFS project.
-# Versioned on roastercode/beamfs-devel (private) only, never on public.
-context/*
-!context/00-MINDMAP.md
-!context/context-recadrage.md
-!context/STATUS.md
-!context/TODO.md
-!context/R14-INCIDENT-20260515.md
-!context/pre-push-hook.sh
-
-# Bitbake transient artefacts (do not commit)
-pn-buildlist
 task-depends.dot
-
-# Rust build artefacts
+  tests/fsck_oracle
+# This file is the operational contract for Claude on the BEAMFS project.
+Thumbs.db
+.tmp_versions/
 tools/raf-decode/target/
+# Versioned on roastercode/beamfs-devel (private) only, never on public.
+*.zip

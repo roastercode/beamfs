@@ -18,7 +18,7 @@ MANDIR     ?= $(PREFIX)/share/man
 INSTALL    ?= install
 
 BIN     := fsck.beamfs
-SRCS    := fsck.beamfs.c crc32.c rs_decode.c
+SRCS    := fsck.beamfs.c crc32.c rs_decode.c fsck_read.c fsck_pass6.c
 OBJS    := $(SRCS:.c=.o)
 
 .PHONY: all clean install test

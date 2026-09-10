@@ -222,7 +222,18 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		brelse(dbh);
 
 		fi->i_direct[block_idx] = cpu_to_le64(block_no);
-		dir->i_size += BEAMFS_BLOCK_SIZE;
+		/*
+		 * What a directory block holds, not what it occupies.
+		 *
+		 * A block is 4096 bytes on the medium and carries 3824 of
+		 * payload; the rest is Reed-Solomon parity. Counting the
+		 * whole block puts 272 bytes of parity inside i_size, and
+		 * a walk that trusts i_size reads them as a directory
+		 * record. The one at the end of the root happens to
+		 * decode as a zero length and stop the walk; nothing
+		 * makes that true of the next block.
+		 */
+		dir->i_size += BEAMFS_DATA_INLINE_BYTES;
 		mark_inode_dirty(dir);
 		*out_block = block_no;
 		return 0;
@@ -296,7 +307,8 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 	ptrs[indirect_slot] = cpu_to_le64(block_no);
 	mark_buffer_dirty(ibh);
 	brelse(ibh);
-	dir->i_size += BEAMFS_BLOCK_SIZE;
+	/* Payload, not block size -- see the note above. */
+	dir->i_size += BEAMFS_DATA_INLINE_BYTES;
 	mark_inode_dirty(dir);
 	*out_block = block_no;
 	return 0;
