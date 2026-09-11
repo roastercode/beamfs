@@ -257,8 +257,14 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 		lock_buffer(ibh);
 		memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 		set_buffer_uptodate(ibh);
+		beamfs_ind_parity_update(sb, ibh, dir);
 		unlock_buffer(ibh);
-		mark_buffer_dirty(ibh);
+		/*
+		 * On the inode's metadata list, like every other site that
+		 * dirties an indirect block: a buffer attached to nothing
+		 * is never flushed by __writeback_single_inode.
+		 */
+		mmb_mark_buffer_dirty(ibh, &BEAMFS_I(dir)->i_metadata_bhs);
 		brelse(ibh);
 		fi->i_indirect = cpu_to_le64(indirect_blk);
 		mark_inode_dirty(dir);
@@ -303,8 +309,25 @@ int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 	mark_buffer_dirty(dbh);
 	brelse(dbh);
 
+	/*
+	 * A directory's indirect block needs its parity like a file's.
+	 *
+	 * This file had no parity update at all, so a directory
+	 * that grew past twelve blocks allocated an indirect block, filled
+	 * it with pointers, and left the parity region describing nothing.
+	 * The checker then read it as beyond correction and orphaned the
+	 * whole subtree.
+	 *
+	 * generic/310 shows it on inode 3, the test directory: twelve
+	 * direct blocks full, indirect block 18455 holding six valid
+	 * pointers, and its parity slot zero across all 256 bytes -- the
+	 * six blocks below reported lost.
+	 */
+	lock_buffer(ibh);
 	ptrs[indirect_slot] = cpu_to_le64(block_no);
-	mark_buffer_dirty(ibh);
+	beamfs_ind_parity_update(sb, ibh, dir);
+	unlock_buffer(ibh);
+	mmb_mark_buffer_dirty(ibh, &BEAMFS_I(dir)->i_metadata_bhs);
 	brelse(ibh);
 	/* Payload, not block size -- see the note above. */
 	dir->i_size += BEAMFS_DATA_INLINE_BYTES;
