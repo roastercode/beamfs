@@ -3586,12 +3586,12 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 	 */
 	if (fi->i_dindirect &&
 	    beamfs_free_ind_range(sb, le64_to_cpu(fi->i_dindirect), 2,
-				  BEAMFS_MAX_IBLOCK_INDIRECT, b_first_freed))
+				  BEAMFS_MAX_IBLOCK_INDIRECT, b_first_freed, inode))
 		fi->i_dindirect = 0;
 
 	if (fi->i_tindirect &&
 	    beamfs_free_ind_range(sb, le64_to_cpu(fi->i_tindirect), 3,
-				  BEAMFS_MAX_IBLOCK_DINDIRECT, b_first_freed))
+				  BEAMFS_MAX_IBLOCK_DINDIRECT, b_first_freed, inode))
 		fi->i_tindirect = 0;
 
 	mark_inode_dirty(inode);

@@ -511,7 +511,8 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
  * it, false when something survived and @blk was kept.
  */
 bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
-			   unsigned int depth, u64 base, u64 first);
+			   unsigned int depth, u64 base, u64 first,
+			   struct inode *inode);
 
 /* indparity.c */
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,

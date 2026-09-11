@@ -227,7 +227,8 @@ static bool beamfs_free_one_block(struct super_block *sb, u64 blk)
  * there.
  */
 bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
-			   unsigned int depth, u64 base, u64 first)
+			   unsigned int depth, u64 base, u64 first,
+			   struct inode *inode)
 {
 	u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
 	u64 child_span = 1;
@@ -274,7 +275,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 
 		if (depth > 1) {
 			if (beamfs_free_ind_range(sb, child, depth - 1,
-						  child_base, first)) {
+						  child_base, first, inode)) {
 				lock_buffer(ibh);
 				beamfs_tc_clear(sb, ibh->b_blocknr, (u32)j);
 				ptrs[j] = 0;
@@ -299,8 +300,34 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 		dirtied = true;
 	}
 
-	if (dirtied)
-		mark_buffer_dirty(ibh);
+	if (dirtied) {
+		/*
+		 * The parity has to follow the block down.
+		 *
+		 * This is the only path that takes pointers out of an
+		 * indirect block, and it left the parity describing the
+		 * state before. A verify then "corrects" the block toward
+		 * that older state and hands back a pointer that was
+		 * cleared -- to a block the allocator has since given to
+		 * another file.
+		 *
+		 * A frozen generic/083 volume shows it exactly: block
+		 * 48682 holds one pointer on disk and its parity
+		 * describes two, so reading it corrected produces 48683,
+		 * which belongs to inode 1317. The checker reported a
+		 * block shared between two inodes that share nothing.
+		 *
+		 * On the inode's metadata list for the same reason every
+		 * other site is: a buffer dirtied and attached to nothing
+		 * is never flushed by __writeback_single_inode.
+		 */
+		beamfs_ind_parity_update(sb, ibh, inode);
+		if (inode)
+			mmb_mark_buffer_dirty(ibh,
+					      &BEAMFS_I(inode)->i_metadata_bhs);
+		else
+			mark_buffer_dirty(ibh);
+	}
 	brelse(ibh);
 
 	/*
@@ -399,17 +426,17 @@ static void beamfs_free_data_blocks(struct inode *inode)
 	 */
 	if (fi->i_indirect) {
 		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_indirect), 1,
-				      BEAMFS_MAX_IBLOCK_DIRECT, 0);
+				      BEAMFS_MAX_IBLOCK_DIRECT, 0, inode);
 		fi->i_indirect = 0;
 	}
 	if (fi->i_dindirect) {
 		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_dindirect), 2,
-				      BEAMFS_MAX_IBLOCK_INDIRECT, 0);
+				      BEAMFS_MAX_IBLOCK_INDIRECT, 0, inode);
 		fi->i_dindirect = 0;
 	}
 	if (fi->i_tindirect) {
 		beamfs_free_ind_range(sb, le64_to_cpu(fi->i_tindirect), 3,
-				      BEAMFS_MAX_IBLOCK_DINDIRECT, 0);
+				      BEAMFS_MAX_IBLOCK_DINDIRECT, 0, inode);
 		fi->i_tindirect = 0;
 	}
 
