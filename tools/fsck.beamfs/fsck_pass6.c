@@ -487,12 +487,22 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 			continue;
 		mode = le16toh(in.i_mode);
 
-		if (!(p.reachable[ino / 8] & (1u << (ino % 8)))) {
+		/*
+		 * Reserved inodes are not reached through a directory and
+		 * are not supposed to be. The canary at inode 2 is a
+		 * conformance fixture the format places on disk with no
+		 * entry naming it -- format-v4.md sec 11.1 -- so looking
+		 * for a name would report every volume as damaged.
+		 */
+		if (!beamfs_ino_is_reserved(ino) &&
+		    !(p.reachable[ino / 8] & (1u << (ino % 8)))) {
 			p.r.orphaned_inodes++;
 			note(&p, "fsck.beamfs: pass 6: inode %llu is allocated but no directory reaches it\n",
 			     (unsigned long long)ino);
 			continue;
 		}
+		if (beamfs_ino_is_reserved(ino) && ino != ROOT_INO)
+			continue;   /* walked for its blocks, not for a name */
 
 		/*
 		 * Directories carry a link for "." and one from their
