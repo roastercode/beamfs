@@ -330,7 +330,7 @@ flush, ou echo, mais jamais rien.
 ## Petit défaut cosmétique (2026-09-09)
 
 Le canary de mkfs.beamfs (inode 2, fixture INLINE, format-v4.md sec 11)
-porte un horodatage à l'époque zéro : `ls` affiche « Jan 1 1970 » sur
+porte un horodatage à l'époque zéro : `ls` affiche "Jan 1 1970" sur
 un volume qui vient d'être formaté. La racine, elle, a bien l'heure
 courante. Sans conséquence sur la cohérence, mais visible partout et
 de nature à faire douter d'un volume neuf lors d'une relecture.

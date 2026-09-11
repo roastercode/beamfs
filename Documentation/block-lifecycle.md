@@ -25,17 +25,17 @@ le bitmap, l'inode, et chaque bloc d'indirection du chemin.
       clear_bit(bitmap mémoire)
       beamfs_write_bitmap_block   -> encode + mark_buffer_dirty
       sync_fs / put_super         -> sync_dirty_buffer explicite
-                                     => « occupé » TOUJOURS sur disque
+                                     => "occupé" TOUJOURS sur disque
 
     lookup_or_alloc_phys
       ptrs[slot] = bloc           -> tampon mémoire, sous lock_buffer
       ind_parity_update           -> parité, hors du verrou du bloc
       mmb_mark_buffer_dirty       -> mark_buffer_dirty + liste inode
       write_inode / mmb_sync      -> disque, SI le writeback passe
-                                     => « référencé » NON GARANTI
+                                     => "référencé" NON GARANTI
 
-Le côté « occupé » est publié de force et immédiatement. Le côté
-« référencé » dépend du writeback. `fsck` teste l'égalité des deux.
+Le côté "occupé" est publié de force et immédiatement. Le côté
+"référencé" dépend du writeback. `fsck` teste l'égalité des deux.
 Tout écart de timing produit `used-but-unreferenced` par construction.
 
 ext2 vit avec la même asymétrie mais ne fuit pas après un démontage

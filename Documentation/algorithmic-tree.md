@@ -37,11 +37,11 @@ observé. Vérifier le chemin avant de patcher.
     LIBRE
       │  beamfs_alloc_block               alloc.c:542
       ▼
-    ALLOUE  (bitmap sur disque dit « occupé », rien ne le référence)
+    ALLOUE  (bitmap sur disque dit "occupé", rien ne le référence)
       │  ptrs[slot] = blk                 file_inline.c, 6 sites
       ▼
     POINTE-EN-MEMOIRE  (le tampon parent porte le pointeur, marqué sale)
-      │  write_inode → mmb_sync           namei.c:1191
+      │  write_inode -> mmb_sync           namei.c:1191
       │  ou sync_blockdev au démontage
       ▼
     POINTE-SUR-DISQUE  (fsck le trouve)
@@ -78,8 +78,8 @@ bitmap, l'inode, chaque bloc d'indirection du chemin.
 verrou**, immédiatement après avoir pris le bit (alloc.c:66). Le bitmap
 est en outre synchronisé explicitement dans `sync_fs` et `put_super`.
 
-    « occupé »    → publié de force, immédiatement, toujours
-    « référencé » → dépend du writeback
+    "occupé"    -> publié de force, immédiatement, toujours
+    "référencé" -> dépend du writeback
 
 `fsck` teste l'égalité des deux ensembles. **L'ordre de publication est
 donc inversé par rapport à l'invariant.**
@@ -308,6 +308,6 @@ première chose à établir.
   bench` qui compare automatiquement.
 - Un écart de un ou deux sur dix est dans le bruit ; dix essais séparent
   30 % de 80 %, pas 70 % de 80 %.
-- Un essai avorté (« aborting ») n'est pas un échec du système de
+- Un essai avorté ("aborting") n'est pas un échec du système de
   fichiers.
 - Ne rien affirmer sans avoir vérifié.
