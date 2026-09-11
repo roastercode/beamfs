@@ -514,7 +514,8 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 			   unsigned int depth, u64 base, u64 first);
 
 /* indparity.c */
-void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh);
+void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
+			      struct inode *inode);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
 
 #ifdef CONFIG_BEAMFS_DEBUG_TREE

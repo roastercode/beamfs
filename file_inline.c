@@ -687,7 +687,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -849,7 +849,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				(u32)indirect_slot, le64_to_cpu(ptrs[indirect_slot]), new_block,
 			__func__);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
-		beamfs_ind_parity_update(sb, ibh);
+		beamfs_ind_parity_update(sb, ibh, inode);
 		unlock_buffer(ibh);
 		/*
 		 * Attach the block to the inode and dirty the inode, the
@@ -917,7 +917,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -998,7 +998,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
-			beamfs_ind_parity_update(sb, l1bh);
+			beamfs_ind_parity_update(sb, l1bh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -1041,7 +1041,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
@@ -1167,7 +1167,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), new_block,
 			__func__);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
-		beamfs_ind_parity_update(sb, l1bh);
+		beamfs_ind_parity_update(sb, l1bh, inode);
 		unlock_buffer(l1bh);
 		/*
 		 * Attach the block to the inode and dirty the inode, the
@@ -1234,7 +1234,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
 			unlock_buffer(ibh);
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -1315,7 +1315,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l1bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l1bh);
 			unlock_buffer(l1bh);
-			beamfs_ind_parity_update(sb, l1bh);
+			beamfs_ind_parity_update(sb, l1bh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -1358,7 +1358,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
@@ -1408,7 +1408,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			memset(l2bh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(l2bh);
 			unlock_buffer(l2bh);
-			beamfs_ind_parity_update(sb, l2bh);
+			beamfs_ind_parity_update(sb, l2bh, inode);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -1451,7 +1451,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk,
 				__func__);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
-			beamfs_ind_parity_update(sb, l1bh);
+			beamfs_ind_parity_update(sb, l1bh, inode);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
@@ -1577,7 +1577,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 				(u32)l3_slot, le64_to_cpu(ptrs[l3_slot]), new_block,
 			__func__);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
-		beamfs_ind_parity_update(sb, l2bh);
+		beamfs_ind_parity_update(sb, l2bh, inode);
 		unlock_buffer(l2bh);
 		/*
 		 * Attach the block to the inode and dirty the inode, the
@@ -3522,7 +3522,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 					ptrs[j] = 0;
 				}
 			}
-			beamfs_ind_parity_update(sb, ibh);
+			beamfs_ind_parity_update(sb, ibh, inode);
 			unlock_buffer(ibh);
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);

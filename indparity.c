@@ -95,8 +95,21 @@ static bool ind_parity_slot(struct super_block *sb, u64 phys,
  * leaves stale parity, which reads as corruption on the next verify --
  * worse than no parity at all, since it turns a healthy volume into one
  * that reports damage.
+ *
+ * @inode is the inode whose write dirtied the block, or NULL when there
+ * is none -- the scrubber repairing a block nobody is writing. It is
+ * needed because the parity block has to go on that inode's metadata
+ * list: a buffer marked dirty and on no inode's list is never flushed
+ * by __writeback_single_inode, so the parity stays in memory while the
+ * block it describes reaches the disk, and the next verify reads the
+ * mismatch as damage.
+ *
+ * generic/476 left 293 indirect blocks the checker could not decode,
+ * 287 of them almost entirely zero: freshly allocated, a few pointers
+ * installed, and parity that never followed them down.
  */
-void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh)
+void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
+			      struct inode *inode)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	const void *block = bh->b_data;
@@ -145,7 +158,16 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh)
 				BEAMFS_SUBBLOCK_DATA, 1);
 	}
 	unlock_buffer(pbh);
-	mark_buffer_dirty(pbh);
+	/*
+	 * On the inode's list when there is one, so writeback carries it
+	 * with the block it describes. Without an inode -- the scrubber
+	 * -- a plain dirty is all there is, and sync_blockdev is what
+	 * eventually takes it.
+	 */
+	if (inode)
+		mmb_mark_buffer_dirty(pbh, &BEAMFS_I(inode)->i_metadata_bhs);
+	else
+		mark_buffer_dirty(pbh);
 	brelse(pbh);
 }
 
