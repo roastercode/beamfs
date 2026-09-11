@@ -1,4 +1,4 @@
-# beamfs — arbre algorithmique du cycle de vie d'un bloc
+# beamfs -- arbre algorithmique du cycle de vie d'un bloc
 
 État au commit 22da463. Écrit après deux semaines passées à corriger des
 sites isolés sans modèle d'ensemble, et deux correctifs consécutifs qui
@@ -87,7 +87,7 @@ donc inversé par rapport à l'invariant.**
 ext2 vit avec la même asymétrie sans fuir après un démontage propre :
 ses blocs d'indirection sont dans le cache du périphérique, que
 `sync_blockdev` vide en fin de `sync_filesystem`. beamfs les y a aussi.
-L'asymétrie seule n'explique donc pas une fuite après démontage propre —
+L'asymétrie seule n'explique donc pas une fuite après démontage propre --
 elle explique une fuite après plantage.
 
 ---
@@ -105,7 +105,7 @@ a déclenché l'allocation**.
 `mmb_mark_buffer_dirty` ne rattache que si `!bh->b_mmb`, donc le tampon
 reste sur la liste du premier inode qui l'a touché. Quand cet inode est
 évincé, `beamfs_evict_inode` (super.c:443) appelle `mmb_invalidate`, qui
-détache tout — y compris ce tampon de bitmap partagé.
+détache tout -- y compris ce tampon de bitmap partagé.
 
 *Ce qui est établi* : le détachement a lieu. `mmb_invalidate` fait
 `__remove_assoc_queue` sur chaque tampon, ce qui met `b_mmb` à NULL et
@@ -124,7 +124,7 @@ avant toute conclusion.
 écrit le bloc de bitmap. **Il ne touche pas au tampon du bloc libéré.**
 
 Le `buffer_head` reste donc dans le cache du périphérique, possiblement
-sale, et — s'il s'agissait d'un bloc d'indirection — toujours rattaché à
+sale, et -- s'il s'agissait d'un bloc d'indirection -- toujours rattaché à
 `i_metadata_bhs` de son ancien propriétaire.
 
 Réattribué, `sb_getblk` rend **le même `buffer_head`**. Le nouveau
@@ -136,8 +136,8 @@ ext2 fait `bforget(bh)` avant `ext2_free_blocks` (ext2/inode.c:543 et
 
 *Mesure* : ajouter `bforget` aux deux sites de libération de beamfs
 (commit 726fa22) a fait passer `464` de 8/10 à **3/10**. Le correctif a
-été annulé. Pourquoi le comportement actuel — tampon relâché sans être
-oublié — donne un meilleur taux **n'est pas expliqué**.
+été annulé. Pourquoi le comportement actuel -- tampon relâché sans être
+oublié -- donne un meilleur taux **n'est pas expliqué**.
 
 ---
 
@@ -155,7 +155,7 @@ Dans `file_inline.c`, tous sous `lock_buffer` au commit 22da463 :
 | 1482 | pointeur de donnée | L3 sous tindirect |
 
 Chaque écriture est suivie de `beamfs_ind_parity_update`, appelé
-**hors du verrou du bloc** — il ne verrouille que le tampon de parité et
+**hors du verrou du bloc** -- il ne verrouille que le tampon de parité et
 lit `bh->b_data` sans protection (indparity.c:4, 23).
 
 *Ce qui est établi* : cette lecture n'est pas protégée.
@@ -201,7 +201,7 @@ les deux que `fsck` déclare perdus.
 
 Capture antérieure, même forme à l'échelle : 512 pointeurs dans le bloc
 1485, la troncature en relit 446 à zéro, `fsck` compte 446 perdus. La
-coupure est temporelle et sans chevauchement — écrit avant 295,166 :
+coupure est temporelle et sans chevauchement -- écrit avant 295,166 :
 conservé ; après 295,169 : perdu.
 
 **Deux écrivains du même inode, sérialisés par le même mutex, voient tous
@@ -249,7 +249,7 @@ entre les deux séries, commit 0995c00) :
     série 2  : 2 succès / 10
 
 La variance sur code identique couvre donc 2 à 8 sur dix. Tous les
-écarts attribués ce jour-là à des correctifs — 8 vs 5 vs 4 vs 3 — sont
+écarts attribués ce jour-là à des correctifs -- 8 vs 5 vs 4 vs 3 -- sont
 plus petits que cette variance. **Aucun de ces quatre points ne mesurait
 un effet du code.** Trois correctifs ont été annulés sur cette base et
 doivent être réévalués sur leur mérite technique, pas sur ces chiffres.

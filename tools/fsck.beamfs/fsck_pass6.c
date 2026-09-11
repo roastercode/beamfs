@@ -68,7 +68,8 @@ struct p6 {
 	/* Who owns each data block, 0 for nobody. Sized for the volume;
 	 * 8 bytes a block is 2 MiB on a 1 GiB volume, which is worth it
 	 * to name both inodes in a sharing report rather than saying
-	 * only that sharing exists. */
+	 * only that sharing exists.
+	 */
 	uint64_t *owner;
 
 	/* Counted references per inode, to compare against i_nlink. */
@@ -107,7 +108,8 @@ static void claim(struct p6 *p, uint64_t phys, uint64_t ino)
 	/* Only blocks inside the allocation region can be shared in a
 	 * way that matters: the root and the canary sit below
 	 * data_start, belong to exactly one inode by construction, and
-	 * have no bitmap entry to contend over. */
+	 * have no bitmap entry to contend over.
+	 */
 	if (phys < p->rd->data_start || phys >= p->rd->data_start + p->nblocks)
 		return;
 	idx = phys - p->rd->data_start;
@@ -145,7 +147,8 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 	if (fsck_read_indirect(p->rd, blk, ptrs) == FSCK_READ_UNCORRECTABLE) {
 		/* Not walked: following pointers out of a block that
 		 * failed its own parity is how one bad block becomes a
-		 * report of hundreds. */
+		 * report of hundreds.
+		 */
 		p->r.unreadable_indirect++;
 		/*
 		 * Named, not just counted. One indirect block past
@@ -186,7 +189,8 @@ static uint64_t count_blocks(struct p6 *p, const struct beamfs_inode *in,
 	/* The subtree's own count, not one for the root of it: an
 	 * indirect block holding fifteen data pointers is sixteen
 	 * blocks, and counting it as one is what made every large file
-	 * look short of blocks. */
+	 * look short of blocks.
+	 */
 	n += claim_tree(p, le64toh(in->i_indirect), 1, ino);
 	n += claim_tree(p, le64toh(in->i_dindirect), 2, ino);
 	n += claim_tree(p, le64toh(in->i_tindirect), 3, ino);
@@ -255,7 +259,8 @@ static void walk_dir_block(struct p6 *p, uint64_t blk, uint64_t dir_ino,
 				/* d_name_len is a byte and BEAMFS_MAX_FILENAME is
 				 * 255, so it cannot exceed it -- what can go wrong
 				 * is a name that does not fit the record it sits
-				 * in, which is the check that matters. */
+				 * in, which is the check that matters.
+				 */
 			} else if (nl == 0 ||
 				   BEAMFS_DIRENT_HDR_LEN + nl > rec) {
 				p->r.bad_dirents++;
@@ -267,7 +272,8 @@ static void walk_dir_block(struct p6 *p, uint64_t blk, uint64_t dir_ino,
 				/* Duplicate names in one directory: two
 				 * entries, one file, and a rename or an
 				 * unlink then works on whichever is
-				 * found first. */
+				 * found first.
+				 */
 				if (*nnames < FSCK_PASS6_MAX_NAMES) {
 					for (k = 0; k < *nnames; k++)
 						if (strncmp(names[k], de->d_name, nl) == 0 &&
@@ -328,7 +334,8 @@ static void walk_directory(struct p6 *p, uint64_t ino,
 	}
 	/* Directories deep enough to need double indirection do not
 	 * occur in practice and walking them would need a second name
-	 * table; they are counted so their absence is not silent. */
+	 * table; they are counted so their absence is not silent.
+	 */
 	if (in->i_dindirect || in->i_tindirect)
 		p->r.deep_directories++;
 }
@@ -436,7 +443,8 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 
 	/* Link counts and reachability, once every directory has been
 	 * seen: an inode's entries may live in a directory walked after
-	 * it. */
+	 * it.
+	 */
 	for (ino = 1; ino <= p.ninodes; ino++) {
 		uint16_t mode;
 

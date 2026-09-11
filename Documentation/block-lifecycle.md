@@ -58,7 +58,7 @@ sont exactement les deux que `fsck` déclare perdus.
 
 Capture antérieure, même forme à l'échelle : 512 pointeurs installés
 dans le bloc 1485, la troncature en relit 446 à zéro, `fsck` compte 446
-blocs perdus. La coupure est temporelle et sans chevauchement — tout ce
+blocs perdus. La coupure est temporelle et sans chevauchement -- tout ce
 qui est écrit avant 295,166 survit, tout ce qui l'est après disparaît.
 
 La perte est donc **en mémoire**, avant tout démontage. Ce n'est pas un
@@ -86,7 +86,7 @@ se fait hors du mutex sur un chemin, soit le contenu du tampon est
 modifié par un tiers non identifié.
 
 `beamfs_ind_parity_update` lit `bh->b_data` **hors du verrou du bloc**
-— il ne verrouille que le tampon de parité. Deux écrivains concurrents
+-- il ne verrouille que le tampon de parité. Deux écrivains concurrents
 peuvent donc lui faire calculer une parité qui ne correspond à aucun
 état réel. Cela corrompt la parité, pas le bloc, mais c'est la seule
 lecture non protégée identifiée à ce jour.
@@ -94,6 +94,6 @@ lecture non protégée identifiée à ce jour.
 ## Ce qui ne marche pas comme approche
 
 Ajouter des verrous site par site. Le 2026-09-09, verrouiller les trois
-sites de splice a fait passer `464` de 8/10 à 4/10 — une régression
+sites de splice a fait passer `464` de 8/10 à 4/10 -- une régression
 nette. Un verrou de plus élargit les fenêtres au lieu de les fermer
 quand le modèle de synchronisation n'est pas établi.

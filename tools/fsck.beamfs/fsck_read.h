@@ -35,11 +35,13 @@ enum fsck_read_status {
 	FSCK_READ_CLEAN = 0,
 	/* Read, an error was found, and Reed-Solomon corrected it. The
 	 * data is good; the medium is not, and the caller may want to
-	 * say so. */
+	 * say so.
+	 */
 	FSCK_READ_CORRECTED,
 	/* Read, an error was found, and it is beyond correction. The
 	 * data is whatever came off the medium and must not be
-	 * believed. */
+	 * believed.
+	 */
 	FSCK_READ_UNCORRECTABLE,
 	/* The read itself failed: short read, seek error, bad offset. */
 	FSCK_READ_IO,
@@ -58,7 +60,8 @@ struct fsck_reader {
 	struct rs_codec *rs;
 	/* Geometry, read once from the superblock and then trusted:
 	 * every pass recomputed it and pass 2 and pass 4 disagreed about
-	 * the bitmap block count for one release. */
+	 * the bitmap block count for one release.
+	 */
 	uint64_t         data_start;
 	uint64_t         nblocks;
 	uint64_t         inode_table_blk;
@@ -66,12 +69,14 @@ struct fsck_reader {
 	uint32_t         inodes_per_block;
 	/* Indirect-block parity region, zero when the volume predates
 	 * it -- v4 and earlier have none, and a checker that insists on
-	 * it cannot read them. */
+	 * it cannot read them.
+	 */
 	uint64_t         ind_parity_blk;
 	uint32_t         ind_parity_len;
 	uint32_t         ind_parity_mode;
 	/* Running totals, so a report can say how much of what it found
-	 * came off a medium that needed correcting. */
+	 * came off a medium that needed correcting.
+	 */
 	unsigned int     corrected;
 	unsigned int     uncorrectable;
 };

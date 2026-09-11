@@ -238,7 +238,8 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 	enum fsck_read_status st = FSCK_READ_CLEAN;
 
 	/* Same as above: an indirect block below data_start is unusual
-	 * but not impossible, and the device's end is the real bound. */
+	 * but not impossible, and the device's end is the real bound.
+	 */
 	if (blk == 0 || blk >= r->data_start + r->nblocks)
 		return FSCK_READ_IO;
 
@@ -263,7 +264,8 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 				if (got != slot[i]) {
 					/* CRC detects; it cannot correct.
 					 * The pointers are not to be
-					 * followed. */
+					 * followed.
+					 */
 					r->uncorrectable++;
 					return FSCK_READ_UNCORRECTABLE;
 				}
@@ -339,7 +341,8 @@ enum fsck_read_status fsck_read_data(struct fsck_reader *r, uint64_t blk,
 			st = FSCK_READ_CORRECTED;
 
 		/* Flat on the way out: a caller reading directory
-		 * records has no business knowing where parity sits. */
+		 * records has no business knowing where parity sits.
+		 */
 		memcpy(out + (size_t)i * BEAMFS_SUBBLOCK_DATA, sub,
 		       BEAMFS_SUBBLOCK_DATA);
 	}
@@ -376,7 +379,8 @@ enum fsck_read_status fsck_read_bitmap(struct fsck_reader *r, uint32_t index,
 			st = FSCK_READ_CORRECTED;
 
 		/* Contiguous on the way out: callers count bits and have
-		 * no business knowing where the parity sits. */
+		 * no business knowing where the parity sits.
+		 */
 		memcpy(out + (size_t)i * BEAMFS_SUBBLOCK_DATA, sub,
 		       BEAMFS_SUBBLOCK_DATA);
 	}

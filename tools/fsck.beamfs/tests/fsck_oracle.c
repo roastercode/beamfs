@@ -203,7 +203,8 @@ static bool set_block_used(int fd, const struct beamfs_super_block *sb,
 
 	/* Decode into a flat view: the bitmap is stored as sixteen
 	 * subblocks of data followed by their parity, and a bit index
-	 * means nothing until the parity is taken out of the way. */
+	 * means nothing until the parity is taken out of the way.
+	 */
 	for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++)
 		memcpy(flat + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 		       blk + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
@@ -216,7 +217,8 @@ static bool set_block_used(int fd, const struct beamfs_super_block *sb,
 
 	/* Back into the on-disk layout, re-encoding parity over what
 	 * changed. Skipping this is how an injected defect gets
-	 * corrected away before the checker ever sees it. */
+	 * corrected away before the checker ever sees it.
+	 */
 	for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++) {
 		uint8_t *sub = blk + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
 
@@ -435,7 +437,8 @@ static void case_dangling(void)
 	read_sb(fd, &sb);
 
 	/* Inode 2 is the canary mkfs writes: a real file with a real
-	 * block, so its pointer is one the walk will follow. */
+	 * block, so its pointer is one the walk will follow.
+	 */
 	/*
 	 * Build the case rather than borrow it: the canary sits below
 	 * data_start and is outside the bitmap, so freeing "its" block
@@ -667,7 +670,8 @@ static void case_correctable_inode(void)
 	read_sb(fd, &sb);
 
 	/* A file with one real, properly marked block: healthy in every
-	 * respect except one bit of medium damage. */
+	 * respect except one bit of medium damage.
+	 */
 	memset(&in, 0, sizeof(in));
 	in.i_mode = 0x8000 | 0644;
 	in.i_nlink = 1;
@@ -684,7 +688,8 @@ static void case_correctable_inode(void)
 	/* One bit inside i_direct[0], within the RS-covered range, and
 	 * left uncorrected on disk: the medium is damaged, the data is
 	 * recoverable, and that is exactly the situation this
-	 * filesystem exists for. */
+	 * filesystem exists for.
+	 */
 	off = (off_t)blk * BEAMFS_BLOCK_SIZE + (off_t)idx * sizeof(struct beamfs_inode)
 	    + offsetof(struct beamfs_inode, i_direct);
 	pread_at(fd, off, &byte, 1);
@@ -766,7 +771,8 @@ static void case_both(void)
 		die("cannot open %s", image);
 	read_sb(fd, &sb);
 	/* One reference to a free block, and one used block nobody
-	 * points at, on the same volume. */
+	 * points at, on the same volume.
+	 */
 	memset(&in, 0, sizeof(in));
 	in.i_mode = 0x8000 | 0644;
 	in.i_nlink = 1;
@@ -816,9 +822,11 @@ static void case_out_of_range_pointer(void)
 
 	v = check();
 	/* The canary's block is now unreferenced, so exactly one is
-	 * expected -- and the checker must survive to say so. */
+	 * expected -- and the checker must survive to say so.
+	 */
 	/* Nothing else is wrong with the volume, so a checker that
-	 * skips the bad pointer and keeps going reports nothing. */
+	 * skips the bad pointer and keeps going reports nothing.
+	 */
 	report("pointer past the end of the device", v.rc >= 0 && v.lost == 0,
 	       "expected to survive with lost=0, got rc=%d lost=%ld", v.rc, v.lost);
 }
@@ -843,15 +851,30 @@ int main(int argc, char **argv)
 
 	/* One case only, when named: an oracle that overwrites its image
 	 * at every case leaves the last one behind, and the one worth
-	 * looking at is whichever failed. */
+	 * looking at is whichever failed.
+	 */
 	if (only) {
-		if (!strcmp(only, "pristine"))    case_pristine();
-		if (!strcmp(only, "leak"))        case_one_leak();
-		if (!strcmp(only, "many"))        case_many_leaks();
-		if (!strcmp(only, "dangling"))    case_dangling();
-		if (!strcmp(only, "both"))        case_both();
-		if (!strcmp(only, "inode"))       case_correctable_inode();
-		if (!strcmp(only, "indirect"))    case_correctable_indirect();
+		if (!strcmp(only, "pristine"))
+			case_pristine();
+
+		if (!strcmp(only, "leak"))
+			case_one_leak();
+
+		if (!strcmp(only, "many"))
+			case_many_leaks();
+
+		if (!strcmp(only, "dangling"))
+			case_dangling();
+
+		if (!strcmp(only, "both"))
+			case_both();
+
+		if (!strcmp(only, "inode"))
+			case_correctable_inode();
+
+		if (!strcmp(only, "indirect"))
+			case_correctable_indirect();
+
 		if (!strcmp(only, "direct"))
 			case_pointer_field("bit in i_direct[0]",
 					   offsetof(struct beamfs_inode, i_direct), 0, 700);
@@ -864,9 +887,11 @@ int main(int argc, char **argv)
 		if (!strcmp(only, "ind3"))
 			case_pointer_field("bit in i_tindirect",
 					   offsetof(struct beamfs_inode, i_tindirect), 3, 760);
-		if (!strcmp(only, "range"))       case_out_of_range_pointer();
+		if (!strcmp(only, "range"))
+			case_out_of_range_pointer();
+
 		printf("\n%u case(s), %u failed\n", cases_run, cases_failed);
-		return cases_failed ? 1 : 0;
+		return cases_failed > 0;
 	}
 
 	case_pristine();
@@ -897,5 +922,5 @@ int main(int argc, char **argv)
 	if (cases_failed)
 		printf("a checker that misreports known damage cannot be used to\n"
 		       "judge unknown damage; every number it has produced is suspect\n");
-	return cases_failed ? 1 : 0;
+	return cases_failed > 0;
 }

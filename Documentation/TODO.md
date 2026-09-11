@@ -113,7 +113,7 @@ Acked-by from Haris Iqbal received. Jason Gunthorpe (maintainer)
 involved. Status: awaiting merge into rdma-next. Google buganizer
 issue closed as Infeasible (not Android scope).
 
-## 2026-09-07 — état xfstests après la semaine de correction
+## 2026-09-07 -- état xfstests après la semaine de correction
 
 ### Résolus et prouvés
 - **generic/522** : passe en 1133 s (fsx soak, tracé de bout en bout,
@@ -128,7 +128,7 @@ issue closed as Infeasible (not Android scope).
 Quatre défauts réels, chacun commité :
 1. i_alloc_mutex sur les cinq parcours de l'arbre (alloc + free_blocks_from
    + free_data_blocks + evict). Commit 6bd9ca2.
-2. write_iter sous inode_lock — write vs truncate concurrents. Commit a179e6c.
+2. write_iter sous inode_lock -- write vs truncate concurrents. Commit a179e6c.
 3. ind_parity_verify décode une COPIE, jamais bh->b_data. decode_rs8
    corrige en place ; la parité de région périmée d'un bloc réalloué
    ramenait l'ancien contenu. Commit 28c3f8b.
@@ -163,7 +163,7 @@ symptôme fsck (used-but-unreferenced).
 - Ancres Python EOF : le code bouge, vérifier count==1 et relire le
   texte réel (cat -A) avant chaque patch.
 
-## 2026-09-07 (suite) — sweep uncorrectable au boot : RÉSOLU
+## 2026-09-07 (suite) -- sweep uncorrectable au boot : RÉSOLU
 
 Les 23 "sweep uncorrectable" au boot étaient des FAUX POSITIFS
 transitoires, prouvé par trois vérifications indépendantes :
@@ -203,25 +203,25 @@ La relecture-confirmation (629020d) reste comme seconde barrière.
 - 589 : montage/propagation identique à ext4 vérifié. Cause exacte
   non trouvée. OUVERT.
 
-## 2026-09-07 — édifice assaini avant reprise de 464
+## 2026-09-07 -- édifice assaini avant reprise de 464
 
 Corrections de cohérence posées cette session, toutes validées :
 - 629020d : sweep confirme par relecture avant de reporter
 - 379b577 : read_folio_range et write_read_folio_range lisent l'arbre
   sous i_alloc_mutex (cohérence de lecture ; ext2 tient truncate_mutex
   sur le même parcours). Partiel assumé : le mutex couvre le lookup,
-  pas l'intervalle jusqu'à l'usage du bloc — le tenir sur l'I/O serait
+  pas l'intervalle jusqu'à l'usage du bloc -- le tenir sur l'I/O serait
   coûteux et risqué.
 - 95a4eb1 : sweep saute les inodes occupés (racine des faux positifs)
 
-Note : generic/076 échouait en séquence après 464 — conséquence de la
+Note : generic/076 échouait en séquence après 464 -- conséquence de la
 fuite 464 laissant le scratch incohérent, pas un défaut propre ni un
 défaut de l'outil de lancement (montages=0 vérifié avant chaque test,
 scratch propre). Il passe dès que la séquence ne contient pas 464.
 
 Reste ouvert : la fuite résiduelle 464, et 589.
 
-## 2026-09-08 — 464 : ce qui est établi, et ce qui reste
+## 2026-09-08 -- 464 : ce qui est établi, et ce qui reste
 
 ### Harnais de capture (beamfs-xfstests, tools/beamfs-trace.sh)
 Déployé en /usr/bin sur le nœud. Résout les échecs de mécanique qui
