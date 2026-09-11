@@ -480,9 +480,11 @@ static void write_indirect(int fd, const struct beamfs_super_block *sb,
 {
 	uint8_t raw[BEAMFS_BLOCK_SIZE];
 	uint8_t par[BEAMFS_BLOCK_SIZE];
-	uint64_t idx, byte_off, region_blk;
+	uint8_t flat[BEAMFS_DATA_INLINE_BYTES];
+	uint64_t idx, region_blk;
 	uint32_t off;
 	size_t stride;
+	unsigned int slots;
 	unsigned int i;
 
 	memset(raw, 0, sizeof(raw));
@@ -492,19 +494,43 @@ static void write_indirect(int fd, const struct beamfs_super_block *sb,
 	if (sb->s_ind_parity_blk == 0 || sb->s_ind_parity_len == 0)
 		return;
 
-	stride = (sb->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC)
-	       ? BEAMFS_IND_PARITY_CRC_BYTES : BEAMFS_IND_PARITY_RS_BYTES;
+	/*
+	 * The fourth copy of this arithmetic -- kernel, mkfs, checker,
+	 * here -- and the one that matters most, because the oracle is
+	 * what says the checker is right. When it wrote slots the checker
+	 * did not read, four of the twelve cases failed and the failure
+	 * looked like a defect in the checker.
+	 */
+	if (sb->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
+		stride = BEAMFS_IND_PARITY_CRC_BYTES;
+		slots  = BEAMFS_IND_PARITY_CRC_SLOTS;
+	} else {
+		stride = BEAMFS_IND_PARITY_RS_BYTES;
+		slots  = BEAMFS_IND_PARITY_RS_SLOTS;
+	}
+
 	idx = blk - sb->s_data_start_blk;
-	byte_off = idx * stride;
-	region_blk = sb->s_ind_parity_blk + byte_off / BEAMFS_BLOCK_SIZE;
-	off = (uint32_t)(byte_off % BEAMFS_BLOCK_SIZE);
-	if (off + stride > BEAMFS_BLOCK_SIZE ||
+	region_blk = sb->s_ind_parity_blk + idx / slots;
+	off = (uint32_t)(idx % slots) * (uint32_t)stride;
+	if (off + stride > BEAMFS_DATA_INLINE_BYTES ||
 	    region_blk >= sb->s_ind_parity_blk + sb->s_ind_parity_len)
 		return;
 
 	pread_at(fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, par, sizeof(par));
+
+	/* The region block carries its own FEC: decode, edit, re-encode. */
+	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
+		uint8_t *sub = par + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+		int positions[BEAMFS_RS_PARITY / 2];
+
+		rs_decode_subblock(rs, sub, BEAMFS_SUBBLOCK_DATA,
+				   sub + BEAMFS_SUBBLOCK_DATA, positions);
+		memcpy(flat + (size_t)i * BEAMFS_SUBBLOCK_DATA, sub,
+		       BEAMFS_SUBBLOCK_DATA);
+	}
+
 	if (sb->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
-		uint32_t *slot = (uint32_t *)(par + off);
+		uint32_t *slot = (uint32_t *)(flat + off);
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 			slot[i] = crc32(raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
@@ -514,7 +540,16 @@ static void write_indirect(int fd, const struct beamfs_super_block *sb,
 			rs_encode_subblock(rs,
 					   raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 					   BEAMFS_SUBBLOCK_DATA,
-					   par + off + (size_t)i * BEAMFS_RS_PARITY);
+					   flat + off + (size_t)i * BEAMFS_RS_PARITY);
+	}
+
+	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
+		uint8_t *sub = par + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+
+		memcpy(sub, flat + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+		       BEAMFS_SUBBLOCK_DATA);
+		rs_encode_subblock(rs, sub, BEAMFS_SUBBLOCK_DATA,
+				   sub + BEAMFS_SUBBLOCK_DATA);
 	}
 	pwrite_at(fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, par, sizeof(par));
 }

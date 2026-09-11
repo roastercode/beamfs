@@ -204,25 +204,67 @@ enum fsck_read_status fsck_read_inode(struct fsck_reader *r, uint64_t ino,
 static bool ind_parity_slot(const struct fsck_reader *r, uint64_t phys,
 			    uint64_t *region_blk, uint32_t *offset, size_t *stride)
 {
-	uint64_t index, byte_off;
+	uint64_t index;
+	unsigned int slots;
 
-	*stride = (r->ind_parity_mode == BEAMFS_IND_PARITY_CRC)
-		? BEAMFS_IND_PARITY_CRC_BYTES : BEAMFS_IND_PARITY_RS_BYTES;
+	if (r->ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
+		*stride = BEAMFS_IND_PARITY_CRC_BYTES;
+		slots   = BEAMFS_IND_PARITY_CRC_SLOTS;
+	} else {
+		*stride = BEAMFS_IND_PARITY_RS_BYTES;
+		slots   = BEAMFS_IND_PARITY_RS_SLOTS;
+	}
 
-	if (*stride == 0 || r->ind_parity_blk == 0 || r->ind_parity_len == 0)
+	if (*stride == 0 || slots == 0 ||
+	    r->ind_parity_blk == 0 || r->ind_parity_len == 0)
 		return false;
 	if (phys < r->data_start)
 		return false;
 
-	index    = phys - r->data_start;
-	byte_off = index * *stride;
-	*region_blk = r->ind_parity_blk + byte_off / BEAMFS_BLOCK_SIZE;
-	*offset     = (uint32_t)(byte_off % BEAMFS_BLOCK_SIZE);
+	/*
+	 * The offset is into the region block's payload, not its raw
+	 * bytes. The block carries its own RS FEC now, so only
+	 * BEAMFS_DATA_INLINE_BYTES of its 4096 are payload and fourteen
+	 * RS slots fit where sixteen did.
+	 */
+	index       = phys - r->data_start;
+	*region_blk = r->ind_parity_blk + index / slots;
+	*offset     = (uint32_t)(index % slots) * (uint32_t)*stride;
 
-	if (*offset + *stride > BEAMFS_BLOCK_SIZE)
+	if (*offset + *stride > BEAMFS_DATA_INLINE_BYTES)
 		return false;
 	if (*region_blk >= r->ind_parity_blk + r->ind_parity_len)
 		return false;
+	return true;
+}
+
+/*
+ * Decode a region block into @flat.
+ *
+ * Returns false when a subblock is beyond correction: the region was
+ * hit, not the indirect block it describes, and saying the block is
+ * damaged would blame the wrong one. Before the region carried its own
+ * FEC there was no way to tell them apart.
+ */
+static bool ind_region_decode(struct fsck_reader *r, uint8_t *raw,
+			      uint8_t *flat)
+{
+	unsigned int i;
+
+	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
+		uint8_t *sub = raw + (size_t)i * BEAMFS_SUBBLOCK_TOTAL;
+		int positions[BEAMFS_RS_PARITY / 2];
+		int rc = rs_decode_subblock(r->rs, sub, BEAMFS_SUBBLOCK_DATA,
+					    sub + BEAMFS_SUBBLOCK_DATA,
+					    positions);
+
+		if (rc == RS_UNCORRECTABLE)
+			return false;
+		if (rc > 0)
+			r->corrected++;
+		memcpy(flat + (size_t)i * BEAMFS_SUBBLOCK_DATA, sub,
+		       BEAMFS_SUBBLOCK_DATA);
+	}
 	return true;
 }
 
@@ -231,6 +273,7 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 {
 	uint8_t raw[BEAMFS_BLOCK_SIZE];
 	uint8_t parity[BEAMFS_BLOCK_SIZE];
+	uint8_t flat[BEAMFS_DATA_INLINE_BYTES];
 	uint64_t region_blk;
 	uint32_t offset;
 	size_t stride;
@@ -254,9 +297,10 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 	 * campaigns. Absence of parity is not damage.
 	 */
 	if (ind_parity_slot(r, blk, &region_blk, &offset, &stride) &&
-	    read_exact(r->fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, parity, sizeof(parity))) {
+	    read_exact(r->fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, parity, sizeof(parity)) &&
+	    ind_region_decode(r, parity, flat)) {
 		if (r->ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
-			const uint32_t *slot = (const uint32_t *)(parity + offset);
+			const uint32_t *slot = (const uint32_t *)(flat + offset);
 
 			for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 				uint32_t got = crc32(raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
@@ -277,7 +321,7 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 					r->rs,
 					raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 					BEAMFS_SUBBLOCK_DATA,
-					parity + offset + (size_t)i * BEAMFS_RS_PARITY,
+					flat + offset + (size_t)i * BEAMFS_RS_PARITY,
 					positions);
 
 				if (rc == RS_UNCORRECTABLE) {

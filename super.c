@@ -1252,6 +1252,27 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 			goto out_brelse;
 		}
 
+		/*
+		 * The parity region carries its own FEC now, and that
+		 * changed how many slots a region block holds: fourteen
+		 * under RS instead of sixteen, because only
+		 * BEAMFS_DATA_INLINE_BYTES of the block is payload.
+		 *
+		 * Reading an older volume with this arithmetic addresses
+		 * the wrong slot and hands back a neighbour's parity,
+		 * which reads as damage on a healthy block. The volume is
+		 * fine; it needs a rewrite, not a repair.
+		 *
+		 * Only checked when a region exists -- with parity off
+		 * there is nothing to be incompatible about.
+		 */
+		if (le32_to_cpu(fsb->s_ind_parity_mode) != BEAMFS_IND_PARITY_NONE &&
+		    !(le64_to_cpu(fsb->s_feat_incompat) &
+		      BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)) {
+			errorf(fc, "beamfs: this volume predates IND_PARITY_FEC -- its parity region has no protection of its own and a different slot geometry, so reading it here would return the wrong block's parity. Copy the data off and remake the volume.");
+			goto out_brelse;
+		}
+
 		if (unknown_incompat) {
 			errorf(fc, "beamfs: unsupported incompat features 0x%016llx",
 			       unknown_incompat);

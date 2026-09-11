@@ -736,6 +736,32 @@ static inline int beamfs_rs_event_subblock(__u32 flags)
  * can become an indirect block, and a table mapping blocks to slots
  * would itself be metadata needing protection.
  */
+/*
+ * Slots one region block holds.
+ *
+ * A region block is RS-encoded like a data block, so its 4096 bytes
+ * carry BEAMFS_DATA_INLINE_BYTES of payload interleaved with parity.
+ * Slots live in the payload and never straddle it.
+ *
+ * Before the region carried its own FEC, slots sat in the raw 4096
+ * bytes and one flipped bit took out every indirect block that region
+ * block covered. The region is a seventh longer now, which on a 1 GiB
+ * volume is 130 blocks, and that is what the last layer being as well
+ * defended as the rest costs.
+ */
+#define BEAMFS_IND_PARITY_RS_SLOTS \
+	(BEAMFS_DATA_INLINE_BYTES / BEAMFS_IND_PARITY_RS_BYTES)
+#define BEAMFS_IND_PARITY_CRC_SLOTS \
+	(BEAMFS_DATA_INLINE_BYTES / BEAMFS_IND_PARITY_CRC_BYTES)
+
+/*
+ * Set when the parity region carries its own RS FEC. Without it the
+ * region is raw bytes with a different slot geometry, so reading one
+ * with this arithmetic addresses the wrong slots: the kernel refuses
+ * the mount rather than returning another block's parity.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC  BIT(17)
+
 enum beamfs_ind_parity_mode {
 	BEAMFS_IND_PARITY_NONE = 0,
 	BEAMFS_IND_PARITY_CRC  = 1,
@@ -925,7 +951,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY | \
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
-				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL)
+				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
 
 /*
  * On-disk superblock - block 0
