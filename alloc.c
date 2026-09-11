@@ -181,10 +181,11 @@ int beamfs_setup_bitmap(struct super_block *sb)
 						np = BEAMFS_RS_PARITY / 2;
 					pr_warn("beamfs: bmap blk %u sub %lu: %d corrected\n",
 						k, i, rc);
-					beamfs_log_rs_event(sb,
-						disk_blk * BEAMFS_BITMAP_SUBBLOCKS + i,
+					beamfs_log_rs_event_flagged(sb,
+						disk_blk,
 						pos, np,
-						BEAMFS_SUBBLOCK_DATA);
+						BEAMFS_SUBBLOCK_DATA,
+						beamfs_rs_event_subblock_bits(i));
 					corrected = true;
 				}
 			}

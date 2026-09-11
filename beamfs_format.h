@@ -413,7 +413,13 @@ static inline u64 beamfs_inline_size_to_blocks(u64 size)
  *     and the trailing alignment pad
  */
 struct beamfs_rs_event {
-	__le64  re_block_no;          /*  0..7   corrected block number     */
+	/*
+	 * The block the correction hit. Always a block: the subblock
+	 * index lives in re_flags, because until v6 several callers
+	 * folded it in here as block * SUBBLOCKS + subblock, with
+	 * SUBBLOCKS differing by caller, and one logged an inode number.
+	 */
+	__le64  re_block_no;          /*  0..7                              */
 	__le64  re_timestamp;         /*  8..15  ktime_get_ns() at recovery */
 	__le32  re_symbol_count;      /* 16..19  symbols corrected           */
 	__le32  re_entropy_q16_16;    /* 20..23  Shannon H, Q16.16, [0,3*65536) */
@@ -469,6 +475,49 @@ struct beamfs_rs_event {
 #define BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID  BIT(0)
 #define BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE  BIT(1)
 #define BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED BIT(2)
+
+/*
+ * INODE -- re_block_no is the inode table block that was being read,
+ *          not a data or metadata block of a file. The correction
+ *          landed inside an inode; which inode is not recorded,
+ *          because clustering analysis asks where on the medium the
+ *          damage was, and the table block is that answer.
+ */
+#define BEAMFS_RS_EVENT_FLAG_INODE          BIT(3)
+
+/*
+ * Subblock index, in bits 8..15, stored as index + 1 so that zero
+ * keeps meaning "not applicable" -- a superblock or inode correction
+ * has no subblock in the sense the data path uses.
+ *
+ * It lives here rather than in re_reserved because that field is a
+ * structural sentinel: a non-zero value in it means the entry is
+ * corrupt, and that is worth more than four bytes. re_flags had
+ * twenty-nine bits spare.
+ *
+ * Before this, callers folded the subblock into re_block_no as
+ * block * SUBBLOCKS + subblock, with SUBBLOCKS being sixteen in the
+ * data path, BEAMFS_BITMAP_SUBBLOCKS in the allocator and thirteen in
+ * the superblock. A reader had no way to know which divisor applied,
+ * so the field documented as a block number was not one.
+ */
+#define BEAMFS_RS_EVENT_SUBBLOCK_SHIFT      8
+#define BEAMFS_RS_EVENT_SUBBLOCK_MASK       (0xFFU << BEAMFS_RS_EVENT_SUBBLOCK_SHIFT)
+
+static inline __u32 beamfs_rs_event_subblock_bits(unsigned int sub)
+{
+	return ((sub + 1) << BEAMFS_RS_EVENT_SUBBLOCK_SHIFT)
+		& BEAMFS_RS_EVENT_SUBBLOCK_MASK;
+}
+
+/* Returns the subblock index, or -1 when the event has none. */
+static inline int beamfs_rs_event_subblock(__u32 flags)
+{
+	unsigned int v = (flags & BEAMFS_RS_EVENT_SUBBLOCK_MASK)
+			 >> BEAMFS_RS_EVENT_SUBBLOCK_SHIFT;
+
+	return v ? (int)(v - 1) : -1;
+}
 
 /*
  * Shannon entropy parameters for the RS journal forensic estimator.

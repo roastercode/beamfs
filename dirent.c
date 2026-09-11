@@ -229,11 +229,12 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {
 			corrected++;
-			beamfs_log_rs_event(sb,
-				bh->b_blocknr * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+			beamfs_log_rs_event_flagged(sb,
+				bh->b_blocknr,
 				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
-				BEAMFS_SUBBLOCK_DATA);
+				BEAMFS_SUBBLOCK_DATA,
+				beamfs_rs_event_subblock_bits(i));
 			beamfs_budget_record(sb, bh->b_blocknr,
 					     (unsigned int)results[i]);
 		} else if (results[i] < 0) {

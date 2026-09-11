@@ -53,6 +53,26 @@
 #include "fsck_read.h"
 #include "fsck_pass6.h"
 
+/*
+ * Has this name already been seen in this directory?
+ *
+ * Returns its index, or @nnames when it is new. Split out of the walk
+ * because the search sat six levels deep inside it -- the blocks, the
+ * records, the validity checks, then this -- and checkpatch is right
+ * that the nesting had stopped being readable.
+ */
+static unsigned int name_seen(char names[][BEAMFS_MAX_FILENAME + 1],
+			      unsigned int nnames, const char *name,
+			      size_t nl)
+{
+	unsigned int k;
+
+	for (k = 0; k < nnames; k++)
+		if (strncmp(names[k], name, nl) == 0 && names[k][nl] == '\0')
+			break;
+	return k;
+}
+
 /* Inode 1 is the root, by the same convention ext2 uses. */
 #define ROOT_INO 1
 
@@ -275,15 +295,14 @@ static void walk_dir_block(struct p6 *p, uint64_t blk, uint64_t dir_ino,
 				 * found first.
 				 */
 				if (*nnames < FSCK_PASS6_MAX_NAMES) {
-					for (k = 0; k < *nnames; k++)
-						if (strncmp(names[k], de->d_name, nl) == 0 &&
-						    names[k][nl] == '\0') {
-							p->r.duplicate_names++;
-							note(p, "fsck.beamfs: pass 6: directory %llu has two entries named %.*s\n",
-							     (unsigned long long)dir_ino,
-							     nl, de->d_name);
-							break;
-						}
+					k = name_seen(names, *nnames,
+						      de->d_name, nl);
+					if (k < *nnames) {
+						p->r.duplicate_names++;
+						note(p, "fsck.beamfs: pass 6: directory %llu has two entries named %.*s\n",
+						     (unsigned long long)dir_ino,
+						     nl, de->d_name);
+					}
 					if (k == *nnames) {
 						memcpy(names[*nnames], de->d_name, nl);
 						names[*nnames][nl] = '\0';

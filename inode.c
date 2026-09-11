@@ -199,9 +199,16 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 
 				if (np > BEAMFS_RS_PARITY / 2)
 					np = BEAMFS_RS_PARITY / 2;
-				beamfs_log_rs_event(sb, (u64)ino,
+				/*
+				 * The table block, not the inode number: a
+				 * clustering pass asks where on the medium the
+				 * damage landed, and an inode number is not a
+				 * position.
+				 */
+				beamfs_log_rs_event_flagged(sb, bh->b_blocknr,
 						   positions, np,
-						   BEAMFS_INODE_RS_DATA);
+						   BEAMFS_INODE_RS_DATA,
+						   BEAMFS_RS_EVENT_FLAG_INODE);
 			}
 			mark_buffer_dirty(bh);
 			pr_warn("beamfs: inode %lu corrected by RS FEC (%d symbols)\n",

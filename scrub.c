@@ -135,11 +135,12 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {
 			n_corrected++;
-			beamfs_log_rs_event(sb,
-				phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+			beamfs_log_rs_event_flagged(sb,
+				phys,
 				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
-				BEAMFS_SUBBLOCK_DATA);
+				BEAMFS_SUBBLOCK_DATA,
+				beamfs_rs_event_subblock_bits(i));
 			/*
 			 * The sweep is where the budget earns its keep: it
 			 * visits blocks nobody reads, which are the ones
@@ -207,8 +208,9 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 			 * is correct: the damage is the same either way.
 			 */
 			beamfs_log_rs_event_flagged(sb,
-				phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
-				NULL, 0, BEAMFS_SUBBLOCK_DATA, 0);
+				phys,
+				NULL, 0, BEAMFS_SUBBLOCK_DATA,
+				beamfs_rs_event_subblock_bits(i));
 			ret = -EUCLEAN;
 		}
 	}

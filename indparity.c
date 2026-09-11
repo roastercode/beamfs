@@ -215,8 +215,8 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u CRC mismatch\n",
 						   (unsigned long long)phys, i);
 				beamfs_log_rs_event_flagged(sb,
-					phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
-					NULL, 0, BEAMFS_SUBBLOCK_DATA, 0);
+					phys, NULL, 0, BEAMFS_SUBBLOCK_DATA,
+					beamfs_rs_event_subblock_bits(i));
 				ret = -EUCLEAN;
 			}
 		}
@@ -272,14 +272,14 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u uncorrectable\n",
 						   (unsigned long long)phys, i);
 				beamfs_log_rs_event_flagged(sb,
-					phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
-					NULL, 0, BEAMFS_SUBBLOCK_DATA, 0);
+					phys, NULL, 0, BEAMFS_SUBBLOCK_DATA,
+					beamfs_rs_event_subblock_bits(i));
 				ret = -EUCLEAN;
 			} else if (results[0] > 0) {
-				beamfs_log_rs_event(sb,
-					phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
-					positions, (unsigned int)results[0],
-					BEAMFS_SUBBLOCK_DATA);
+				beamfs_log_rs_event_flagged(sb,
+					phys, positions, (unsigned int)results[0],
+					BEAMFS_SUBBLOCK_DATA,
+					beamfs_rs_event_subblock_bits(i));
 			}
 		}
 		beamfs_scratch_put(sb, copy);

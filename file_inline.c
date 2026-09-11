@@ -1810,11 +1810,10 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			 * cycle. The journal entry preserves the forensic
 			 * record of the event regardless.
 			 */
-			beamfs_log_rs_event_flagged(sb,
-				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+			beamfs_log_rs_event_flagged(sb, (u64)phys,
 				NULL, 0,
 				BEAMFS_SUBBLOCK_DATA,
-				xflags);
+				xflags | beamfs_rs_event_subblock_bits(i));
 			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu subblock=%u uncorrectable%s\n",
 					   (unsigned long long)inode->i_ino,
 					   (unsigned long long)iblock_logical_for_log,
@@ -1836,11 +1835,10 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					    (unsigned long long)iblock_logical_for_log,
 					    i, rc,
 					    rmw_path ? "neutralised" : "corrected");
-			beamfs_log_rs_event_flagged(sb,
-				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS + i,
+			beamfs_log_rs_event_flagged(sb, (u64)phys,
 				pos, np,
 				BEAMFS_SUBBLOCK_DATA,
-				xflags);
+				xflags | beamfs_rs_event_subblock_bits(i));
 			/*
 			 * The journal says this happened; the budget says
 			 * how close the block now is to having nothing left.

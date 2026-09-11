@@ -556,6 +556,7 @@ static uint64_t build_file(int fd, const struct beamfs_super_block *sb,
 	struct beamfs_inode in;
 	uint64_t ind, child, data;
 	uint64_t ptrs[BEAMFS_INDIRECT_PTRS];
+	int i;
 
 	memset(&in, 0, sizeof(in));
 	in.i_mode = 0x8000 | 0644;
@@ -586,8 +587,8 @@ static uint64_t build_file(int fd, const struct beamfs_super_block *sb,
 	set_block_used(fd, sb, ind, true, rs);
 
 	child = ind;
-	for (int L = 1; L < level; L++) {
-		uint64_t up = base + 1 + (uint64_t)L;
+	for (i = 1; i < level; i++) {
+		uint64_t up = base + 1 + (uint64_t)i;
 
 		memset(ptrs, 0, sizeof(ptrs));
 		ptrs[0] = child;

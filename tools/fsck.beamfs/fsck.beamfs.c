@@ -743,6 +743,51 @@ static void mark_reference(void *ctx_v, uint64_t phys)
 	ctx->reference[bit / 8] |= (uint8_t)(1u << (bit % 8));
 }
 
+
+/*
+ * Compare one bitmap bit against what the inode walk found.
+ *
+ * Extracted from the loop in pass 4, which ran seven levels deep: the
+ * bitmap blocks, the subblocks inside each, the bits inside those, and
+ * then the two disagreements and their repairs. checkpatch calls that
+ * too many leading tabs and it is right -- the comparison is one idea
+ * and it belongs on its own.
+ *
+ * Returns non-zero when the bit was rewritten, so the caller knows the
+ * block needs writing back.
+ */
+static int compare_one_bit(const struct fsck_opts *o, uint8_t *sub,
+			   unsigned long b, const uint8_t *reference,
+			   uint64_t bit_global, uint64_t data_start,
+			   unsigned int *referenced_but_free,
+			   unsigned int *used_but_unreferenced)
+{
+	int disk_free = (sub[b / 8] & (1u << (b % 8))) != 0;
+	int ref_used  = (reference[bit_global / 8] &
+			 (1u << (bit_global % 8))) != 0;
+
+	if (ref_used && disk_free) {
+		(*referenced_but_free)++;
+		if (o->verbose)
+			fprintf(stderr, "fsck.beamfs: pass 4: block %llu referenced but bitmap marks free\n",
+				(unsigned long long)(data_start + bit_global));
+		if (o->repair) {
+			sub[b / 8] &= (uint8_t)~(1u << (b % 8));
+			return 1;
+		}
+	} else if (!ref_used && !disk_free) {
+		(*used_but_unreferenced)++;
+		if (o->verbose)
+			fprintf(stderr, "fsck.beamfs: pass 4: block %llu marked used but unreferenced\n",
+				(unsigned long long)(data_start + bit_global));
+		if (o->repair) {
+			sub[b / 8] |= (uint8_t)(1u << (b % 8));
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 {
 	struct beamfs_super_block sb;
@@ -939,31 +984,12 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 				}
 
 				for (b = 0; b < (unsigned long)BEAMFS_SUBBLOCK_DATA * 8 &&
-					    bit_global < nblocks; b++, bit_global++) {
-					int disk_free = (sub[b / 8] & (1u << (b % 8))) != 0;
-					int ref_used  = (reference[bit_global / 8] &
-							 (1u << (bit_global % 8))) != 0;
-
-					if (ref_used && disk_free) {
-						referenced_but_free++;
-						if (o->verbose)
-							fprintf(stderr, "fsck.beamfs: pass 4: block %llu referenced but bitmap marks free\n",
-								(unsigned long long)(data_start + bit_global));
-						if (o->repair) {
-							sub[b / 8] &= (uint8_t)~(1u << (b % 8));
-							block_dirty = 1;
-						}
-					} else if (!ref_used && !disk_free) {
-						used_but_unreferenced++;
-						if (o->verbose)
-							fprintf(stderr, "fsck.beamfs: pass 4: block %llu marked used but unreferenced\n",
-								(unsigned long long)(data_start + bit_global));
-						if (o->repair) {
-							sub[b / 8] |= (uint8_t)(1u << (b % 8));
-							block_dirty = 1;
-						}
-					}
-				}
+					    bit_global < nblocks; b++, bit_global++)
+					block_dirty |= compare_one_bit(o, sub, b,
+							reference, bit_global,
+							data_start,
+							&referenced_but_free,
+							&used_but_unreferenced);
 			}
 
 			if (block_dirty) {
@@ -1039,6 +1065,9 @@ static int pass5_rs_journal(const struct fsck_opts *o)
 	struct beamfs_super_block sb;
 	unsigned int bad_crc = 0;
 	unsigned int bad_sentinel = 0;
+	unsigned int out_of_range = 0;
+	uint64_t     oor_first = 0;
+	int          oor_several = 0;
 	unsigned int reordered = 0;
 	uint64_t     prev_ts = 0;
 	int          seen_first = 0;
@@ -1080,6 +1109,35 @@ static int pass5_rs_journal(const struct fsck_opts *o)
 			bad_sentinel++;
 			fprintf(stderr, "fsck.beamfs: pass 5: journal slot %u sentinel nonzero (reserved=0x%08x pad=0x%08x)\n",
 				idx, ev->re_reserved, ev->re_pad);
+		}
+
+		/*
+		 * The block number has to be one.
+		 *
+		 * Until format v6 several callers folded the subblock into
+		 * this field as block * SUBBLOCKS + subblock, with SUBBLOCKS
+		 * being sixteen in the data path, BEAMFS_BITMAP_SUBBLOCKS in
+		 * the allocator and thirteen in the superblock -- and one
+		 * caller logged an inode number instead. A frozen
+		 * generic/476 volume carried two entries reading 2128016 and
+		 * 492048 on a device of 262144 blocks, and this pass called
+		 * the journal OK, because it checked the CRC and never
+		 * looked at what the field said.
+		 *
+		 * The subblock lives in re_flags now and this is a block.
+		 * An entry naming a block outside the device is either from
+		 * an older volume or is damage the CRC did not catch.
+		 */
+		if (ev->re_block_no >= le64toh(sb.s_block_count)) {
+			out_of_range++;
+			/* Named once. A ring of 64 entries usually holds a
+			 * handful of distinct blocks, and one line each
+			 * buries the fact under its own repetition.
+			 */
+			if (out_of_range == 1)
+				oor_first = ev->re_block_no;
+			else if (ev->re_block_no != oor_first)
+				oor_several = 1;
 		}
 
 		if (seen_first && ev->re_timestamp < prev_ts) {
@@ -1137,14 +1195,30 @@ static int pass5_rs_journal(const struct fsck_opts *o)
 		}
 	}
 
-	if (bad_sentinel > 0 || reordered > 0) {
-		/* Sentinel violations and reordering are forensic anomalies,
-		 * not correctable by this pass (there is no independent
-		 * source of truth for what the journal should say). Report
-		 * only.
+	if (bad_sentinel > 0 || reordered > 0 || out_of_range > 0) {
+		/* Sentinel violations, reordering and out-of-range block
+		 * numbers are forensic anomalies, not correctable by this
+		 * pass: there is no independent source of truth for what the
+		 * journal should say, and an entry written by an older
+		 * format is not damage. Report only.
 		 */
-		fprintf(stderr, "fsck.beamfs: pass 5: %u sentinel violation(s), %u timestamp reordering(s) (report-only)\n",
-			bad_sentinel, reordered);
+		fprintf(stderr, "fsck.beamfs: pass 5: %u sentinel violation(s), %u timestamp reordering(s), %u entrie(s) naming a block outside the device (report-only)\n",
+			bad_sentinel, reordered, out_of_range);
+		if (out_of_range > 0) {
+			uint64_t nb = le64toh(sb.s_block_count);
+
+			fprintf(stderr, "fsck.beamfs: pass 5:   %s %llu, against %llu blocks on this device\n",
+				oor_several ? "first of several, block" : "every one names block",
+				(unsigned long long)oor_first,
+				(unsigned long long)nb);
+			if (!oor_several &&
+			    oor_first % BEAMFS_DATA_INLINE_SUBBLOCKS == 0 &&
+			    oor_first / BEAMFS_DATA_INLINE_SUBBLOCKS < nb)
+				fprintf(stderr, "fsck.beamfs: pass 5:   divided by %u that is block %llu, so these entries predate format v6\n",
+					BEAMFS_DATA_INLINE_SUBBLOCKS,
+					(unsigned long long)(oor_first
+						/ BEAMFS_DATA_INLINE_SUBBLOCKS));
+		}
 	}
 
 	if (bad_crc > 0) {
