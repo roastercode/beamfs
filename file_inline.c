@@ -2626,25 +2626,50 @@ struct beamfs_inline_wb_ctx {
 	struct inode  *inode;
 	struct folio  *folio;
 	size_t         len;
-	bh_end_io_t   *orig_end_io;
 	void          *orig_private;
 };
 
-static void beamfs_inline_wb_end_io(struct buffer_head *bh, int uptodate)
+/*
+ * Completion for a writeback block.
+ *
+ * Takes a bio rather than a buffer_head: b_end_io went away in 7.3 and
+ * the completion is passed to bh_submit() instead of being stored on
+ * the buffer. bio_endio_bh() hands back the buffer the bio was built
+ * around, which is what still makes a filesystem's own completion
+ * possible.
+ *
+ * The old version saved and restored b_end_io. With the field gone
+ * there is nothing to put back, which is one fewer thing to get wrong.
+ */
+static void beamfs_inline_wb_end_io(struct bio *bio)
 {
+	struct buffer_head *bh;
+	bool uptodate = bio_endio_bh(bio, &bh);
 	struct beamfs_inline_wb_ctx *wb = bh->b_private;
 	struct inode *inode = wb->inode;
 	struct folio *folio = wb->folio;
 	size_t len = wb->len;
 
-	bh->b_end_io = wb->orig_end_io;
 	bh->b_private = wb->orig_private;
 	kfree(wb);
 
 	if (!uptodate)
 		mapping_set_error(inode->i_mapping, -EIO);
 
-	end_buffer_write_sync(bh, uptodate);
+	/*
+	 * What end_buffer_write_sync did: record the error on the
+	 * buffer, mark it uptodate or not, unlock it, and drop the
+	 * reference taken before submission.
+	 */
+	if (uptodate) {
+		set_buffer_uptodate(bh);
+	} else {
+		mark_buffer_write_io_error(bh);
+		clear_buffer_uptodate(bh);
+	}
+	unlock_buffer(bh);
+	put_bh(bh);
+
 	iomap_finish_folio_write(inode, folio, len);
 }
 
@@ -3105,19 +3130,24 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 				wb->inode        = inode;
 				wb->folio        = folio;
 				wb->len          = len;
-				wb->orig_end_io  = bh->b_end_io;
 				wb->orig_private = bh->b_private;
 				bh->b_private = wb;
-				bh->b_end_io  = beamfs_inline_wb_end_io;
 				last_bh = bh;
-			} else {
-				bh->b_end_io = end_buffer_write_sync;
 			}
 			get_bh(bh);
-			submit_bh(REQ_OP_WRITE |
+			/*
+			 * The completion is an argument now. bh_end_write is
+			 * what end_buffer_write_sync became; this filesystem's
+			 * own completion goes in its place on the last buffer
+			 * of the range, the one that finishes the folio.
+			 */
+			bh_submit(bh,
+				  REQ_OP_WRITE |
 				  ((wpc->wbc &&
 				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
-				   REQ_SYNC : 0), bh);
+				   REQ_SYNC : 0),
+				  (bh == last_bh) ? beamfs_inline_wb_end_io
+						  : bh_end_write);
 		} else {
 			/*
 			 * Already clean, so no completion is coming. If this
@@ -3128,7 +3158,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			if (bh == last_bh) {
 				struct beamfs_inline_wb_ctx *ctx = bh->b_private;
 
-				bh->b_end_io  = ctx->orig_end_io;
+				/* b_end_io went away; only b_private is ours to restore. */
 				bh->b_private = ctx->orig_private;
 				kfree(ctx);
 				iomap_finish_folio_write(inode, folio, len);
@@ -3368,10 +3398,7 @@ const struct address_space_operations beamfs_inline_aops = {
 static int beamfs_inline_fsync(struct file *file, loff_t start, loff_t end,
 			       int datasync)
 {
-	struct inode *inode = file->f_mapping->host;
-
-	return mmb_fsync(file, &BEAMFS_I(inode)->i_metadata_bhs,
-			 start, end, datasync != 0);
+	return simple_fsync(file, start, end, datasync);
 }
 
 const struct file_operations beamfs_inline_file_operations = {

@@ -700,7 +700,7 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode)
 /* ------------------------------------------------------------------ */
 
 static int beamfs_create(struct mnt_idmap *idmap, struct inode *dir,
-			struct dentry *dentry, umode_t mode, bool excl)
+			struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	int           ret;

@@ -573,12 +573,37 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 	return last_err;
 }
 
+/*
+ * Persist everything this inode owns, not just the inode.
+ *
+ * Called by __writeback_single_inode during any WB_SYNC_ALL writeback,
+ * which is what 7.3 added: before it, a filesystem had its own fsync
+ * and several racing fsyncs could each see the dirty bits already clear
+ * and return before the metadata was on the medium. I_SYNC serialises
+ * it properly now, and the metadata buffers attached to the inode are
+ * written here rather than from a path the VFS does not know about.
+ *
+ * ext2 has the same shape. beamfs descends from its design and this
+ * follows it.
+ */
+static int beamfs_sync_inode_metadata(struct inode *inode,
+				      struct writeback_control *wbc)
+{
+	int err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+
+	if (err)
+		pr_err_ratelimited("beamfs: cannot sync metadata of inode %lu\n",
+				   (unsigned long)inode->i_ino);
+	return err;
+}
+
 static const struct super_operations beamfs_super_ops = {
 	.alloc_inode    = beamfs_alloc_inode,
 	.free_inode     = beamfs_free_inode,
 	.evict_inode    = beamfs_evict_inode,
 	.put_super      = beamfs_put_super,
 	.write_inode    = beamfs_write_inode,
+	.sync_inode_metadata = beamfs_sync_inode_metadata,
 	.sync_fs        = beamfs_sync_fs,
 	.statfs         = beamfs_statfs,
 };

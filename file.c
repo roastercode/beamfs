@@ -23,10 +23,7 @@ static ssize_t beamfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 static int beamfs_fsync(struct file *file, loff_t start, loff_t end,
 			int datasync)
 {
-	struct inode *inode = file->f_mapping->host;
-
-	return mmb_fsync(file, &BEAMFS_I(inode)->i_metadata_bhs,
-			 start, end, datasync != 0);
+	return simple_fsync(file, start, end, datasync);
 }
 
 const struct file_operations beamfs_file_operations = {
