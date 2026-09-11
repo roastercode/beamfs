@@ -421,6 +421,20 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 		p.r.allocated_inodes++;
 		mode = le16toh(in.i_mode);
 
+		/*
+		 * Only regular files and directories own a block tree.
+		 *
+		 * A short symlink keeps its target inside the inode, in the
+		 * bytes the pointer fields occupy: a link to "foo" reads
+		 * back as i_direct[0] = 7303014, which is 0x6f6f66. Walking
+		 * one as a file claims blocks nobody owns, reports pointers
+		 * outside the device, and on a generic/083 volume made an
+		 * ordinary symlink look like a block shared between two
+		 * inodes. Devices and fifos have no blocks either.
+		 */
+		if ((mode & S_FMT) != S_REG && (mode & S_FMT) != S_DIR)
+			continue;
+
 		/* Claims every block, and reports a second claimant. */
 		owned = count_blocks(&p, &in, ino);
 
