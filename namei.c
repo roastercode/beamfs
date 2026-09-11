@@ -726,8 +726,25 @@ static int beamfs_create(struct mnt_idmap *idmap, struct inode *dir,
 	return 0;
 
 out_iput:
-	unlock_new_inode(inode);
-	iput(inode);
+	/*
+	 * The inode was allocated, written to disk with nlink=1, and
+	 * never linked. beamfs_evict_inode frees an inode only when
+	 * nlink has reached zero, so releasing it here without
+	 * decrementing leaves it allocated on the medium with no name --
+	 * space that nothing can reach and nothing will reclaim.
+	 *
+	 * generic/204 fills the inode table and shows the result: 1678
+	 * inodes, contiguous from 14707 to the end of the table, all
+	 * mode 0100644 nlink=1 size=0, every one of them a create that
+	 * failed after the inode was written.
+	 *
+	 * mkdir below already does this, twice, because a directory is
+	 * born with nlink=2. discard_new_inode is what the VFS provides
+	 * for an inode that was never published -- btrfs, ceph, ext2,
+	 * jfs, ntfs3 and udf all use it on this path.
+	 */
+	inode_dec_link_count(inode);
+	discard_new_inode(inode);
 	return ret;
 }
 
@@ -778,10 +795,10 @@ static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	return NULL;
 
 out_fail:
-	unlock_new_inode(inode);
+	/* Twice: a directory is born with nlink=2. */
 	inode_dec_link_count(inode);
 	inode_dec_link_count(inode);
-	iput(inode);
+	discard_new_inode(inode);
 	inode_dec_link_count(dir);
 	return ERR_PTR(ret);
 }
@@ -1088,8 +1105,25 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 	return 0;
 
 out_iput:
-	unlock_new_inode(inode);
-	iput(inode);
+	/*
+	 * The inode was allocated, written to disk with nlink=1, and
+	 * never linked. beamfs_evict_inode frees an inode only when
+	 * nlink has reached zero, so releasing it here without
+	 * decrementing leaves it allocated on the medium with no name --
+	 * space that nothing can reach and nothing will reclaim.
+	 *
+	 * generic/204 fills the inode table and shows the result: 1678
+	 * inodes, contiguous from 14707 to the end of the table, all
+	 * mode 0100644 nlink=1 size=0, every one of them a create that
+	 * failed after the inode was written.
+	 *
+	 * mkdir below already does this, twice, because a directory is
+	 * born with nlink=2. discard_new_inode is what the VFS provides
+	 * for an inode that was never published -- btrfs, ceph, ext2,
+	 * jfs, ntfs3 and udf all use it on this path.
+	 */
+	inode_dec_link_count(inode);
+	discard_new_inode(inode);
 	return ret;
 }
 
