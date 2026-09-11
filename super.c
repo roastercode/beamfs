@@ -1491,13 +1491,27 @@ static int beamfs_get_tree(struct fs_context *fc)
 /*
  * beamfs_reconfigure - handle mount -o remount
  *
- * xfstests calls remount,ro after each test to verify filesystem
- * integrity. beamfs accepts the reconfigure request without
- * taking any action - ro/rw transitions are handled by the VFS.
+ * The flush is the whole job. Accepting the request and doing nothing
+ * left every dirty inode in memory while the blocks they name were
+ * already marked used on disk, so a remount,ro produced a filesystem
+ * holding allocations nothing pointed at.
+ *
+ * generic/452 is the smallest possible demonstration: copy ls onto the
+ * scratch volume, remount read-only, and the checker finds block 18443
+ * -- data_start itself, the first block of the file -- marked used and
+ * unreferenced, with the inode still reading size=0 and no direct
+ * pointer. The pointer was written; it never reached the medium.
+ *
+ * xfstests remounts read-only after most tests before running its
+ * check, so this reached far past the one test that isolates it.
+ *
+ * sync_filesystem is what every other filesystem does here, ext2
+ * included, and the VFS does not do it for us: the ro/rw transition is
+ * the VFS's, the flush before it is ours.
  */
 static int beamfs_reconfigure(struct fs_context *fc)
 {
-	return 0;
+	return sync_filesystem(fc->root->d_sb);
 }
 
 static const struct fs_context_operations beamfs_context_ops = {
