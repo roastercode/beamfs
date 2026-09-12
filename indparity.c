@@ -292,6 +292,26 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
+		/*
+		 * Said out loud.
+		 *
+		 * Returning quietly here leaves the block on the medium
+		 * with no parity describing it, and nothing anywhere
+		 * records that it happened. generic/464 produced exactly
+		 * that the day the pool was made to give up rather than
+		 * wait: block 41641 of inode 24, written, named by the
+		 * inode, and its parity slot at region 2482 + 3584 still
+		 * empty.
+		 *
+		 * The pool must not wait -- it is reached under
+		 * i_alloc_mutex from a page fault, and waiting there is
+		 * what wedged the node for half an hour three times. But
+		 * an allocation that fails on a filesystem whose whole
+		 * purpose is parity is a failure of the filesystem, not a
+		 * step to skip.
+		 */
+		pr_err_ratelimited("beamfs: no scratch page for the parity of indirect %llu; the block goes to the medium undescribed\n",
+				   (unsigned long long)phys);
 		brelse(pbh);
 		return;
 	}

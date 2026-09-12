@@ -2468,6 +2468,23 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 			continue;
 		}
 
+		/*
+		 * sb_bread, and it can loop.
+		 *
+		 * __bread_gfp adds __GFP_NOFAIL whatever mask it is
+		 * given -- fs/buffer.c line 1410, "prefer looping in the
+		 * allocator rather than here" -- so there is no mask that
+		 * makes this read fail cleanly. Passing __GFP_NORETRY was
+		 * tried and does nothing.
+		 *
+		 * generic/464 wedges here: page allocation stall under
+		 * bdev_getblk, called from a page fault with the folio
+		 * locked, on a machine whose page cache is full of this
+		 * filesystem's own blocks. The way out is not to reach
+		 * the buffer cache from the fault path at all, which is
+		 * what ext2 under iomap does and what this still has to
+		 * do.
+		 */
 		bh = sb_bread(sb, phys);
 		if (!bh) {
 			pr_err_ratelimited("beamfs/inline: read_folio_range: sb_bread phys=%llu failed\n",

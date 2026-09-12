@@ -164,6 +164,28 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 		return 0;
 	claim(p, blk, ino);
 
+	{
+		enum fsck_read_status ist = fsck_read_indirect(p->rd, blk, ptrs);
+
+		/*
+		 * Never described is not beyond correction.
+		 *
+		 * The parity slot for this block is empty, and the kernel
+		 * writes parity with every block it writes, so nothing
+		 * ever wrote this one. Calling it beyond correction points
+		 * at the medium; it belongs to the filesystem.
+		 *
+		 * generic/464: block 41641 of inode 24, named by the
+		 * inode, filled with 0xcd, parity slot at region 2482 +
+		 * 3584 empty.
+		 */
+		if (ist == FSCK_READ_UNDESCRIBED) {
+			p->r.unreadable_indirect++;
+			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu was never described -- no parity was ever written for it, so nothing ever wrote the block; the subtree under it is unreachable\n",
+			     (unsigned long long)blk, (unsigned long long)ino);
+			return n;
+		}
+	}
 	if (fsck_read_indirect(p->rd, blk, ptrs) == FSCK_READ_UNCORRECTABLE) {
 		/* Not walked: following pointers out of a block that
 		 * failed its own parity is how one bad block becomes a

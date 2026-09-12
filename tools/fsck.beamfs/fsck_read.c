@@ -50,6 +50,7 @@ const char *fsck_read_strerror(enum fsck_read_status s)
 	case FSCK_READ_CLEAN:         return "clean";
 	case FSCK_READ_CORRECTED:     return "corrected";
 	case FSCK_READ_UNCORRECTABLE: return "uncorrectable";
+	case FSCK_READ_UNDESCRIBED:  return "never described";
 	case FSCK_READ_IO:            return "I/O error";
 	}
 	return "unknown";
@@ -299,6 +300,29 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 	if (ind_parity_slot(r, blk, &region_blk, &offset, &stride) &&
 	    read_exact(r->fd, (off_t)region_blk * BEAMFS_BLOCK_SIZE, parity, sizeof(parity)) &&
 	    ind_region_decode(r, parity, flat)) {
+		size_t k;
+		int described = 0;
+
+		/*
+		 * An empty slot is not a failed check.
+		 *
+		 * Every block written through the kernel gets its parity
+		 * written in the same breath, so a slot of zeros means no
+		 * block was ever described here. Running the decoder
+		 * against zeros reports "beyond correction", which points
+		 * at the medium when the block was simply never written.
+		 */
+		for (k = 0; k < stride; k++) {
+			if (flat[offset + k]) {
+				described = 1;
+				break;
+			}
+		}
+		if (!described) {
+			r->undescribed++;
+			return FSCK_READ_UNDESCRIBED;
+		}
+
 		if (r->ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
 			const uint32_t *slot = (const uint32_t *)(flat + offset);
 

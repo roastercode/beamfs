@@ -43,6 +43,19 @@ enum fsck_read_status {
 	 * believed.
 	 */
 	FSCK_READ_UNCORRECTABLE,
+	/* The block has no parity describing it at all: the slot that
+	 * should hold it is entirely zero. Not damage -- a block that
+	 * was never described, which on a filesystem that writes parity
+	 * with every block means it was never written either.
+	 *
+	 * Worth its own answer because "beyond correction" says the
+	 * medium lost something, and this says the filesystem did.
+	 * generic/464 produced one: block 41641 of inode 24, named by
+	 * the inode on disk, filled with 0xcd, and its parity slot at
+	 * region 2482 + 3584 empty. Reported as beyond correction, it
+	 * reads as a medium that ate a block. It is not.
+	 */
+	FSCK_READ_UNDESCRIBED,
 	/* The read itself failed: short read, seek error, bad offset. */
 	FSCK_READ_IO,
 };
@@ -79,6 +92,10 @@ struct fsck_reader {
 	 */
 	unsigned int     corrected;
 	unsigned int     uncorrectable;
+	/* Blocks whose parity slot was empty: never described, so on
+	 * this filesystem never written.
+	 */
+	unsigned int     undescribed;
 };
 
 /*

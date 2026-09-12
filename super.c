@@ -785,13 +785,33 @@ void beamfs_fail(struct super_block *sb, const char *where, int err)
 	 */
 }
 
+/*
+ * A scratch page, or NULL.
+ *
+ * __GFP_NORETRY, and every caller handles NULL: this is reached from
+ * beamfs_ind_parity_verify, which runs under i_alloc_mutex, while a
+ * reader on the same inode holds a locked folio and waits for that
+ * mutex. A wait here is a wait the folio waiter cannot outlast --
+ * mempool_alloc with GFP_NOFS sleeps until somebody returns a page,
+ * and under generic/464 the somebody was itself queued behind the
+ * folio.
+ *
+ * generic/464 wedged the node twice that way. The blocked-state dump
+ * shows one xfs_io in __mutex_lock under beamfs_inline_read_folio_range
+ * and twenty tasks in folio_wait_bit_common behind it, the machine
+ * spinning at 140% with nothing moving for half an hour.
+ *
+ * Giving up costs a verify that does not happen. Waiting costs the
+ * mount.
+ */
 void *beamfs_scratch_get(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
 	if (!sbi || !sbi->s_scratch_pool)
-		return kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-	return mempool_alloc(sbi->s_scratch_pool, GFP_NOFS);
+		return kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS | __GFP_NORETRY);
+	return mempool_alloc(sbi->s_scratch_pool,
+			     GFP_NOFS | __GFP_NORETRY | __GFP_NOWARN);
 }
 
 void beamfs_scratch_put(struct super_block *sb, void *p)
