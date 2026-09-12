@@ -32,6 +32,7 @@
 #include <linux/crc32.h>
 #include <linux/slab.h>
 #include "beamfs.h"
+#include "beamfs_trace.h"
 
 /* Parity bytes one indirect block costs under the active mode. */
 static size_t ind_parity_stride(struct beamfs_sb_info *sbi)
@@ -202,13 +203,29 @@ static void ind_slot_scatter(u8 *scratch, u32 off, size_t stride,
 }
 
 /* Encode @scratch, the decoded block, back into the buffer. */
+/*
+ * Encode @scratch back into the buffer.
+ *
+ * @scratch is a decoded copy of the block and keeps its layout: sixteen
+ * subblocks of BEAMFS_SUBBLOCK_TOTAL, each holding its data then its
+ * parity. It is not a flat payload, and reading it as one -- at
+ * i * BEAMFS_SUBBLOCK_DATA rather than i * BEAMFS_SUBBLOCK_TOTAL --
+ * shifts every subblock against the one it came from.
+ *
+ * That is what happened when the second scratch page was removed: the
+ * gather and scatter helpers were written for the interleaved layout,
+ * this one was left reading the old flat one, and every region write
+ * scrambled the block. Files came back with EUCLEAN moments after being
+ * written -- generic/001 reporting "cp: error copying big.0 to big.1:
+ * Structure needs cleaning" on its second iteration.
+ */
 static void ind_region_write(struct buffer_head *pbh, const u8 *scratch)
 {
 	unsigned int i;
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		memcpy((u8 *)pbh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       scratch + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+		       scratch + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
 		       BEAMFS_SUBBLOCK_DATA);
 
 	beamfs_rs_encode_region((u8 *)pbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
@@ -333,6 +350,16 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(pbh, scratch);
+
+	{
+		unsigned int nz = 0, k;
+
+		for (k = 0; k < BEAMFS_INDIRECT_PTRS; k++)
+			if (((const __le64 *)block)[k])
+				nz++;
+		trace_beamfs_parity_slot(inode ? inode->i_ino : 0, phys,
+					 region_blk, offset / (u32)stride, nz);
+	}
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
 	/*

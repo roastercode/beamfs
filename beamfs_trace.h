@@ -37,6 +37,40 @@ TRACE_EVENT(beamfs_slot_store,
 		  __entry->old, __entry->new, __entry->level)
 );
 
+/*
+ * One parity slot written.
+ *
+ * A region block holds fourteen slots and several inodes' indirect
+ * blocks land in the same one. generic/464 leaves slots describing a
+ * block that is not the block on the medium -- subblocks 0..6 with
+ * data and no parity, 7..15 with parity and no data, two states in one
+ * slot -- and the question is which writer left what, and in which
+ * order. @nz is how many of the indirect block's pointers were set
+ * when the parity was taken, so a slot can be matched to the block it
+ * was computed from.
+ */
+TRACE_EVENT(beamfs_parity_slot,
+	TP_PROTO(unsigned long ino, u64 phys, u64 region, unsigned int slot,
+		 unsigned int nz),
+	TP_ARGS(ino, phys, region, slot, nz),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(u64, phys)
+		__field(u64, region)
+		__field(unsigned int, slot)
+		__field(unsigned int, nz)
+	),
+	TP_fast_assign(
+		__entry->ino = ino;
+		__entry->phys = phys;
+		__entry->region = region;
+		__entry->slot = slot;
+		__entry->nz = nz;
+	),
+	TP_printk("ino=%lu ind=%llu region=%llu slot=%u ptrs=%u",
+		  __entry->ino, __entry->phys, __entry->region,
+		  __entry->slot, __entry->nz)
+);
 TRACE_EVENT(beamfs_block_alloc,
 	TP_PROTO(unsigned long ino, u64 blk, unsigned int level),
 	TP_ARGS(ino, blk, level),

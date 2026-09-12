@@ -686,8 +686,23 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
-			unlock_buffer(ibh);
+			/*
+			 * Parity taken under the lock, like the install
+			 * sites do.
+			 *
+			 * The block is allocated and visible before its
+			 * pointer is installed a few lines down, so
+			 * another writer can reach it. Computing parity
+			 * after unlock_buffer describes whatever the block
+			 * held at that instant, which need not be what
+			 * reaches the medium: generic/464 writes and
+			 * fsyncs the same files from several tasks and
+			 * produced 194 indirect blocks whose parity was
+			 * written and did not match, seven orphaned blocks
+			 * under each.
+			 */
 			beamfs_ind_parity_update(sb, ibh, inode);
+			unlock_buffer(ibh);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -916,8 +931,23 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
-			unlock_buffer(ibh);
+			/*
+			 * Parity taken under the lock, like the install
+			 * sites do.
+			 *
+			 * The block is allocated and visible before its
+			 * pointer is installed a few lines down, so
+			 * another writer can reach it. Computing parity
+			 * after unlock_buffer describes whatever the block
+			 * held at that instant, which need not be what
+			 * reaches the medium: generic/464 writes and
+			 * fsyncs the same files from several tasks and
+			 * produced 194 indirect blocks whose parity was
+			 * written and did not match, seven orphaned blocks
+			 * under each.
+			 */
 			beamfs_ind_parity_update(sb, ibh, inode);
+			unlock_buffer(ibh);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
@@ -1233,8 +1263,23 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_zeroed(sb, inode->i_ino, ibh->b_blocknr, __func__);
 			memset(ibh->b_data, 0, BEAMFS_BLOCK_SIZE);
 			set_buffer_uptodate(ibh);
-			unlock_buffer(ibh);
+			/*
+			 * Parity taken under the lock, like the install
+			 * sites do.
+			 *
+			 * The block is allocated and visible before its
+			 * pointer is installed a few lines down, so
+			 * another writer can reach it. Computing parity
+			 * after unlock_buffer describes whatever the block
+			 * held at that instant, which need not be what
+			 * reaches the medium: generic/464 writes and
+			 * fsyncs the same files from several tasks and
+			 * produced 194 indirect blocks whose parity was
+			 * written and did not match, seven orphaned blocks
+			 * under each.
+			 */
 			beamfs_ind_parity_update(sb, ibh, inode);
+			unlock_buffer(ibh);
 			/*
 			 * Attach it to the inode as the install sites do.
 			 *
