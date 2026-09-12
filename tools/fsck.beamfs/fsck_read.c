@@ -315,22 +315,56 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 				}
 			}
 		} else {
+			/*
+			 * Decoded in a copy, never in raw.
+			 *
+			 * rs_decode_subblock corrects in place, and a
+			 * subblock past its correction radius has already
+			 * written the decoder's guesses into the buffer
+			 * before it gives up. Decoding straight into raw
+			 * meant an uncorrectable block was destroyed on the
+			 * way to being declared uncorrectable, and the
+			 * caller read the wreckage.
+			 *
+			 * generic/464 shows what that cost: block 20084
+			 * holds four valid pointers on the medium and came
+			 * back with 366, among them 17179869188 and
+			 * 1999944 -- decoder artefacts, not data. Three
+			 * different blocks came back with nearly the same
+			 * numbers. Every count of lost blocks on a volume
+			 * with an uncorrectable indirect was taken from
+			 * that.
+			 *
+			 * The kernel already decodes into scratch for the
+			 * same reason; beamfs_ind_parity_verify records the
+			 * 500-block leak that taught it.
+			 */
+			uint8_t work[BEAMFS_BLOCK_SIZE];
+			int failed = 0;
+
+			memcpy(work, raw, sizeof(work));
 			for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 				int positions[BEAMFS_RS_PARITY / 2];
 				int rc = rs_decode_subblock(
 					r->rs,
-					raw + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+					work + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 					BEAMFS_SUBBLOCK_DATA,
 					flat + offset + (size_t)i * BEAMFS_RS_PARITY,
 					positions);
 
 				if (rc == RS_UNCORRECTABLE) {
-					r->uncorrectable++;
-					return FSCK_READ_UNCORRECTABLE;
+					failed = 1;
+					break;
 				}
 				if (rc > 0)
 					st = FSCK_READ_CORRECTED;
 			}
+			if (failed) {
+				r->uncorrectable++;
+				return FSCK_READ_UNCORRECTABLE;
+			}
+			/* Every subblock decoded: the copy is the truth. */
+			memcpy(raw, work, sizeof(work));
 			if (st == FSCK_READ_CORRECTED)
 				r->corrected++;
 		}
