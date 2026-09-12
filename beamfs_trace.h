@@ -49,6 +49,49 @@ TRACE_EVENT(beamfs_slot_store,
  * when the parity was taken, so a slot can be matched to the block it
  * was computed from.
  */
+/*
+ * An indirect block read on the allocation path.
+ *
+ * generic/464 has two writers install a pointer into the same slot of
+ * the same indirect block, twenty-five seconds apart, and the second
+ * one reads it as zero: xfs_io writes 23967 into slot 5 of block 36508
+ * at t=2158.33, and a writeback kworker writes 105019 into the same
+ * slot at t=2183.22, with the trace showing 0-> both times. The block
+ * held the first pointer; the second writer did not see it.
+ *
+ * @uptodate says whether the buffer came back already valid -- a
+ * buffer that had to be read from the medium is one the cache had
+ * dropped, and what comes back is whatever was last written out,
+ * which need not be what the last writer put in memory.
+ *
+ * @slotval is what sits in the slot about to be written, so a read
+ * that returns zero where a pointer was installed shows up here rather
+ * than being inferred from two slot_store events.
+ */
+TRACE_EVENT(beamfs_ind_read,
+	TP_PROTO(unsigned long ino, u64 blk, unsigned int slot, u64 slotval,
+		 int uptodate, int fresh),
+	TP_ARGS(ino, blk, slot, slotval, uptodate, fresh),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(u64, blk)
+		__field(unsigned int, slot)
+		__field(u64, slotval)
+		__field(int, uptodate)
+		__field(int, fresh)
+	),
+	TP_fast_assign(
+		__entry->ino = ino;
+		__entry->blk = blk;
+		__entry->slot = slot;
+		__entry->slotval = slotval;
+		__entry->uptodate = uptodate;
+		__entry->fresh = fresh;
+	),
+	TP_printk("ino=%lu ind=%llu slot=%u val=%llu uptodate=%d fresh=%d",
+		  __entry->ino, __entry->blk, __entry->slot,
+		  __entry->slotval, __entry->uptodate, __entry->fresh)
+);
 TRACE_EVENT(beamfs_parity_slot,
 	TP_PROTO(unsigned long ino, u64 phys, u64 region, unsigned int slot,
 		 unsigned int nz),

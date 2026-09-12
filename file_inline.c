@@ -198,12 +198,36 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return ret;
 
 		/* Already held when this call created it. */
-		if (!ibh)
-			ibh = sb_bread(sb, indirect_blk);
-		if (!ibh) {
-			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
-					   (unsigned long long)indirect_blk);
-			return -EIO;
+		{
+			int fresh = 0;
+
+			if (!ibh) {
+				/*
+				 * find_get_block, not sb_getblk: the
+				 * question is whether the cache already
+				 * holds this block, and sb_getblk would
+				 * answer it by creating one. A probe that
+				 * changes what it measures is worse than
+				 * no probe -- generic/464 passed with one
+				 * and the result could not be read.
+				 */
+				struct buffer_head *probe =
+					sb_find_get_block(sb, indirect_blk);
+
+				fresh = !probe;
+				if (probe)
+					brelse(probe);
+				ibh = sb_bread(sb, indirect_blk);
+			}
+			if (!ibh) {
+				pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
+						   (unsigned long long)indirect_blk);
+				return -EIO;
+			}
+			trace_beamfs_ind_read(inode->i_ino, indirect_blk,
+				(unsigned int)indirect_slot,
+				le64_to_cpu(((__le64 *)ibh->b_data)[indirect_slot]),
+				buffer_uptodate(ibh), fresh);
 		}
 		/*
 		 * Verify before trusting the pointers. Under CRC this turns a
