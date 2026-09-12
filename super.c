@@ -1337,12 +1337,26 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	spin_lock_init(&sbi->s_lock);
 
 	/*
-	 * Nine elements: the paths that can hold a scratch page at the
-	 * same time are readdir, lookup, add_dirent, del_dirent,
-	 * dir_is_empty, the sweep, the block decoder and two in
-	 * writeback.
+	 * The paths that can hold a scratch page at the same time:
+	 * readdir, lookup, add_dirent, del_dirent, dir_is_empty, the
+	 * sweep, the block decoder, two in writeback -- and three more
+	 * in beamfs_ind_parity_verify, which decodes a region block into
+	 * scratch before it can read one slot out of it.
+	 *
+	 * Twelve was not enough under read pressure. mempool_alloc with
+	 * GFP_NOFS waits when the pool is empty, and a reader that holds
+	 * two while waiting for a third is waiting on the readers that
+	 * hold the rest. generic/464 walked into it: three sshd-session
+	 * tasks stalled 191 seconds in __bread_gfp under
+	 * beamfs_ind_parity_verify, the machine at 330% CPU with 16 MiB
+	 * free and 7.6 GiB of page cache GFP_NOFS was not allowed to
+	 * reclaim, and it never came back.
+	 *
+	 * Thirty-two, which is 128 KiB a mount: enough that every path
+	 * can hold its three and still find one, and small enough not to
+	 * matter on the embedded profile this filesystem targets.
 	 */
-	sbi->s_scratch_pool = mempool_create_kmalloc_pool(9,
+	sbi->s_scratch_pool = mempool_create_kmalloc_pool(32,
 							  BEAMFS_BLOCK_SIZE);
 	if (!sbi->s_scratch_pool) {
 		kfree(sbi);

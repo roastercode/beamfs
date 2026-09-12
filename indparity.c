@@ -99,7 +99,7 @@ static bool ind_parity_slot(struct super_block *sb, u64 phys,
 }
 
 /*
- * Decode a region block into @flat, correcting what RS can.
+ * Decode a region block into @scratch, correcting what RS can.
  *
  * Returns 0 when the payload can be trusted, -EUCLEAN when a subblock
  * was beyond correction. On -EUCLEAN the caller must not write the
@@ -112,7 +112,7 @@ static bool ind_parity_slot(struct super_block *sb, u64 phys,
  * leaks.
  */
 static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
-			   u8 *scratch, u8 *flat)
+			   u8 *scratch)
 {
 	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
 	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
@@ -142,21 +142,73 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 				BEAMFS_SUBBLOCK_DATA,
 				beamfs_rs_event_subblock_bits(i));
 		}
-		memcpy(flat + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-		       scratch + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       BEAMFS_SUBBLOCK_DATA);
 	}
 	return ret;
 }
 
-/* Encode @flat back into the region block. */
-static void ind_region_write(struct buffer_head *pbh, const u8 *flat)
+/*
+ * Copy one slot out of a decoded region block.
+ *
+ * The payload is interleaved with parity -- 239 bytes of data every 255
+ * -- so a slot at payload offset @off can straddle the boundary between
+ * two subblocks, and a caller cannot simply point into the buffer.
+ *
+ * Gathering the whole 3824-byte payload into a second scratch page was
+ * the first way this worked, and it cost a page per verify on a read
+ * path. beamfs_ind_parity_verify then held three at once out of a pool
+ * of nine; generic/464 emptied it and three readers stalled 191 seconds
+ * each in __bread_gfp, on a machine with 16 MiB free and 7.6 GiB of
+ * page cache that GFP_NOFS could not reclaim. A slot is 256 bytes and
+ * fits on the stack.
+ */
+static void ind_slot_gather(const u8 *scratch, u32 off, size_t stride,
+			    u8 *out)
+{
+	size_t done = 0;
+
+	while (done < stride) {
+		unsigned int sub = (unsigned int)((off + done) / BEAMFS_SUBBLOCK_DATA);
+		size_t within = (off + done) % BEAMFS_SUBBLOCK_DATA;
+		size_t run = BEAMFS_SUBBLOCK_DATA - within;
+
+		if (run > stride - done)
+			run = stride - done;
+
+		memcpy(out + done,
+		       scratch + (size_t)sub * BEAMFS_SUBBLOCK_TOTAL + within,
+		       run);
+		done += run;
+	}
+}
+
+/* Put one slot back into a decoded region block, same geometry. */
+static void ind_slot_scatter(u8 *scratch, u32 off, size_t stride,
+			     const u8 *in)
+{
+	size_t done = 0;
+
+	while (done < stride) {
+		unsigned int sub = (unsigned int)((off + done) / BEAMFS_SUBBLOCK_DATA);
+		size_t within = (off + done) % BEAMFS_SUBBLOCK_DATA;
+		size_t run = BEAMFS_SUBBLOCK_DATA - within;
+
+		if (run > stride - done)
+			run = stride - done;
+
+		memcpy(scratch + (size_t)sub * BEAMFS_SUBBLOCK_TOTAL + within,
+		       in + done, run);
+		done += run;
+	}
+}
+
+/* Encode @scratch, the decoded block, back into the buffer. */
+static void ind_region_write(struct buffer_head *pbh, const u8 *scratch)
 {
 	unsigned int i;
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		memcpy((u8 *)pbh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       flat + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+		       scratch + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 		       BEAMFS_SUBBLOCK_DATA);
 
 	beamfs_rs_encode_region((u8 *)pbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
@@ -202,9 +254,15 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	u32 offset;
 	size_t stride;
 	unsigned int i;
-	u8 *scratch, *flat;
+	u8 *scratch;
+	/* One slot, 256 bytes. On the stack, so this path holds one
+	 * scratch page instead of two.
+	 */
+	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
 
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
+		return;
+	if (stride > sizeof(slotbuf))
 		return;
 
 	pbh = beamfs_bread(sb, region_blk, "indirect parity");
@@ -216,12 +274,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	}
 
 	scratch = beamfs_scratch_get(sb);
-	flat = beamfs_scratch_get(sb);
-	if (!scratch || !flat) {
-		if (scratch)
-			beamfs_scratch_put(sb, scratch);
-		if (flat)
-			beamfs_scratch_put(sb, flat);
+	if (!scratch) {
 		brelse(pbh);
 		return;
 	}
@@ -239,26 +292,27 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * indirect blocks' parity permanently wrong, in a way nothing
 	 * could afterwards detect.
 	 */
-	if (ind_region_read(sb, pbh, scratch, flat) == -EUCLEAN) {
+	if (ind_region_read(sb, pbh, scratch) == -EUCLEAN) {
 		pr_err_ratelimited("beamfs: parity region block %llu beyond correction; not updating the slot for indirect %llu\n",
 				   (unsigned long long)region_blk,
 				   (unsigned long long)phys);
 		unlock_buffer(pbh);
 		beamfs_scratch_put(sb, scratch);
-		beamfs_scratch_put(sb, flat);
 		brelse(pbh);
 		return;
 	}
 
+	ind_slot_gather(scratch, offset, stride, slotbuf);
+
 	if (sbi->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
-		__le32 *slot = (__le32 *)(flat + offset);
+		__le32 *slot = (__le32 *)slotbuf;
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 			slot[i] = cpu_to_le32(crc32_le(~0U,
 				(const u8 *)block + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_DATA) ^ ~0U);
 	} else {
-		u8 *slot = flat + offset;
+		u8 *slot = slotbuf;
 
 		/*
 		 * The indirect block is 4096 bytes and an RS codeword
@@ -277,10 +331,10 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 				BEAMFS_SUBBLOCK_DATA, 1);
 	}
 
-	ind_region_write(pbh, flat);
+	ind_slot_scatter(scratch, offset, stride, slotbuf);
+	ind_region_write(pbh, scratch);
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
-	beamfs_scratch_put(sb, flat);
 	/*
 	 * On the inode's list when there is one, so writeback carries it
 	 * with the block it describes. Without an inode -- the scrubber
@@ -317,7 +371,8 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	size_t stride;
 	unsigned int i;
 	int ret = 0;
-	u8 *rscratch, *flat;
+	u8 *rscratch;
+	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
 
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return 0;
@@ -326,13 +381,12 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	if (!pbh)
 		return 0;   /* parity unreadable: do not fail the read on it */
 
+	if (stride > sizeof(slotbuf)) {
+		brelse(pbh);
+		return 0;
+	}
 	rscratch = beamfs_scratch_get(sb);
-	flat = beamfs_scratch_get(sb);
-	if (!rscratch || !flat) {
-		if (rscratch)
-			beamfs_scratch_put(sb, rscratch);
-		if (flat)
-			beamfs_scratch_put(sb, flat);
+	if (!rscratch) {
 		brelse(pbh);
 		return 0;
 	}
@@ -348,18 +402,19 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	 * honest answer -- the block may well be fine and there is now
 	 * nothing to check it against.
 	 */
-	if (ind_region_read(sb, pbh, rscratch, flat) == -EUCLEAN) {
+	if (ind_region_read(sb, pbh, rscratch) == -EUCLEAN) {
 		pr_err_ratelimited("beamfs: parity region block %llu beyond correction; indirect %llu cannot be checked\n",
 				   (unsigned long long)region_blk,
 				   (unsigned long long)phys);
 		beamfs_scratch_put(sb, rscratch);
-		beamfs_scratch_put(sb, flat);
 		brelse(pbh);
 		return 0;
 	}
 
+	ind_slot_gather(rscratch, offset, stride, slotbuf);
+
 	if (sbi->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
-		const __le32 *slot = (const __le32 *)(flat + offset);
+		const __le32 *slot = (const __le32 *)slotbuf;
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 			u32 want = le32_to_cpu(slot[i]);
@@ -377,7 +432,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 			}
 		}
 	} else {
-		u8 *slot = flat + offset;
+		u8 *slot = slotbuf;
 		int results[1];
 		int positions[BEAMFS_RS_PARITY / 2];
 		u8 *copy;
@@ -410,7 +465,6 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		copy = beamfs_scratch_get(sb);
 		if (!copy) {
 			beamfs_scratch_put(sb, rscratch);
-			beamfs_scratch_put(sb, flat);
 			brelse(pbh);
 			return 0;
 		}
@@ -444,7 +498,6 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	}
 
 	beamfs_scratch_put(sb, rscratch);
-	beamfs_scratch_put(sb, flat);
 	brelse(pbh);
 	return ret;
 }
