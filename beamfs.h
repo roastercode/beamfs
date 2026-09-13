@@ -67,6 +67,21 @@ struct beamfs_sb_info {
 	 * keep working.
 	 */
 	mempool_t        *s_scratch_pool;
+	/*
+	 * Staging for the superblock's RS encode, allocated at mount.
+	 *
+	 * beamfs_dirty_super_now used to kvmalloc it on every call, and
+	 * beamfs_free_block calls that under s_lock -- a spinlock. An
+	 * allocation that sleeps under a spinlock is a deadlock waiting
+	 * for a machine busy enough, and DEBUG_ATOMIC_SLEEP found it on
+	 * the first generic/076 after it was turned on: "BUG: sleeping
+	 * function called from invalid context", rm holding three locks.
+	 *
+	 * 2769 bytes a mount against an allocation on every block freed.
+	 * Written under s_lock, which every caller of dirty_super_now
+	 * already holds or takes.
+	 */
+	u8               *s_sb_rs_staging;
 	unsigned long     s_nblocks;       /* Number of data blocks */
 	unsigned long     s_data_start;    /* First data block number */
 	/* Inode allocator */

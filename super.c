@@ -131,6 +131,8 @@ static void beamfs_put_super(struct super_block *sb)
 		beamfs_destroy_bitmap(sb);
 		mempool_destroy(sbi->s_scratch_pool);
 		sbi->s_scratch_pool = NULL;
+		kvfree(sbi->s_sb_rs_staging);
+		sbi->s_sb_rs_staging = NULL;
 		brelse(sbi->s_sbh);
 		kfree(sbi->s_beamfs_sb);
 		kfree(sbi);
@@ -894,19 +896,36 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 	 * payload.
 	 */
 	{
-		u8 *staging = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES, GFP_NOFS);
+		u8 *staging = sbi->s_sb_rs_staging;
 		u8 *parity_dst = (u8 *)fsb + BEAMFS_SB_RS_PARITY_OFFSET;
 
+		/*
+		 * The buffer is the mount's, not this call's.
+		 *
+		 * This allocated 2769 bytes on every call, and
+		 * beamfs_free_block reaches it under s_lock -- a
+		 * spinlock. kvmalloc sleeps, and an allocation that
+		 * sleeps under a spinlock is a deadlock waiting for a
+		 * machine busy enough to take the slow path.
+		 *
+		 * DEBUG_ATOMIC_SLEEP found it on the first generic/076
+		 * after the check was turned on: "BUG: sleeping function
+		 * called from invalid context at sched/mm.h:322", rm
+		 * holding sb_writers, i_alloc_mutex and s_lock, in
+		 * __kvmalloc_node_noprof under beamfs_dirty_super_now
+		 * under beamfs_free_block under beamfs_evict_inode.
+		 *
+		 * Writing it is serialised by s_lock, which every path
+		 * into this function holds or takes.
+		 */
 		if (!staging) {
-			pr_warn("beamfs: dirty_super: kvmalloc(%u) failed; skipping RS re-encode\n",
-				BEAMFS_SB_RS_STAGING_BYTES);
+			pr_warn_ratelimited("beamfs: dirty_super: no staging buffer; skipping RS re-encode\n");
 		} else {
 			beamfs_sb_to_rs_staging(fsb, staging);
 			beamfs_rs_encode_region(staging, BEAMFS_SB_RS_DATA_LEN,
 						parity_dst, BEAMFS_RS_PARITY,
 						BEAMFS_SB_RS_DATA_LEN,
 						BEAMFS_SB_RS_SUBBLOCKS);
-			kvfree(staging);
 		}
 	}
 
@@ -1379,6 +1398,24 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_scratch_pool = mempool_create_kmalloc_pool(32,
 							  BEAMFS_BLOCK_SIZE);
 	if (!sbi->s_scratch_pool) {
+		kfree(sbi);
+		return -ENOMEM;
+	}
+
+	/*
+	 * Staging for the superblock's RS encode, taken once.
+	 *
+	 * beamfs_dirty_super_now needs 2769 bytes to lay the superblock
+	 * out for the encoder, and beamfs_free_block reaches it under
+	 * s_lock -- a spinlock. Allocating there is what
+	 * DEBUG_ATOMIC_SLEEP reports as "sleeping function called from
+	 * invalid context"; allocating here costs 2769 bytes a mount and
+	 * nothing else.
+	 */
+	sbi->s_sb_rs_staging = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES,
+					GFP_KERNEL);
+	if (!sbi->s_sb_rs_staging) {
+		mempool_destroy(sbi->s_scratch_pool);
 		kfree(sbi);
 		return -ENOMEM;
 	}

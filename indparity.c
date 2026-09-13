@@ -219,7 +219,73 @@ static void ind_slot_scatter(u8 *scratch, u32 off, size_t stride,
  * written -- generic/001 reporting "cp: error copying big.0 to big.1:
  * Structure needs cleaning" on its second iteration.
  */
-static void ind_region_write(struct buffer_head *pbh, const u8 *scratch)
+/*
+ * Does the block decode as soon as it is encoded?
+ *
+ * generic/076 on a volume of 131072 blocks reported region block 1051
+ * subblock 9 and region block 8104 subblock 6 beyond correction, and
+ * sixteen indirect blocks became uncheckable behind them. The question
+ * a report on the medium cannot answer is whether the block left this
+ * function already broken or became so on the way out, and this answers
+ * it: decode a copy of what was just encoded, and say so when it fails.
+ *
+ * Debug-only. Every region write pays a full sixteen-codeword decode,
+ * which is the cost of the encode again; CONFIG_BEAMFS_DEBUG_TREE is
+ * the switch the tree checks already live behind.
+ */
+#ifdef CONFIG_BEAMFS_DEBUG_TREE
+static void ind_region_selfcheck(struct super_block *sb,
+				 const struct buffer_head *pbh)
+{
+	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	u8 *copy = beamfs_scratch_get(sb);
+	unsigned int i;
+
+	if (!copy)
+		return;
+	memcpy(copy, pbh->b_data, BEAMFS_BLOCK_SIZE);
+	beamfs_rs_decode_region(copy, BEAMFS_SUBBLOCK_TOTAL,
+				copy + BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_SUBBLOCK_TOTAL,
+				BEAMFS_SUBBLOCK_DATA,
+				BEAMFS_DATA_INLINE_SUBBLOCKS,
+				results, NULL, 0, "region selfcheck");
+	{
+		unsigned int bad = 0;
+
+		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
+			if (results[i] < 0) {
+				bad++;
+				pr_err_ratelimited("beamfs: region block %llu subblock %u does not decode as written\n",
+						   (unsigned long long)pbh->b_blocknr, i);
+			} else if (results[i] > 0) {
+				bad++;
+				pr_err_ratelimited("beamfs: region block %llu subblock %u needed %d correction(s) as written\n",
+						   (unsigned long long)pbh->b_blocknr, i,
+						   results[i]);
+			}
+		}
+		/*
+		 * Silent when it passes.
+		 *
+		 * It said so for a while, because silence meant two things
+		 * -- the block encoded correctly, or this function never
+		 * ran on it -- and generic/076 needed them told apart. It
+		 * did: the block leaves this function decodable every
+		 * time, and what arrives on the medium is somebody else's
+		 * problem.
+		 *
+		 * Saying it again costs 1390 lines of a 3422-line dmesg,
+		 * which is where a KCSAN report goes to be missed.
+		 */
+		(void)bad;
+	}
+	beamfs_scratch_put(sb, copy);
+}
+#endif
+
+static void ind_region_write(struct super_block *sb,
+			     struct buffer_head *pbh, const u8 *scratch)
 {
 	unsigned int i;
 
@@ -233,6 +299,11 @@ static void ind_region_write(struct buffer_head *pbh, const u8 *scratch)
 				BEAMFS_SUBBLOCK_TOTAL,
 				BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_DATA_INLINE_SUBBLOCKS);
+#ifdef CONFIG_BEAMFS_DEBUG_TREE
+	ind_region_selfcheck(sb, pbh);
+#else
+	(void)sb;
+#endif
 }
 
 /*
@@ -369,7 +440,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	}
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
-	ind_region_write(pbh, scratch);
+	ind_region_write(sb, pbh, scratch);
 
 	{
 		unsigned int nz = 0, k;
@@ -459,6 +530,48 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	}
 
 	ind_slot_gather(rscratch, offset, stride, slotbuf);
+
+	/*
+	 * An empty slot describes nothing, and decoding against it
+	 * destroys the block.
+	 *
+	 * Zero data with zero parity is a valid RS codeword, so a slot of
+	 * zeros is a codeword saying "this block is all zeros". An
+	 * indirect block early in its life holds one or two pointers --
+	 * eight bytes in a 239-byte subblock -- and RS(255,239) corrects
+	 * up to eight symbols. The decoder therefore does exactly what it
+	 * is asked: it moves those eight bytes to zero and reports a
+	 * successful correction.
+	 *
+	 * generic/076 catches it in the act. treecheck reports parent
+	 * 18516 slot 1 holding 18518, read back as 0 and reallocated to
+	 * 22512, from writeback -- and the checker says of that block
+	 * that no parity was ever written for it.
+	 *
+	 * A block whose parity has not been written yet is unverifiable,
+	 * not wrong. Say so and let the read through: the pointers are
+	 * what the writer put there, and destroying them to satisfy a
+	 * codeword nobody wrote is the one outcome worse than not
+	 * checking.
+	 */
+	{
+		size_t k;
+		bool described = false;
+
+		for (k = 0; k < stride; k++) {
+			if (slotbuf[k]) {
+				described = true;
+				break;
+			}
+		}
+		if (!described) {
+			pr_warn_ratelimited("beamfs: indirect block %llu has no parity written yet; not checked\n",
+					    (unsigned long long)phys);
+			beamfs_scratch_put(sb, rscratch);
+			brelse(pbh);
+			return 0;
+		}
+	}
 
 	if (sbi->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
 		const __le32 *slot = (const __le32 *)slotbuf;
