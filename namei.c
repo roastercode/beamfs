@@ -1256,9 +1256,32 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	 */
 	ret = beamfs_write_inode_raw_flags(inode, sync);
 
-	mret = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+	{
+		int had = mmb_has_buffers(&BEAMFS_I(inode)->i_metadata_bhs);
+
+		mret = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+		trace_beamfs_mmb(inode->i_ino, "write_inode sync", had, mret);
+	}
 	if (!ret)
 		ret = mret;
+
+	/*
+	 * Tell the VFS this inode may have metadata in flight.
+	 *
+	 * __writeback_single_inode calls ->sync_inode_metadata only for an
+	 * inode carrying I_METADATA_WRITEBACK, and nothing sets that flag
+	 * but the filesystem itself. beamfs declared the operation and
+	 * never set the flag, so the operation was never called once --
+	 * zero times in a 414000-line trace of generic/464 -- and the only
+	 * thing writing the metadata buffers was this function.
+	 *
+	 * That is not enough. An inode written by WB_SYNC_NONE writeback
+	 * leaves its buffers queued, and the WB_SYNC_ALL pass that should
+	 * wait for them skipped the call that waits. ext2, ext4, fat,
+	 * minix and bfs all set it here, at the end of ->write_inode, for
+	 * the same reason.
+	 */
+	set_inode_metadata_writeback(inode);
 
 	return ret;
 }

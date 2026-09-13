@@ -148,6 +148,42 @@ TRACE_EVENT(beamfs_block_free,
 		  __entry->ino, __entry->blk, __entry->site)
 );
 
+/*
+ * An inode's metadata buffers, written or dropped.
+ *
+ * An indirect block is dirtied and put on the inode's metadata list,
+ * and something has to take it from there to the medium. Two things
+ * can: mmb_sync, from write_inode and from sync_inode_metadata, which
+ * writes them; and mmb_invalidate, from evict_inode, which does not --
+ * it empties the list and the buffers go with whatever they held.
+ *
+ * generic/464 leaves one indirect block per run filled with 0xcd, the
+ * kernel's poison for memory nobody wrote: block 41641 of inode 24 in
+ * one capture, 35433 of inode 65 in the next, each named by its inode
+ * on disk and each never written. Something is taking these buffers
+ * off the list without writing them, and @how says which.
+ *
+ * @n is how many buffers the list held when the call started, so a
+ * sync that finds nothing and an evict that drops four are told apart.
+ */
+TRACE_EVENT(beamfs_mmb,
+	TP_PROTO(unsigned long ino, const char *how, int n, int err),
+	TP_ARGS(ino, how, n, err),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__string(how, how)
+		__field(int, n)
+		__field(int, err)
+	),
+	TP_fast_assign(
+		__entry->ino = ino;
+		__assign_str(how);
+		__entry->n = n;
+		__entry->err = err;
+	),
+	TP_printk("ino=%lu %s buffers=%d err=%d",
+		  __entry->ino, __get_str(how), __entry->n, __entry->err)
+);
 TRACE_EVENT(beamfs_write_inode,
 	TP_PROTO(unsigned long ino, int sync, u64 indirect, int err),
 	TP_ARGS(ino, sync, indirect, err),
