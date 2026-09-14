@@ -847,6 +847,19 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 struct ref_ctx {
 	uint8_t *reference;
 	uint64_t data_start;
+	/*
+	 * Which inode each block belongs to, or zero.
+	 *
+	 * Eight bytes a block -- a gigabyte volume costs two megabytes --
+	 * and it turns "327 blocks nothing references" into "327 blocks,
+	 * and the ones around the first belong to inode 42". The
+	 * allocator hands out the lowest free bit, so a block dropped
+	 * mid-write sits among the file's other blocks.
+	 *
+	 * NULL when the allocation failed: the count still works.
+	 */
+	uint64_t *owner;
+	uint64_t  cur_ino;
 };
 
 static void mark_reference(void *ctx_v, uint64_t phys)
@@ -855,6 +868,8 @@ static void mark_reference(void *ctx_v, uint64_t phys)
 	uint64_t bit = phys - ctx->data_start;
 
 	ctx->reference[bit / 8] |= (uint8_t)(1u << (bit % 8));
+	if (ctx->owner)
+		ctx->owner[bit] = ctx->cur_ino;
 }
 
 
@@ -917,7 +932,8 @@ static int compare_one_bit(const struct fsck_opts *o, uint8_t *sub,
  * the count cannot tell them apart.
  */
 static void report_leaked_shape(int fd, const uint64_t *blks, unsigned int n,
-				unsigned int total)
+				unsigned int total, const uint64_t *owner,
+				uint64_t data_start, uint64_t nblocks)
 {
 	unsigned int runs = 1;
 	unsigned int longest = 1;
@@ -944,6 +960,47 @@ static void report_leaked_shape(int fd, const uint64_t *blks, unsigned int n,
 		(unsigned long long)blks[n - 1], runs, longest);
 
 	/*
+	 * Who owns the blocks around the first of them.
+	 *
+	 * The allocator hands out the lowest free bit, so consecutive
+	 * allocations for one file land together: a block dropped
+	 * mid-write sits among that file's other blocks, and naming the
+	 * owner of its neighbours turns a number into a place to look.
+	 */
+	if (owner) {
+		uint64_t before = 0, after = 0;
+		uint64_t b = blks[0];
+		uint64_t k;
+
+		for (k = b; k > data_start && k + 64 > b; k--)
+			if (owner[k - data_start]) {
+				before = owner[k - data_start];
+				break;
+			}
+		for (k = b; k < data_start + nblocks && k < b + 64; k++)
+			if (owner[k - data_start]) {
+				after = owner[k - data_start];
+				break;
+			}
+
+		if (before || after) {
+			fprintf(stderr,
+				"fsck.beamfs: pass 4:   the blocks around %llu belong to inode",
+				(unsigned long long)b);
+			if (before && (before == after || !after))
+				fprintf(stderr, " %llu\n",
+					(unsigned long long)before);
+			else if (before && after)
+				fprintf(stderr, " %llu below and %llu above\n",
+					(unsigned long long)before,
+					(unsigned long long)after);
+			else
+				fprintf(stderr, " %llu\n",
+					(unsigned long long)after);
+		}
+	}
+
+	/*
 	 * A single run says the bits were set together and never
 	 * cleared; scattered singles say each was set on its own. On a
 	 * sample this size the distinction is already visible.
@@ -959,8 +1016,10 @@ static void report_leaked_shape(int fd, const uint64_t *blks, unsigned int n,
 		fprintf(stderr,
 			"fsck.beamfs: pass 4:   %u more not listed\n", total - n);
 
-	/* What the first one holds, which says whether it was ever
-	 * written or only marked. */
+	/*
+	 * What the first one holds, which says whether it was ever
+	 * written or only marked.
+	 */
 	{
 		static uint8_t buf[BEAMFS_BLOCK_SIZE];
 		unsigned int nz = 0;
@@ -992,6 +1051,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	uint64_t  reference_bytes;
 	unsigned int referenced_but_free = 0;
 	unsigned int used_but_unreferenced = 0;
+	uint64_t    *owner_of = NULL;
 	/*
 	 * The first of the leaked blocks, kept so the tail can say what
 	 * shape they are in. Sixty-four is enough to see runs and far
@@ -1026,6 +1086,12 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	}
 	reference_bytes = (nblocks + 7) / 8;
 	reference = calloc(1, reference_bytes);
+	/*
+	 * Eight bytes a block: a gigabyte volume costs two megabytes.
+	 * NULL is not fatal -- the counts still work and only the
+	 * neighbour report goes quiet.
+	 */
+	owner_of = calloc((size_t)nblocks, sizeof(*owner_of));
 	if (!reference) {
 		fprintf(stderr, "fsck.beamfs: pass 4: OOM allocating %llu-byte reference bitmap\n",
 			(unsigned long long)reference_bytes);
@@ -1056,6 +1122,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 				(unsigned long long)ino);
 			fsck_reader_close(&rd);
 			free(reference);
+	free(owner_of);
 			return FSCK_ERROR;
 		}
 		if (st == FSCK_READ_UNCORRECTABLE) {
@@ -1120,7 +1187,8 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		}
 
 		{
-			struct ref_ctx rctx = { reference, data_start };
+			struct ref_ctx rctx = { reference, data_start,
+						owner_of, ino };
 			unsigned int dummy_bad = 0; /* pass 3 already reports these */
 
 			if (raw.i_indirect)
@@ -1152,6 +1220,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		if (!rs) {
 			fprintf(stderr, "fsck.beamfs: pass 4: rs_init failed\n");
 			free(reference);
+	free(owner_of);
 			return FSCK_ERROR;
 		}
 		bitmap_blocks_count = beamfs_bitmap_blocks_count_from_flags(sb.s_flags);
@@ -1168,6 +1237,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 					(unsigned long long)disk_blk, strerror(errno));
 				rs_free(rs);
 				free(reference);
+	free(owner_of);
 				return FSCK_ERROR;
 			}
 
@@ -1201,6 +1271,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 						(unsigned long long)disk_blk, strerror(errno));
 					rs_free(rs);
 					free(reference);
+	free(owner_of);
 					return FSCK_ERROR;
 				}
 			}
@@ -1219,7 +1290,9 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		return FSCK_OK;
 	}
 
-	report_leaked_shape(o->fd, leaked, n_leaked, used_but_unreferenced);
+	report_leaked_shape(o->fd, leaked, n_leaked, used_but_unreferenced,
+			    owner_of, data_start, nblocks);
+	free(owner_of);
 	fprintf(stderr, "fsck.beamfs: pass 4: %u referenced-but-free, %u used-but-unreferenced block(s)\n",
 		referenced_but_free, used_but_unreferenced);
 
