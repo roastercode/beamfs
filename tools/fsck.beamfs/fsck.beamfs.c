@@ -493,6 +493,108 @@ static void walk_indirect_tree(struct fsck_reader *rd, uint64_t block_no,
 	}
 }
 
+/*
+ * Which blocks hold the inodes that would not decode, and what is in
+ * them instead.
+ *
+ * Inodes scattered across the table and inodes sharing a block are
+ * different findings, and the count alone cannot tell them apart.
+ */
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+static void report_bad_inode_blocks(int fd,
+				    const struct beamfs_super_block *sb,
+				    const uint64_t *inos, unsigned int n)
+{
+	uint64_t table = sb->s_inode_table_blk;
+	uint64_t per = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
+	uint64_t seen[32];
+	unsigned int n_seen = 0;
+	unsigned int i, j;
+
+	if (n == 0 || per == 0)
+		return;
+
+	for (i = 0; i < n; i++) {
+		uint64_t blk = table + (inos[i] - 1) / per;
+
+		for (j = 0; j < n_seen; j++)
+			if (seen[j] == blk)
+				break;
+		if (j < n_seen)
+			continue;
+		if (n_seen == ARRAY_SIZE(seen))
+			break;
+		seen[n_seen++] = blk;
+	}
+
+	fprintf(stderr,
+		"fsck.beamfs: pass 3: they lie in %u block(s) of the inode table\n",
+		n_seen);
+
+	for (j = 0; j < n_seen; j++) {
+		static uint8_t buf[BEAMFS_BLOCK_SIZE];
+		unsigned int counts[256];
+		/*
+		 * best starts at 1, not 0: counts[0] is the zero padding
+		 * and dwarfs every real byte, so a search seeded with it
+		 * never moves and the dominant byte is never found.
+		 */
+		unsigned int best = 1, nz = 0, in_block = 0;
+		ssize_t got;
+		size_t k;
+		unsigned int v;
+
+		for (i = 0; i < n; i++)
+			if (table + (inos[i] - 1) / per == seen[j])
+				in_block++;
+
+		got = pread(fd, buf, sizeof(buf),
+			    (off_t)seen[j] * BEAMFS_BLOCK_SIZE);
+		if (got != (ssize_t)sizeof(buf)) {
+			fprintf(stderr,
+				"fsck.beamfs: pass 3:   block %llu holds %u of them, and will not read\n",
+				(unsigned long long)seen[j], in_block);
+			continue;
+		}
+
+		memset(counts, 0, sizeof(counts));
+		for (k = 0; k < sizeof(buf); k++) {
+			counts[buf[k]]++;
+			if (buf[k])
+				nz++;
+		}
+		for (v = 2; v < 256; v++)
+			if (counts[v] > counts[best])
+				best = v;
+
+		fprintf(stderr,
+			"fsck.beamfs: pass 3:   block %llu holds %u of them; %u of %u bytes set",
+			(unsigned long long)seen[j], in_block,
+			nz, (unsigned int)sizeof(buf));
+
+		/*
+		 * One byte filling a tenth of the bytes that are set is
+		 * not an inode table: inodes are mixed fields and repeat
+		 * nothing, while a file written with a constant byte
+		 * repeats that byte and little else.
+		 *
+		 * Measured against the bytes that are set, not against the
+		 * block: most of an inode table block is zero padding, and
+		 * a rule counting zeros calls every sparse table suspect.
+		 * generic/075 left 513 copies of 0x3b among 1119 set bytes
+		 * and a rule of an eighth of the block missed it by one.
+		 */
+		if (best && nz && counts[best] * 10 > nz)
+			fprintf(stderr,
+				", mostly 0x%02x (%u times) -- file data, not inodes",
+				best, counts[best]);
+		fputc('\n', stderr);
+	}
+}
+
 static int pass3_inode_walk(const struct fsck_opts *o)
 {
 	struct beamfs_super_block sb;
@@ -506,6 +608,13 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 	unsigned int uncorrectable_inodes = 0;
 	unsigned int bad_pointer_inodes = 0;
 	int       positions[RS_NROOTS / 2];
+	/*
+	 * The first thirty-two that would not decode, kept so the tail
+	 * can say which blocks they share. Thirty-two is more than
+	 * enough to see a pattern and small enough for the stack.
+	 */
+	uint64_t  bad_inos[32];
+	unsigned int n_bad_inos = 0;
 
 	if (lseek(o->fd, 0, SEEK_SET) < 0 ||
 	    read(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb)) {
@@ -571,6 +680,8 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 						    raw.i_reserved, positions);
 			if (rc == RS_UNCORRECTABLE) {
 				uncorrectable_inodes++;
+				if (n_bad_inos < ARRAY_SIZE(bad_inos))
+					bad_inos[n_bad_inos++] = ino;
 				fprintf(stderr, "fsck.beamfs: pass 3: inode %llu RS-uncorrectable\n",
 					(unsigned long long)ino);
 				continue;
@@ -578,6 +689,8 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 			crc = crc32_inode(&raw);
 			if (crc != raw.i_crc32) {
 				uncorrectable_inodes++;
+				if (n_bad_inos < ARRAY_SIZE(bad_inos))
+					bad_inos[n_bad_inos++] = ino;
 				fprintf(stderr, "fsck.beamfs: pass 3: inode %llu CRC32 still wrong after RS correction\n",
 					(unsigned long long)ino);
 				continue;
@@ -688,6 +801,7 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 	if (uncorrectable_inodes > 0 || bad_pointer_inodes > 0) {
 		fprintf(stderr, "fsck.beamfs: pass 3: %u inode(s) RS-uncorrectable, %u out-of-range pointer(s)\n",
 			uncorrectable_inodes, bad_pointer_inodes);
+		report_bad_inode_blocks(o->fd, &sb, bad_inos, n_bad_inos);
 		return FSCK_UNCORRECTED;
 	}
 
