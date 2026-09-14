@@ -112,13 +112,100 @@ static bool ind_parity_slot(struct super_block *sb, u64 phys,
  * beamfs_ind_parity_verify documents below at the cost of 500-block
  * leaks.
  */
+/*
+ * The region block this cpu decoded last.
+ *
+ * A verify decodes sixteen RS codewords over a 4096-byte region block
+ * to read the stride bytes belonging to one indirect block, and perf
+ * puts 12.9% of the machine in there -- nearly half of the time that
+ * is not idle, on a busy volume.
+ *
+ * A region block carries the parity of fourteen indirect blocks, and
+ * walking a file reads them in order: the same 4096 bytes are decoded
+ * fourteen times with nothing changed between. Remembering the last
+ * one skips the other thirteen.
+ *
+ * Keyed on the buffer's own sequence: b_blocknr says which block, and
+ * a write to it goes through lock_buffer, so a decode taken while the
+ * buffer was locked cannot be stale. What can go stale is a decode
+ * from before an update, which is why the generation below exists.
+ */
+struct ind_region_cache {
+	u64	blocknr;
+	u64	gen;
+	int	ret;
+	u8	*data;
+};
+
+static DEFINE_PER_CPU(struct ind_region_cache, ind_rcache);
+
+/*
+ * Bumped by every parity update.
+ *
+ * One counter for the filesystem rather than one per region: an update
+ * anywhere invalidates every cached decode, which costs a handful of
+ * redundant decodes and cannot be wrong. A per-region counter would
+ * save those and need a table as large as the region itself.
+ */
+void beamfs_ind_parity_touched(struct beamfs_sb_info *sbi)
+{
+	atomic64_inc(&sbi->s_ind_parity_gen);
+}
+
+/*
+ * Give back the per-cpu decode buffers.
+ *
+ * Called from module exit. One page per cpu is not a leak anybody
+ * notices while the module is loaded and is one the kernel complains
+ * about when it is not.
+ */
+void beamfs_ind_parity_cache_free(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct ind_region_cache *c = per_cpu_ptr(&ind_rcache, cpu);
+
+		kfree(c->data);
+		c->data = NULL;
+	}
+}
+
 static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
+
 			   u8 *scratch)
 {
 	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
 	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int i;
 	int ret = 0;
+
+	/*
+	 * The same region, decoded a moment ago on this cpu?
+	 *
+	 * Fourteen indirect blocks share a region block and a walk down
+	 * a file reads them in order, so the decode below runs fourteen
+	 * times over the same 4096 bytes with nothing changed between.
+	 *
+	 * The generation rules out a decode from before an update. The
+	 * cache is per-cpu and taken without a lock: preemption between
+	 * the read and the copy can only give a miss, never a wrong hit,
+	 * because the key is checked again after the copy.
+	 */
+	{
+		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+		u64 gen = atomic64_read(&sbi->s_ind_parity_gen);
+		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
+		bool hit = c->data && c->blocknr == pbh->b_blocknr &&
+			   c->gen == gen;
+		int cached = c->ret;
+
+		if (hit)
+			memcpy(scratch, c->data, BEAMFS_BLOCK_SIZE);
+		put_cpu_ptr(&ind_rcache);
+		if (hit)
+			return cached;
+	}
 
 	memcpy(scratch, pbh->b_data, BEAMFS_BLOCK_SIZE);
 
@@ -144,6 +231,33 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 				beamfs_rs_event_subblock_bits(i));
 		}
 	}
+
+	/*
+	 * Kept for the next thirteen indirect blocks in this region.
+	 *
+	 * The buffer is allocated on first use and never freed: one page
+	 * per cpu, for the life of the module, against a decode of
+	 * sixteen codewords on every read of an indirect block.
+	 *
+	 * GFP_ATOMIC and a failure that costs nothing: no cache is a
+	 * slower filesystem, not a wrong one.
+	 */
+	{
+		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+		u64 gen = atomic64_read(&sbi->s_ind_parity_gen);
+		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
+
+		if (!c->data)
+			c->data = kmalloc(BEAMFS_BLOCK_SIZE, GFP_ATOMIC);
+		if (c->data) {
+			memcpy(c->data, scratch, BEAMFS_BLOCK_SIZE);
+			c->blocknr = pbh->b_blocknr;
+			c->gen = gen;
+			c->ret = ret;
+		}
+		put_cpu_ptr(&ind_rcache);
+	}
+
 	return ret;
 }
 
@@ -459,6 +573,12 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * -- a plain dirty is all there is, and sync_blockdev is what
 	 * eventually takes it.
 	 */
+	/*
+	 * Every cached decode of this region now describes what the block
+	 * held before this update.
+	 */
+	beamfs_ind_parity_touched(sbi);
+
 	if (inode)
 		mmb_mark_buffer_dirty(pbh, &BEAMFS_I(inode)->i_metadata_bhs);
 	else

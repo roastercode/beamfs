@@ -82,6 +82,16 @@ struct beamfs_sb_info {
 	 * already holds or takes.
 	 */
 	u8               *s_sb_rs_staging;
+	/*
+	 * Bumped by every indirect-parity update.
+	 *
+	 * The per-cpu decode cache in indparity.c keys on it: a cached
+	 * decode from before an update describes a region that has
+	 * changed since, and one counter for the filesystem is enough --
+	 * a redundant decode costs what it was going to cost anyway,
+	 * while a stale hit would report a block as sound that is not.
+	 */
+	atomic64_t        s_ind_parity_gen;
 	unsigned long     s_nblocks;       /* Number of data blocks */
 	unsigned long     s_data_start;    /* First data block number */
 	/* Inode allocator */
@@ -533,6 +543,7 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 			      struct inode *inode);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+void beamfs_ind_parity_cache_free(void);
 
 #ifdef CONFIG_BEAMFS_DEBUG_TREE
 void beamfs_tc_init(struct beamfs_sb_info *sbi);

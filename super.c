@@ -1663,6 +1663,9 @@ static int __init beamfs_init(void)
 
 static void __exit beamfs_exit(void)
 {
+	/* One page per cpu, held for the life of the module. */
+	beamfs_ind_parity_cache_free();
+
 	/* Before the codec tables go, since a reader could be in a run. */
 	beamfs_debugfs_exit();
 	unregister_filesystem(&beamfs_fs_type);
