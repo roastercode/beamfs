@@ -727,6 +727,22 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_buffer_dirty(dbh);
 		brelse(dbh);
 
+		/*
+		 * The direct array is a slot store like any other.
+		 *
+		 * The three indirect levels emit this and the direct array
+		 * did not, so a probe pairing allocations against stores
+		 * counted every direct block as an allocation that went
+		 * nowhere: 176180 of them in one generic/269, against 327
+		 * blocks fsck actually finds leaked.
+		 *
+		 * parent 0 and level 0: there is no block above a direct
+		 * pointer, and nothing else uses those values.
+		 */
+		trace_beamfs_slot_store(inode->i_ino, 0, iblock_logical,
+					le64_to_cpu(fi->i_direct[iblock_logical]),
+					new_block, 0);
+
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
 
