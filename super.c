@@ -492,15 +492,32 @@ static void beamfs_evict_inode(struct inode *inode)
 	 * write_inode already syncs the same list; this is the path that
 	 * did not.
 	 */
-	if (inode->i_nlink) {
-		int err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+	{
+		int had = mmb_has_buffers(&BEAMFS_I(inode)->i_metadata_bhs);
+		int err = 0;
 
-		if (err)
-			pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
-					   (unsigned long long)inode->i_ino, err);
+		/*
+		 * Said whichever way it goes.
+		 *
+		 * write_inode traces its own sync and evict traced
+		 * nothing, so a run leaving 22 indirect blocks that
+		 * nothing ever wrote gave no way to tell an inode whose
+		 * list was empty from one whose list was thrown away. @n
+		 * is what the list held when the call started.
+		 */
+		if (inode->i_nlink) {
+			err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+			if (err)
+				pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
+						   (unsigned long long)inode->i_ino,
+						   err);
+			trace_beamfs_mmb(inode->i_ino, "evict sync", had, err);
+		} else {
+			trace_beamfs_mmb(inode->i_ino, "evict drop", had, 0);
+		}
+
+		mmb_invalidate(&BEAMFS_I(inode)->i_metadata_bhs);
 	}
-
-	mmb_invalidate(&BEAMFS_I(inode)->i_metadata_bhs);
 	clear_inode(inode);
 	/*
 	 * Ordering constraint: beamfs_free_inode_num() must run AFTER
