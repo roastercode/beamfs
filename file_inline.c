@@ -547,6 +547,43 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 /*   <0 on error (-ENOSPC if alloc fails, -EIO on indirect read fail,        */
 /*                -EOPNOTSUPP beyond v1 capacity)                            */
 /* ------------------------------------------------------------------------- */
+/*
+ * Is this a block a file may point at?
+ *
+ * Everything below s_data_start is metadata: the superblock, the inode
+ * table, the bitmap, the indirect parity region. A file's data never
+ * lives there, and a pointer naming it is wrong whatever produced it.
+ *
+ * generic/075 found two blocks of the inode table holding fsx's fill
+ * bytes, seven inodes in them beyond correction and 40437 pointers
+ * naming blocks past the end of the device -- and the first thing to
+ * notice was fsck, three minutes and one unmount later, by which time
+ * the path that did it was gone.
+ *
+ * Refused here instead, with the block and the inode named, while the
+ * stack that produced it is still on the stack.
+ */
+static bool beamfs_phys_is_sane(struct super_block *sb, struct inode *inode,
+				u64 phys, const char *where)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	u64 last = (u64)sbi->s_data_start + sbi->s_nblocks;
+
+	if (phys == 0)
+		return true;			/* a hole, not an address */
+
+	if (phys < sbi->s_data_start || phys >= last) {
+		pr_err_ratelimited("beamfs: %s: inode %lu names block %llu, outside %llu..%llu\n",
+				   where, inode ? inode->i_ino : 0UL,
+				   (unsigned long long)phys,
+				   (unsigned long long)sbi->s_data_start,
+				   (unsigned long long)last - 1);
+		beamfs_fail(sb, where, -EUCLEAN);
+		return false;
+	}
+	return true;
+}
+
 static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					      u64 iblock_logical,
 					      u64 *phys_out)
@@ -2363,6 +2400,22 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	} else {
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	}
+	/*
+	 * The last place a wrong address can still be stopped.
+	 *
+	 * What goes into the iomap below becomes a bio, and a bio does
+	 * not ask where it is going: an address under s_data_start lands
+	 * on the inode table. generic/075 put fsx's fill bytes in blocks
+	 * 7 and 246 that way and left no trace in any buffer head,
+	 * because iomap does not use them.
+	 *
+	 * Checked here rather than at each of the seventeen places the
+	 * two lookups return a block: one gate the address must pass, and
+	 * one place to read when it does not.
+	 */
+	if (ret == 0 && !beamfs_phys_is_sane(sb, inode, phys, "iomap_begin"))
+		ret = -EUCLEAN;
+
 	if (ret < 0)
 		return ret;
 
@@ -3716,6 +3769,13 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		mutex_lock(&fi->i_alloc_mutex);
 		(void)beamfs_inline_lookup_phys(inode, b, &before);
 		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+		/*
+		 * The same gate: this one reads the block and writes it
+		 * back, so a wrong address here overwrites metadata with
+		 * a zeroed tail.
+		 */
+		if (ret == 0 && !beamfs_phys_is_sane(sb, inode, phys, "zero_tail"))
+			ret = -EUCLEAN;
 		mutex_unlock(&fi->i_alloc_mutex);
 		if (ret < 0)
 			return ret;
