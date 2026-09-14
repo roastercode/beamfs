@@ -874,7 +874,9 @@ static int compare_one_bit(const struct fsck_opts *o, uint8_t *sub,
 			   unsigned long b, const uint8_t *reference,
 			   uint64_t bit_global, uint64_t data_start,
 			   unsigned int *referenced_but_free,
-			   unsigned int *used_but_unreferenced)
+			   unsigned int *used_but_unreferenced,
+			   uint64_t *leaked, unsigned int *n_leaked,
+			   unsigned int leaked_cap)
 {
 	int disk_free = (sub[b / 8] & (1u << (b % 8))) != 0;
 	int ref_used  = (reference[bit_global / 8] &
@@ -891,6 +893,9 @@ static int compare_one_bit(const struct fsck_opts *o, uint8_t *sub,
 		}
 	} else if (!ref_used && !disk_free) {
 		(*used_but_unreferenced)++;
+		/* The first few, for the shape report at the end. */
+		if (*n_leaked < leaked_cap)
+			leaked[(*n_leaked)++] = data_start + bit_global;
 		if (o->verbose)
 			fprintf(stderr, "fsck.beamfs: pass 4: block %llu marked used but unreferenced\n",
 				(unsigned long long)(data_start + bit_global));
@@ -900,6 +905,80 @@ static int compare_one_bit(const struct fsck_opts *o, uint8_t *sub,
 		}
 	}
 	return 0;
+}
+
+/*
+ * What shape are the leaked blocks in?
+ *
+ * "9743 used-but-unreferenced" says how many and nothing else, and the
+ * shape is the finding: one contiguous run is a single allocation whose
+ * owner was lost, and nine thousand scattered singles is an allocator
+ * handing out bits it never records. The two want different fixes and
+ * the count cannot tell them apart.
+ */
+static void report_leaked_shape(int fd, const uint64_t *blks, unsigned int n,
+				unsigned int total)
+{
+	unsigned int runs = 1;
+	unsigned int longest = 1;
+	unsigned int cur = 1;
+	unsigned int i;
+
+	if (n < 2)
+		return;
+
+	for (i = 1; i < n; i++) {
+		if (blks[i] == blks[i - 1] + 1) {
+			cur++;
+			if (cur > longest)
+				longest = cur;
+		} else {
+			runs++;
+			cur = 1;
+		}
+	}
+
+	fprintf(stderr,
+		"fsck.beamfs: pass 4: the first %u of them span %llu..%llu in %u run(s), longest %u\n",
+		n, (unsigned long long)blks[0],
+		(unsigned long long)blks[n - 1], runs, longest);
+
+	/*
+	 * A single run says the bits were set together and never
+	 * cleared; scattered singles say each was set on its own. On a
+	 * sample this size the distinction is already visible.
+	 */
+	if (runs == 1)
+		fprintf(stderr,
+			"fsck.beamfs: pass 4:   contiguous -- one allocation whose owner is gone\n");
+	else if (longest == 1)
+		fprintf(stderr,
+			"fsck.beamfs: pass 4:   no two adjacent -- set one at a time\n");
+
+	if (total > n)
+		fprintf(stderr,
+			"fsck.beamfs: pass 4:   %u more not listed\n", total - n);
+
+	/* What the first one holds, which says whether it was ever
+	 * written or only marked. */
+	{
+		static uint8_t buf[BEAMFS_BLOCK_SIZE];
+		unsigned int nz = 0;
+		size_t k;
+
+		if (pread(fd, buf, sizeof(buf),
+			  (off_t)blks[0] * BEAMFS_BLOCK_SIZE)
+		    == (ssize_t)sizeof(buf)) {
+			for (k = 0; k < sizeof(buf); k++)
+				if (buf[k])
+					nz++;
+			fprintf(stderr,
+				"fsck.beamfs: pass 4:   block %llu has %u of %u bytes set%s\n",
+				(unsigned long long)blks[0], nz,
+				(unsigned int)sizeof(buf),
+				nz ? "" : " -- allocated and never written");
+		}
+	}
 }
 
 static int pass4_bitmap_rebuild(const struct fsck_opts *o)
@@ -913,6 +992,13 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	uint64_t  reference_bytes;
 	unsigned int referenced_but_free = 0;
 	unsigned int used_but_unreferenced = 0;
+	/*
+	 * The first of the leaked blocks, kept so the tail can say what
+	 * shape they are in. Sixty-four is enough to see runs and far
+	 * short of the nine thousand generic/075 produced.
+	 */
+	uint64_t     leaked[64];
+	unsigned int n_leaked = 0;
 	unsigned int excluded_inodes = 0;
 	struct fsck_reader rd;
 	enum fsck_read_status st;
@@ -1103,7 +1189,9 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 							reference, bit_global,
 							data_start,
 							&referenced_but_free,
-							&used_but_unreferenced);
+							&used_but_unreferenced,
+							leaked, &n_leaked,
+							ARRAY_SIZE(leaked));
 			}
 
 			if (block_dirty) {
@@ -1131,6 +1219,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		return FSCK_OK;
 	}
 
+	report_leaked_shape(o->fd, leaked, n_leaked, used_but_unreferenced);
 	fprintf(stderr, "fsck.beamfs: pass 4: %u referenced-but-free, %u used-but-unreferenced block(s)\n",
 		referenced_but_free, used_but_unreferenced);
 

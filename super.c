@@ -472,6 +472,34 @@ static void beamfs_evict_inode(struct inode *inode)
 		inode->i_mode = 0;
 		beamfs_write_inode_raw(inode);
 	}
+	/*
+	 * Written before the list is thrown away.
+	 *
+	 * mmb_invalidate empties the list without writing anything --
+	 * fs/buffer.c takes each buffer off the queue and the contents go
+	 * with whatever they held. For an inode being deleted that is
+	 * right: the blocks are freed above and what they hold no longer
+	 * matters. For an inode that still has links it is not, and
+	 * nothing here told the two apart.
+	 *
+	 * generic/269 leaves 2230 indirect blocks whose pointer is
+	 * installed and whose contents never reached the medium -- fsck
+	 * reads each as never described, the subtree under it
+	 * unreachable. A probe counted 23510 evictions and 23510
+	 * invalidations, 16381 of them from umount: every dirty metadata
+	 * buffer an inode still owned at unmount was dropped.
+	 *
+	 * write_inode already syncs the same list; this is the path that
+	 * did not.
+	 */
+	if (inode->i_nlink) {
+		int err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+
+		if (err)
+			pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
+					   (unsigned long long)inode->i_ino, err);
+	}
+
 	mmb_invalidate(&BEAMFS_I(inode)->i_metadata_bhs);
 	clear_inode(inode);
 	/*
