@@ -574,7 +574,8 @@ static bool beamfs_phys_is_sane(struct super_block *sb, struct inode *inode,
 
 	if (phys < sbi->s_data_start || phys >= last) {
 		pr_err_ratelimited("beamfs: %s: inode %lu names block %llu, outside %llu..%llu\n",
-				   where, inode ? inode->i_ino : 0UL,
+				   where,
+				   inode ? inode->i_ino : 0UL,
 				   (unsigned long long)phys,
 				   (unsigned long long)sbi->s_data_start,
 				   (unsigned long long)last - 1);
@@ -2413,7 +2414,8 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * two lookups return a block: one gate the address must pass, and
 	 * one place to read when it does not.
 	 */
-	if (ret == 0 && !beamfs_phys_is_sane(sb, inode, phys, "iomap_begin"))
+	if (ret == 0 &&
+	    !beamfs_phys_is_sane(inode->i_sb, inode, phys, "iomap_begin"))
 		ret = -EUCLEAN;
 
 	if (ret < 0)
@@ -3774,7 +3776,8 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		 * back, so a wrong address here overwrites metadata with
 		 * a zeroed tail.
 		 */
-		if (ret == 0 && !beamfs_phys_is_sane(sb, inode, phys, "zero_tail"))
+		if (ret == 0 &&
+		    !beamfs_phys_is_sane(inode->i_sb, inode, phys, "zero_tail"))
 			ret = -EUCLEAN;
 		mutex_unlock(&fi->i_alloc_mutex);
 		if (ret < 0)

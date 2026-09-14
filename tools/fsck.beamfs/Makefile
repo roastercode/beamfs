@@ -9,7 +9,23 @@
 #
 
 CC      ?= gcc
-CFLAGS  ?= -O2 -Wall -Wextra -Werror -std=gnu11 -D_GNU_SOURCE
+# Every warning on, and treated as an error.
+#
+# -Wformat=2 first: a %lu given an unsigned long long compiles clean
+# where the types happen to match and breaks where they do not, and two
+# of those reached a commit before this line existed.
+#
+# -Wconversion without -Wsign-conversion: the sign variant fires
+# nineteen times in rs_decode.c, on Galois-field arithmetic whose
+# values are bounded by construction, and a flag that shouts on correct
+# code is one that gets turned off. The truncation half is what catches
+# an offset losing its top bits, which is the mistake that matters.
+CFLAGS  ?= -O2 -std=gnu11 -D_GNU_SOURCE \
+	   -Wall -Wextra -Wformat=2 -Wconversion -Wno-sign-conversion \
+	   -Wcast-qual -Wpointer-arith -Wmissing-prototypes -Wundef \
+	   -Wstrict-prototypes -Wshadow \
+	   -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+	   -Werror
 LDFLAGS ?=
 
 PREFIX     ?= /usr

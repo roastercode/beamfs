@@ -33,6 +33,26 @@ ifeq ($(BEAMFS_DEBUG_TREE),1)
 ccflags-y += -DCONFIG_BEAMFS_DEBUG_TREE
 endif
 
+# Every warning on, and treated as an error.
+#
+# -Werror=format above all: a %lu given an unsigned long long compiles
+# clean against the host kernel, where the types happen to match, and
+# stops bitbake dead against the target. Two of those reached a commit
+# before this was here.
+#
+# -Wshadow and -Wmissing-prototypes catch what review does not: a local
+# hiding an outer name reads correctly and does the wrong thing, and a
+# function without a prototype is one the header forgot.
+ccflags-y += -Wall -Wextra -Wformat=2 -Werror=format
+# -Wshadow is off: the kernel's own headers trip it -- cc_mask in
+# asm/text-patching.h shadows a global -- and a flag that fires on
+# somebody else's code is a flag that gets turned off in a hurry.
+ccflags-y += -Wmissing-prototypes -Wmissing-declarations
+ccflags-y += -Wundef -Wstrict-prototypes
+# The kernel passes handlers more arguments than most of them use.
+ccflags-y += -Wno-unused-parameter
+ccflags-y += -Werror
+
 ccflags-y += -I$(src)
 
 ccflags-y += -fmacro-prefix-map=$(src)/=
