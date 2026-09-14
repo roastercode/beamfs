@@ -69,6 +69,21 @@ offset losing its top bits.
 redundancy: `inodes_per_block` declared twice in `mkfs.beamfs.c`,
 computed the same way both times.
 
+## tools/check-build.sh
+
+`make` here compiles two files out of sixteen: it builds against the
+workstation's kernel, super.c fails on a signature that changed in 7.3,
+and everything after it is never reached. Twice in one morning that
+silence read as a pass.
+
+`tools/check-build.sh` copies the sources into the tree Yocto unpacked
+and asks kbuild to build the one directory, with the config, compiler
+and headers the real build uses. Sixteen files, thirty seconds, against
+bitbake's twenty minutes.
+
+It runs before a commit is proposed. It does not replace bitbake: link
+time, the recipe's Kconfig lines and the image itself only happen there.
+
 ## What a local build does not prove
 
 `make` on the workstation compiles the module against the workstation's

@@ -573,9 +573,16 @@ static bool beamfs_phys_is_sane(struct super_block *sb, struct inode *inode,
 		return true;			/* a hole, not an address */
 
 	if (phys < sbi->s_data_start || phys >= last) {
+		/*
+		 * The inode number in its own variable: a ternary between
+		 * i_ino and a literal is promoted, and %lu given the
+		 * result compiles clean where the promotion happens to
+		 * land on unsigned long and breaks where it does not.
+		 */
+		unsigned long ino = inode ? inode->i_ino : 0;
+
 		pr_err_ratelimited("beamfs: %s: inode %lu names block %llu, outside %llu..%llu\n",
-				   where,
-				   inode ? inode->i_ino : 0UL,
+				   where, ino,
 				   (unsigned long long)phys,
 				   (unsigned long long)sbi->s_data_start,
 				   (unsigned long long)last - 1);
