@@ -624,10 +624,45 @@ static inline void beamfs_order_before_pointer(struct buffer_head *bh)
 }
 #endif
 
+/*
+ * Did this call allocate, or did it find what was already there?
+ *
+ * iomap needs the answer. A write shorter than the mapping it was
+ * given leaves the rest of that mapping allocated, and only the blocks
+ * this call created may be given back -- a block that was already
+ * there belongs to the file whether or not this write reached it.
+ *
+ * generic/013 leaves 28 consecutive blocks allocated and never
+ * written, the length of one write, and nothing can tell them from
+ * blocks the file already owned.
+ *
+ * @allocated may be NULL for callers that do not care.
+ */
+static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
+						  u64 iblock_logical,
+						  u64 *phys_out,
+						  bool *allocated);
+
 static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					      u64 iblock_logical,
 					      u64 *phys_out)
 {
+	return beamfs_inline_lookup_or_alloc_phys_new(inode, iblock_logical,
+						      phys_out, NULL);
+}
+
+static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
+						  u64 iblock_logical,
+						  u64 *phys_out,
+						  bool *allocated)
+{
+	/*
+	 * False until proven otherwise: a caller reading this after an
+	 * error path must not find a stale true.
+	 */
+	if (allocated)
+		*allocated = false;
+
 	/*
 	 * Nothing free: say so once and return, rather than walking the
 	 * whole indirection tree to discover it at every level.
@@ -780,6 +815,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
 
+		if (allocated)
+			*allocated = true;
 		*phys_out = new_block;
 		return 0;
 	}
@@ -1016,6 +1053,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_inode_dirty(inode);
 		brelse(ibh);
 
+		if (allocated)
+			*allocated = true;
 		*phys_out = new_block;
 		return 0;
 	}
@@ -1355,6 +1394,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_inode_dirty(inode);
 		brelse(l1bh);
 
+		if (allocated)
+			*allocated = true;
 		*phys_out = new_block;
 		return 0;
 	}
@@ -1788,6 +1829,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		mark_inode_dirty(inode);
 		brelse(l2bh);
 
+		if (allocated)
+			*allocated = true;
 		*phys_out = new_block;
 		return 0;
 	}
@@ -2470,9 +2513,23 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		 * 256 threads on one sparse file. A narrow window, hit
 		 * often enough by 256 threads.
 		 */
+		bool fresh = false;
+
 		mutex_lock(&fi->i_alloc_mutex);
-		ret = beamfs_inline_lookup_or_alloc_phys(inode, b, &phys);
+		ret = beamfs_inline_lookup_or_alloc_phys_new(inode, b, &phys,
+							     &fresh);
 		mutex_unlock(&fi->i_alloc_mutex);
+
+		/*
+		 * IOMAP_F_NEW: this mapping did not exist before the call.
+		 *
+		 * iomap_end may only give back what this call created. A
+		 * block the file already owned belongs to it whether or
+		 * not the write that asked for the mapping reached it, and
+		 * freeing that would lose data nobody asked to lose.
+		 */
+		if (ret == 0 && fresh)
+			iomap->flags |= IOMAP_F_NEW;
 	} else {
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	}
