@@ -660,6 +660,35 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
  * character for character, which is how a fifth comes to differ by
  * accident.
  */
+/*
+ * Lay a block's payload down in whichever layout the volume uses.
+ *
+ * Alternating, the payload is sixteen runs of 239 bytes 255 apart, and
+ * the copy has to break it up. A capsule holds it contiguously, and
+ * breaking it up writes every run 16 bytes further along than it
+ * belongs -- measured as the last 222 bytes of every block coming back
+ * wrong, which is where the fifteenth run ends up.
+ *
+ * Paired with beamfs_seal_block, which encodes what this writes.
+ */
+static void beamfs_lay_payload(struct super_block *sb, u8 *block,
+			       const u8 *payload)
+{
+	unsigned int i;
+
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE) {
+		memcpy(block + BEAMFS_CAPSULE_DATA_OFF, payload,
+		       BEAMFS_CAPSULE_DATA_BYTES);
+		return;
+	}
+
+	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
+		memcpy(block + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
+		       payload + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+		       BEAMFS_SUBBLOCK_DATA);
+}
+
 static int beamfs_seal_block(struct super_block *sb, u8 *block)
 {
 	if (BEAMFS_SB(sb)->s_feat_incompat &
@@ -2243,22 +2272,37 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		u32 dst_off   = 0;
 		u32 sb_idx;
 
-		for (sb_idx = sb_first; sb_idx <= sb_last; sb_idx++) {
-			u32 sb_user_start = sb_idx * BEAMFS_SUBBLOCK_DATA;
-			u32 sb_user_end   = sb_user_start + BEAMFS_SUBBLOCK_DATA;
-			u32 from_in_sb    = (slice_offset > sb_user_start)
-				? (slice_offset - sb_user_start) : 0;
-			u32 to_in_sb      = (slice_end < sb_user_end)
-				? (slice_end - sb_user_start)
-				: BEAMFS_SUBBLOCK_DATA;
-			u32 copy_len      = to_in_sb - from_in_sb;
-
+		if (BEAMFS_SB(sb)->s_feat_incompat &
+		    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE) {
+			/*
+			 * A capsule holds its payload contiguously, so
+			 * the slice is one copy. Walking it in sixteen
+			 * runs 255 apart reads each one 16 bytes further
+			 * along than it lies.
+			 */
 			memcpy(dst_buf + dst_off,
-			       tmp
-				+ (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL
-				+ from_in_sb,
-			       copy_len);
-			dst_off += copy_len;
+			       tmp + BEAMFS_CAPSULE_DATA_OFF + slice_offset,
+			       slice_length);
+			dst_off += slice_length;
+		} else {
+			for (sb_idx = sb_first; sb_idx <= sb_last; sb_idx++) {
+				u32 sb_user_start = sb_idx * BEAMFS_SUBBLOCK_DATA;
+				u32 sb_user_end   = sb_user_start +
+						    BEAMFS_SUBBLOCK_DATA;
+				u32 from_in_sb    = (slice_offset > sb_user_start)
+					? (slice_offset - sb_user_start) : 0;
+				u32 to_in_sb      = (slice_end < sb_user_end)
+					? (slice_end - sb_user_start)
+					: BEAMFS_SUBBLOCK_DATA;
+				u32 copy_len      = to_in_sb - from_in_sb;
+
+				memcpy(dst_buf + dst_off,
+				       tmp
+					+ (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL
+					+ from_in_sb,
+				       copy_len);
+				dst_off += copy_len;
+			}
 		}
 	}
 
@@ -3075,7 +3119,6 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
 		struct buffer_head *bh;
-		unsigned int sb_idx;
 		u64    phys = 0;
 		u8    *src;
 
@@ -3233,11 +3276,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			kunmap_local(src);
 		}
 
-		for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++)
-			memcpy((u8 *)bh->b_data +
-			       (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
-			       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
-			       BEAMFS_SUBBLOCK_DATA);
+		beamfs_lay_payload(sb, (u8 *)bh->b_data, scratch);
 
 		ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
 		if (ret < 0) {
@@ -3911,7 +3950,6 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	struct buffer_head       *bh;
 	u8                       *scratch;
 	u64                       phys = 0;
-	unsigned int              sb_idx;
 	int                       ret;
 
 	if (zero_offset >= BEAMFS_DATA_INLINE_BYTES)
@@ -3979,11 +4017,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	memset(scratch + zero_offset, 0,
 	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
 
-	for (sb_idx = 0; sb_idx < BEAMFS_DATA_INLINE_SUBBLOCKS; sb_idx++) {
-		memcpy((u8 *)bh->b_data + (size_t)sb_idx * BEAMFS_SUBBLOCK_TOTAL,
-		       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
-		       BEAMFS_SUBBLOCK_DATA);
-	}
+	beamfs_lay_payload(sb, (u8 *)bh->b_data, scratch);
 
 	ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
 	if (ret < 0) {
