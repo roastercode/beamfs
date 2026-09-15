@@ -171,6 +171,19 @@ enum fsck_read_status fsck_read_bitmap(struct fsck_reader *r, uint32_t index,
  * @out receives BEAMFS_DATA_INLINE_BYTES with the parity applied and
  * removed.
  */
+/*
+ * A directory block is not a capsule.
+ *
+ * dirent.c writes one in the alternating layout whatever the volume's
+ * data blocks do, so reading it as a capsule gathers the wrong symbols
+ * and reports it beyond correction -- which is what generic/002 showed
+ * on the first interleaved sweep.
+ *
+ * Same contract as fsck_read_data otherwise.
+ */
+enum fsck_read_status fsck_read_dirblock(struct fsck_reader *r, uint64_t blk,
+					 uint8_t *out);
+
 enum fsck_read_status fsck_read_data(struct fsck_reader *r, uint64_t blk,
 				     uint8_t *out);
 

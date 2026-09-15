@@ -415,6 +415,24 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 	return st;
 }
 
+/*
+ * A directory block, always in the alternating layout.
+ *
+ * The same code as fsck_read_data with the capsule branch skipped: a
+ * directory is written by dirent.c, which knows nothing of capsules.
+ */
+enum fsck_read_status fsck_read_dirblock(struct fsck_reader *r, uint64_t blk,
+					 uint8_t *out)
+{
+	int was = r->interleaved;
+	enum fsck_read_status st;
+
+	r->interleaved = 0;
+	st = fsck_read_data(r, blk, out);
+	r->interleaved = was;
+	return st;
+}
+
 enum fsck_read_status fsck_read_data(struct fsck_reader *r, uint64_t blk,
 				     uint8_t *out)
 {

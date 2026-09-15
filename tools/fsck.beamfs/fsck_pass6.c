@@ -252,7 +252,7 @@ static void walk_dir_block(struct p6 *p, uint64_t blk, uint64_t dir_ino,
 	uint8_t flat[BEAMFS_DATA_INLINE_BYTES];
 	uint32_t off = 0;
 
-	if (fsck_read_data(p->rd, blk, flat) == FSCK_READ_UNCORRECTABLE) {
+	if (fsck_read_dirblock(p->rd, blk, flat) == FSCK_READ_UNCORRECTABLE) {
 		p->r.unreadable_dirblocks++;
 		return;
 	}
