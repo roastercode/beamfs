@@ -62,6 +62,18 @@ install: $(BIN)
 tests/test_rs_vectors: tests/test_rs_vectors.o rs_decode.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
+# What a parity region survives when one slot is edited.
+#
+# A function doing read-modify-write on a region went onto the free
+# path untested and produced 56 "beyond correction" messages in one
+# sweep. These are the questions that should have come first.
+tests/region_test: tests/region_test.o rs_decode.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+tests/region_test.o: tests/region_test.c rs_decode.h beamfs_format.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+
+
 tests/test_rs_vectors.o: tests/test_rs_vectors.c rs_decode.h
 	$(CC) $(CFLAGS) -I. -c -o $@ $<
 
@@ -71,3 +83,4 @@ test: tests/test_rs_vectors
 	if [ $$rc -eq 0 ]; then echo "OK"; \
 	elif [ $$rc -eq 77 ]; then echo "SKIPPED (decoder skeleton)"; \
 	else echo "FAIL rc=$$rc"; exit $$rc; fi
+	./tests/region_test

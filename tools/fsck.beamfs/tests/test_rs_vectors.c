@@ -51,8 +51,8 @@ static void encode_rs_userspace(const uint8_t *data, size_t data_len,
 		index_of[0] = 255;
 		alpha_to[255] = 0;
 		for (j = 0; j < 255; j++) {
-			alpha_to[j] = sr;
-			index_of[sr] = j;
+			alpha_to[j] = (uint8_t)sr;
+			index_of[sr] = (uint8_t)j;
 			sr <<= 1;
 			if (sr & 0x100)
 				sr ^= 0x187;
