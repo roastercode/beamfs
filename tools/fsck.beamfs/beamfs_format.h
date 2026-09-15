@@ -169,6 +169,65 @@ typedef uint32_t u32;
 #define BEAMFS_DATA_INLINE_PAD        (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL)         /* 16  */
 
 /*
+ * The grouped layout, under BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE.
+ *
+ * Alternating, a codeword owns 239 consecutive bytes and a nine-byte
+ * burst lands entirely in it: eight is all one corrects, so the
+ * subblock is lost. Grouped, the 3824 data bytes are contiguous and
+ * the symbols of one codeword are spread across them -- symbol i of
+ * codeword j at byte i*16 + j -- so the same burst puts one symbol in
+ * each of the sixteen and 139 consecutive bytes are needed to lose
+ * one.
+ *
+ *   [3824 data, interleaved][256 parity][8 csum][8 selfid]
+ *
+ * Same 4096 bytes, same 272 of overhead, same tail pad. Only the
+ * positions change, and with them the burst a block survives.
+ */
+/*
+ *   0 .. 3807   user data          |
+ *   3808 .. 3815 csum              | covered by the sixteen codewords,
+ *   3816 .. 3823 selfid            | interleaved
+ *   3824 .. 4079 parity, 16 x 16   |
+ *   4080 .. 4095 generation + free
+ *
+ * The descriptor moves inside the coded area. Today the csum that says
+ * whether a block is sound and the selfid that says whether it is the
+ * right one sit in the tail pad, outside every codeword: a nine-byte
+ * burst there condemns a block the rest of which would have survived
+ * intact. A capsule that cannot protect its own header is not a unit
+ * of survival.
+ *
+ * It costs sixteen bytes of capacity per block -- 3808 rather than
+ * 3824, 0.42%, four megabytes on a gigabyte -- and buys the header the
+ * same 139-byte burst resistance as the data.
+ *
+ * The sixteen bytes freed at the end hold the generation, which needs
+ * no correction: a stale generation is caught by disagreeing with what
+ * the tree expects, not by being decoded.
+ */
+#define BEAMFS_CAPSULE_DATA_OFF       0
+#define BEAMFS_CAPSULE_DATA_BYTES     3808
+#define BEAMFS_CAPSULE_CSUM_OFF       3808   /* u8 type, 3 rsvd, __le32 crc */
+#define BEAMFS_CAPSULE_SELFID_OFF     3816   /* __le64 digest(ino, iblock)  */
+#define BEAMFS_CAPSULE_CODED_BYTES    3824   /* data + csum + selfid        */
+#define BEAMFS_CAPSULE_PARITY_OFF     3824
+#define BEAMFS_CAPSULE_PARITY_LEN     (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY)
+#define BEAMFS_CAPSULE_GEN_OFF        4080   /* __le64 generation           */
+#define BEAMFS_CAPSULE_GEN_BYTES      8
+#define BEAMFS_CAPSULE_FREE_OFF       4088   /* 8 bytes, zero, reserved     */
+
+/*
+ * Kept: the woven names above describe the same geometry without the
+ * descriptor moved, which is what rs_bench and the tests use.
+ */
+#define BEAMFS_DATA_WOVEN_OFF         0
+#define BEAMFS_DATA_WOVEN_BYTES       BEAMFS_DATA_INLINE_BYTES          /* 3824 */
+#define BEAMFS_DATA_WOVEN_PARITY_OFF  BEAMFS_DATA_INLINE_BYTES          /* 3824 */
+#define BEAMFS_DATA_WOVEN_PARITY_LEN  (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY) /* 256 */
+#define BEAMFS_DATA_WOVEN_TOTAL       (BEAMFS_DATA_WOVEN_BYTES + BEAMFS_DATA_WOVEN_PARITY_LEN) /* 4080 */
+
+/*
  * DATA_CSUM descriptor layout inside the 16-byte block tail pad
  * [BEAMFS_DATA_INLINE_TOTAL .. BEAMFS_BLOCK_SIZE). Not part of any RS
  * codeword. See format-v6.md section 3.1. Only 8 bytes are used; the
@@ -762,6 +821,29 @@ static inline int beamfs_rs_event_subblock(__u32 flags)
  */
 #define BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC  BIT(17)
 
+/*
+ * Set when a block's RS symbols are interleaved across its codewords.
+ *
+ * Without it, codeword j owns bytes [j*239, (j+1)*239) -- 239
+ * consecutive bytes. A heavy ion through a die corrupts neighbouring
+ * cells, so a nine-byte burst lands entirely in one codeword and takes
+ * it past correction: "subblock N beyond correction" has meant exactly
+ * that every time it has appeared.
+ *
+ * With it, symbol i of codeword j sits at byte i*16 + j. The same burst
+ * puts one symbol in each of the sixteen codewords, and it takes 129
+ * consecutive bytes to lose one -- sixteen times the burst resistance
+ * for not one byte of extra parity and no measurable time
+ * (tools/fsck.beamfs/tests/interleave_test.c).
+ *
+ * Incompatible: reading an interleaved block with the contiguous
+ * arithmetic gathers the wrong symbols and decodes to noise, so a
+ * kernel without this refuses the mount rather than returning it.
+ *
+ * This is why CCSDS interleaves every code it puts in orbit.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE  BIT(18)
+
 enum beamfs_ind_parity_mode {
 	BEAMFS_IND_PARITY_NONE = 0,
 	BEAMFS_IND_PARITY_CRC  = 1,
@@ -952,7 +1034,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
-				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC | \
+				    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
 
 /*
  * On-disk superblock - block 0

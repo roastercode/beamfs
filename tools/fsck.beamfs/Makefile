@@ -76,6 +76,13 @@ tests/test_rs_vectors: tests/test_rs_vectors.o rs_decode.o
 tests/fsck_oracle: tests/fsck_oracle.c rs_decode.o crc32.o beamfs_format.h rs_decode.h
 	$(CC) $(CFLAGS) -I. $(LDFLAGS) -o $@ tests/fsck_oracle.c rs_decode.o crc32.o
 
+# A capsule, and what it survives -- the header included.
+tests/capsule_test: tests/capsule_test.o rs_decode.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+tests/capsule_test.o: tests/capsule_test.c rs_decode.h beamfs_format.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+
 # The failing test: a nine-byte burst on a block as laid out today.
 tests/burst_test: tests/burst_test.o rs_decode.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
