@@ -592,6 +592,38 @@ static bool beamfs_phys_is_sane(struct super_block *sb, struct inode *inode,
 	return true;
 }
 
+#ifdef CONFIG_BEAMFS_ORDERED_META
+/*
+ * Put a metadata block on the medium before anything names it.
+ *
+ * The safe order for a tree is pointee before pointer, always, and
+ * nothing in beamfs establishes it: mark_buffer_dirty hands the buffer
+ * to writeback, which sorts by age and by position.
+ *
+ * This is the brute form -- one synchronous write per level, up to
+ * four for a block reached through triple indirection -- and it is
+ * meant to answer one question: is the missing order the reason nine
+ * xfstests fail? A journal is how a filesystem gets the same property
+ * without paying this.
+ */
+static void beamfs_order_before_pointer(struct buffer_head *bh)
+{
+	if (!bh)
+		return;
+	/*
+	 * write_dirty_buffer submits and returns; the wait is what makes
+	 * this an ordering and not a hint.
+	 */
+	write_dirty_buffer(bh, REQ_SYNC);
+	wait_on_buffer(bh);
+}
+#else
+static inline void beamfs_order_before_pointer(struct buffer_head *bh)
+{
+	(void)bh;
+}
+#endif
+
 static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					      u64 iblock_logical,
 					      u64 *phys_out)
@@ -743,6 +775,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 					le64_to_cpu(fi->i_direct[iblock_logical]),
 					new_block, 0);
 
+		/* The block, before the pointer that names it. */
+		beamfs_order_before_pointer(dbh);
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
 
@@ -827,6 +861,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * anything flushes it. Holding the reference closes it.
 			 */
 
+		/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(ibh);
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -948,6 +984,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 				(u32)indirect_slot, le64_to_cpu(ptrs[indirect_slot]), new_block,
 			__func__);
+		/* The block, before the pointer that names it. */
+		beamfs_order_before_pointer(dbh);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh, inode);
 		unlock_buffer(ibh);
@@ -1071,6 +1109,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
+		/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(ibh);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1155,6 +1195,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
+			/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh, inode);
 			/* Splicing a child into its parent is an install like
@@ -1281,6 +1323,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
 				(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), new_block,
 			__func__);
+		/* The block, before the pointer that names it. */
+		beamfs_order_before_pointer(dbh);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh, inode);
 		unlock_buffer(l1bh);
@@ -1403,6 +1447,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
+		/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(ibh);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1487,6 +1533,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
+			/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh, inode);
 			/* Splicing a child into its parent is an install like
@@ -1580,6 +1628,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
 					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk,
 				__func__);
+			/* The block, before the pointer that names it. */
+			beamfs_order_before_pointer(l2bh);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
 			beamfs_ind_parity_update(sb, l1bh, inode);
 			/* Splicing a child into its parent is an install like
@@ -1706,6 +1756,8 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 		beamfs_tc_store(sb, inode->i_ino, l2bh->b_blocknr,
 				(u32)l3_slot, le64_to_cpu(ptrs[l3_slot]), new_block,
 			__func__);
+		/* The block, before the pointer that names it. */
+		beamfs_order_before_pointer(dbh);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh, inode);
 		unlock_buffer(l2bh);
