@@ -1330,6 +1330,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
+			/*
 			 * Held, not released and read back.
 			 *
 			 * This released the buffer here and read the same block
@@ -1376,6 +1391,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
+			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
 		}
 		brelse(ibh);
 
@@ -1688,6 +1718,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
+			/*
 			 * Held, not released and read back.
 			 *
 			 * This released the buffer here and read the same block
@@ -1734,6 +1779,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
+			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
 		}
 		brelse(ibh);
 
@@ -1796,6 +1856,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
 			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
+			/*
 			 * Held, not released and read back.
 			 *
 			 * This released the buffer here and read the same block
@@ -1842,6 +1917,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 			mmb_mark_buffer_dirty(l1bh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
+			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
 		}
 		brelse(l1bh);
 
@@ -4074,6 +4164,21 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 			unlock_buffer(ibh);
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
+			/*
+			 * And the inode, so the list gets flushed.
+			 *
+			 * mmb_mark_buffer_dirty puts the buffer on the inode's
+			 * metadata list, and mmb_sync empties that list -- from
+			 * write_inode, which the VFS calls only for an inode it
+			 * believes is dirty. Installing a pointer into a parent block
+			 * changes no field of the inode, so nothing marked it, and
+			 * both buffers stayed in memory with the pointer in them.
+			 *
+			 * generic/013 loses fourteen blocks that way: allocated,
+			 * placed in a slot, and the block holding the slot never
+			 * written -- "indirect block N has no parity written yet".
+			 */
+			mark_inode_dirty(inode);
 			brelse(ibh);
 
 			for (j = 0; j < n_doomed; j++)
