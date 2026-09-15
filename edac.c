@@ -556,6 +556,72 @@ int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
 	return worst;
 }
 
+/*
+ * Encode a 4096-byte block in the grouped layout.
+ *
+ * The block is its own argument rather than a data pointer and a
+ * parity pointer: the two are at fixed offsets within it and passing
+ * them apart invites the mismatch that cost an afternoon -- woven
+ * functions expecting a compact area, callers handing them an
+ * alternating one.
+ *
+ * Returns 0, or the first encode failure.
+ */
+int beamfs_rs_encode_block(u8 *block)
+{
+	if (!block)
+		return -EINVAL;
+
+	return beamfs_rs_encode_woven(block + BEAMFS_DATA_WOVEN_OFF,
+				      block + BEAMFS_DATA_WOVEN_PARITY_OFF,
+				      BEAMFS_RS_PARITY,
+				      BEAMFS_SUBBLOCK_DATA,
+				      BEAMFS_DATA_INLINE_SUBBLOCKS);
+}
+
+/*
+ * Decode one, correcting in place.
+ *
+ * @results, when given, holds one entry per codeword: the number of
+ * symbols corrected, or negative for one that would not decode.
+ *
+ * Returns the worst of those, so a caller that wants only "is this
+ * block sound" can test the return and a caller that wants to log
+ * which codewords suffered has the array.
+ */
+int beamfs_rs_decode_block(u8 *block, int *results, const char *who)
+{
+	if (!block)
+		return -EINVAL;
+
+	return beamfs_rs_decode_woven(block + BEAMFS_DATA_WOVEN_OFF,
+				      block + BEAMFS_DATA_WOVEN_PARITY_OFF,
+				      BEAMFS_RS_PARITY,
+				      BEAMFS_SUBBLOCK_DATA,
+				      BEAMFS_DATA_INLINE_SUBBLOCKS,
+				      results, who);
+}
+
+/*
+ * Read @len bytes of user data at @off out of a block.
+ *
+ * Grouped, the data is contiguous but the symbols of a codeword are
+ * not: byte @off of the user's data is at @off within the data area,
+ * because interleaving moves symbols within a codeword and not the
+ * bytes the user sees. The two are the same array read two ways.
+ *
+ * This exists so nothing outside edac has to know that.
+ */
+void beamfs_block_read(const u8 *block, size_t off, size_t len, u8 *out)
+{
+	memcpy(out, block + BEAMFS_DATA_WOVEN_OFF + off, len);
+}
+
+void beamfs_block_write(u8 *block, size_t off, size_t len, const u8 *in)
+{
+	memcpy(block + BEAMFS_DATA_WOVEN_OFF + off, in, len);
+}
+
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
 			   u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks)

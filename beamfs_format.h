@@ -169,6 +169,28 @@ typedef uint32_t u32;
 #define BEAMFS_DATA_INLINE_PAD        (BEAMFS_BLOCK_SIZE - BEAMFS_DATA_INLINE_TOTAL)         /* 16  */
 
 /*
+ * The grouped layout, under BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE.
+ *
+ * Alternating, a codeword owns 239 consecutive bytes and a nine-byte
+ * burst lands entirely in it: eight is all one corrects, so the
+ * subblock is lost. Grouped, the 3824 data bytes are contiguous and
+ * the symbols of one codeword are spread across them -- symbol i of
+ * codeword j at byte i*16 + j -- so the same burst puts one symbol in
+ * each of the sixteen and 139 consecutive bytes are needed to lose
+ * one.
+ *
+ *   [3824 data, interleaved][256 parity][8 csum][8 selfid]
+ *
+ * Same 4096 bytes, same 272 of overhead, same tail pad. Only the
+ * positions change, and with them the burst a block survives.
+ */
+#define BEAMFS_DATA_WOVEN_OFF         0
+#define BEAMFS_DATA_WOVEN_BYTES       BEAMFS_DATA_INLINE_BYTES          /* 3824 */
+#define BEAMFS_DATA_WOVEN_PARITY_OFF  BEAMFS_DATA_INLINE_BYTES          /* 3824 */
+#define BEAMFS_DATA_WOVEN_PARITY_LEN  (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY) /* 256 */
+#define BEAMFS_DATA_WOVEN_TOTAL       (BEAMFS_DATA_WOVEN_BYTES + BEAMFS_DATA_WOVEN_PARITY_LEN) /* 4080 */
+
+/*
  * DATA_CSUM descriptor layout inside the 16-byte block tail pad
  * [BEAMFS_DATA_INLINE_TOTAL .. BEAMFS_BLOCK_SIZE). Not part of any RS
  * codeword. See format-v6.md section 3.1. Only 8 bytes are used; the

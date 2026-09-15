@@ -42,7 +42,7 @@ static void ok(const char *what, int pass)
 		failures++;
 }
 
-/* The block as the format lays it out today. */
+/* The block as the format lays it out today: alternating. */
 static void build(struct rs_codec *rs, uint8_t *blk, const uint8_t *src)
 {
 	unsigned int j;
@@ -52,6 +52,53 @@ static void build(struct rs_codec *rs, uint8_t *blk, const uint8_t *src)
 		rs_encode_subblock(rs, blk + (size_t)j * TOTAL, DATA,
 				   blk + (size_t)j * TOTAL + DATA);
 	}
+}
+
+/*
+ * And as the grouped layout does: 3824 data then 256 parity, with the
+ * symbols of a codeword spread across the data area.
+ */
+static uint8_t woven_word[DATA];
+
+static void build_woven(struct rs_codec *rs, uint8_t *blk, const uint8_t *src)
+{
+	unsigned int j;
+	size_t i;
+
+	memcpy(blk, src, (size_t)SUBS * DATA);
+	for (j = 0; j < SUBS; j++) {
+		for (i = 0; i < DATA; i++)
+			woven_word[i] = blk[i * SUBS + j];
+		rs_encode_subblock(rs, woven_word, DATA,
+				   blk + (size_t)SUBS * DATA
+				       + (size_t)j * PAR);
+	}
+}
+
+static unsigned int repair_woven(struct rs_codec *rs, uint8_t *blk)
+{
+	int positions[PAR / 2];
+	unsigned int bad = 0;
+	unsigned int j;
+	size_t i;
+
+	for (j = 0; j < SUBS; j++) {
+		int rc;
+
+		for (i = 0; i < DATA; i++)
+			woven_word[i] = blk[i * SUBS + j];
+		rc = rs_decode_subblock(rs, woven_word, DATA,
+					blk + (size_t)SUBS * DATA
+					    + (size_t)j * PAR,
+					positions);
+		if (rc == RS_UNCORRECTABLE) {
+			bad++;
+			continue;
+		}
+		for (i = 0; i < DATA; i++)
+			blk[i * SUBS + j] = woven_word[i];
+	}
+	return bad;
 }
 
 /* Returns the number of subblocks that would not decode. */
@@ -119,6 +166,28 @@ int main(void)
 	for (i = 0; i < 16; i++)
 		blk[600 + i] ^= 0xff;
 	ok("sixteen consecutive bytes are corrected", repair(rs, blk) == 0);
+
+	/*
+	 * The same bursts against the grouped layout, so the two sit
+	 * side by side in one run: what is lost today and what is not.
+	 */
+	printf("\nand as the grouped layout would have it\n");
+
+	memset(blk, 0, sizeof(blk));
+	build_woven(rs, blk, src);
+	for (i = 0; i < 9; i++)
+		blk[600 + i] ^= 0xff;
+	ok("grouped: nine consecutive bytes are corrected",
+	   repair_woven(rs, blk) == 0);
+	ok("grouped: the data is what it was",
+	   memcmp(blk, src, sizeof(src)) == 0);
+
+	memset(blk, 0, sizeof(blk));
+	build_woven(rs, blk, src);
+	for (i = 0; i < 128; i++)
+		blk[600 + i] ^= 0xff;
+	ok("grouped: a 128-byte burst is corrected",
+	   repair_woven(rs, blk) == 0);
 
 	rs_free(rs);
 	printf("\n%d case(s), %d failed\n", cases, failures);

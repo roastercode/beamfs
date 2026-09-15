@@ -501,6 +501,10 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
  * positions_buf may be NULL (and positions_stride == 0) if the caller
  * does not need entropy logging for any of the subblocks.
  */
+int beamfs_rs_encode_block(u8 *block);
+int beamfs_rs_decode_block(u8 *block, int *results, const char *who);
+void beamfs_block_read(const u8 *block, size_t off, size_t len, u8 *out);
+void beamfs_block_write(u8 *block, size_t off, size_t len, const u8 *in);
 int beamfs_rs_encode_woven(u8 *data_buf, u8 *parity_buf,
 			   size_t parity_stride, size_t data_len,
 			   unsigned int n_subblocks);
