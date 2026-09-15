@@ -2640,8 +2640,76 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	return 0;
 }
 
+/*
+ * Give back what a short write allocated and did not use.
+ *
+ * iomap_begin allocates a block per call as it walks the mapping, and
+ * a write that stops short -- ENOSPC, a signal, an error partway --
+ * leaves the rest of them allocated and named by nothing. generic/013
+ * ends with ten such blocks in two runs, the longer of nine: one
+ * write's worth.
+ *
+ * Only what this mapping created, which is what IOMAP_F_NEW says. A
+ * block the file already owned belongs to it whether or not this write
+ * reached it, and freeing that loses data nobody asked to lose.
+ *
+ * Rounded up to the next block: a partially written block is kept
+ * whole, because the bytes before the stopping point are the user's.
+ */
+static int beamfs_inline_iomap_end(struct inode *inode, loff_t pos,
+				   loff_t length, ssize_t written,
+				   unsigned int flags, struct iomap *iomap)
+{
+	u32 payload = beamfs_block_payload(inode->i_sb);
+	u64 first_unused;
+	loff_t reached;
+
+	if (!(flags & IOMAP_WRITE) || !(iomap->flags & IOMAP_F_NEW))
+		return 0;
+	if (written < 0 || written >= length)
+		return 0;
+
+	/*
+	 * The first block entirely past what the write reached. Anything
+	 * from here to the end of the mapping was allocated by it and
+	 * never filled.
+	 */
+	reached = pos + written;
+	first_unused = ((u64)reached + payload - 1) / payload;
+
+	if ((loff_t)(first_unused * payload) >= pos + length)
+		return 0;
+
+	/*
+	 * Only past the end of the file.
+	 *
+	 * free_blocks_from frees everything from a block onwards, which
+	 * is what a truncate wants and not what this does. A write that
+	 * fails at offset zero on a file that already holds data would
+	 * take all of it: the mapping is new, the blocks past it are
+	 * not.
+	 *
+	 * i_size is what iomap has already set from what was written, so
+	 * anything beyond it is out of the file by definition.
+	 */
+	{
+		loff_t size = i_size_read(inode);
+		u64 first_past_eof = ((u64)size + payload - 1) / payload;
+
+		if (first_unused < first_past_eof)
+			return 0;
+	}
+
+	mutex_lock(&BEAMFS_I(inode)->i_alloc_mutex);
+	beamfs_inline_free_blocks_from(inode, first_unused);
+	mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
+
+	return 0;
+}
+
 static const struct iomap_ops beamfs_inline_iomap_ops = {
 	.iomap_begin = beamfs_inline_iomap_begin,
+	.iomap_end   = beamfs_inline_iomap_end,
 };
 
 /*
@@ -4094,7 +4162,7 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 					 beamfs_block_payload(inode->i_sb));
 			if (tail_off != 0 && new_size > 0) {
 				u64 b_last_kept = new_size /
-						  BEAMFS_DATA_INLINE_BYTES;
+						  beamfs_block_payload(inode->i_sb);
 
 				ret = beamfs_inline_zero_tail_block(inode,
 								    b_last_kept,
