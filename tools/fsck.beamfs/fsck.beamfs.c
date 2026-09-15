@@ -32,6 +32,21 @@
 #include "crc32.h"
 #include "rs_decode.h"
 #include "fsck_read.h"
+
+/*
+ * What this build knows how to read.
+ *
+ * Deliberately its own constant rather than the kernel's
+ * BEAMFS_FEAT_INCOMPAT_SUPP: the two move at different times, and a
+ * checker claiming support the moment the kernel gains it would walk
+ * volumes it cannot read.
+ */
+#define FSCK_FEAT_INCOMPAT_SUPP  (BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS | \
+				  BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY | \
+				  BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
+				  BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
+				  BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
+				  BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
 #include "fsck_pass6.h"
 #include "sb_layout.h"
 
@@ -264,6 +279,32 @@ static int pass1_superblock(struct fsck_opts *o)
 	if (!(sb.s_feat_incompat & BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL))
 		fprintf(stderr,
 			"fsck.beamfs: this volume predates INODE_CRC_FULL: i_crc32 covers the head of the inode and not the block pointers, so the inode passes below report damage that is not there\n");
+
+	/*
+	 * A bit this checker does not know how to read.
+	 *
+	 * Nothing here checked s_feat_incompat, so a volume in a layout
+	 * this build predates would be walked with the wrong arithmetic
+	 * and given a verdict: blocks gathered from the wrong offsets,
+	 * decoded to noise, and reported as damage that is not there --
+	 * or, worse, as health that is not there either.
+	 *
+	 * A checker that cannot read a volume has to say so rather than
+	 * guess about it.
+	 */
+	{
+		uint64_t unknown = sb.s_feat_incompat & ~FSCK_FEAT_INCOMPAT_SUPP;
+
+		if (unknown) {
+			fprintf(stderr,
+				"fsck.beamfs: volume uses incompatible feature(s) 0x%016llx that this build cannot read\n",
+				(unsigned long long)unknown);
+			if (unknown & BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+				fprintf(stderr,
+					"fsck.beamfs: RS_INTERLEAVE: each codeword's symbols are spread across the block and the descriptor is inside the coded area\n");
+			return FSCK_ERROR;
+		}
+	}
 
 	if (o->verbose)
 		printf("fsck.beamfs: pass 1: superblock OK\n");
