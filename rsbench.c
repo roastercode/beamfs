@@ -124,7 +124,7 @@ static void beamfs_rsbench_burst(struct seq_file *m)
 {
 	unsigned int subs = BEAMFS_DATA_INLINE_SUBBLOCKS;
 	size_t dlen = BEAMFS_SUBBLOCK_DATA;
-	u8 *blk, *par, *scratch, *saved;
+	u8 *blk, *par, *saved;
 	unsigned int burst;
 	unsigned int plain_limit = 0, woven_limit = 0;
 	size_t i;
@@ -132,8 +132,7 @@ static void beamfs_rsbench_burst(struct seq_file *m)
 	blk     = kmalloc(dlen * subs, GFP_KERNEL);
 	saved   = kmalloc(dlen * subs, GFP_KERNEL);
 	par     = kmalloc((size_t)subs * BEAMFS_RS_PARITY, GFP_KERNEL);
-	scratch = kmalloc(dlen, GFP_KERNEL);
-	if (!blk || !saved || !par || !scratch)
+	if (!blk || !saved || !par)
 		goto out;
 
 	for (i = 0; i < dlen * subs; i++)
@@ -161,11 +160,11 @@ static void beamfs_rsbench_burst(struct seq_file *m)
 		/* Interleaved. */
 		memcpy(blk, saved, dlen * subs);
 		beamfs_rs_encode_woven(blk, par, BEAMFS_RS_PARITY, dlen,
-				       subs, scratch);
+				       subs);
 		for (i = 0; i < burst; i++)
 			blk[100 + i] ^= 0xff;
 		rc = beamfs_rs_decode_woven(blk, par, BEAMFS_RS_PARITY, dlen,
-					    subs, NULL, scratch, "rsbench");
+					    subs, NULL, "rsbench");
 		if (rc >= 0 && woven_limit == burst - 1)
 			woven_limit = burst;
 	}
@@ -174,7 +173,6 @@ static void beamfs_rsbench_burst(struct seq_file *m)
 	seq_printf(m, "BURST_BYTES_INTERLEAVED=%u\n", woven_limit);
 
 out:
-	kfree(scratch);
 	kfree(par);
 	kfree(saved);
 	kfree(blk);

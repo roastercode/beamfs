@@ -44,6 +44,25 @@
 static struct rs_control * __percpu *beamfs_rs_ctrl_pcpu;
 
 /*
+ * A codeword's worth of scratch, per cpu.
+ *
+ * Interleaving means a codeword's symbols are not contiguous, and
+ * encode_rs8 takes a contiguous buffer: lib/reed_solomon has no notion
+ * of a stride and is not ours to change. So the symbols are gathered
+ * into this and handed over.
+ *
+ * Per cpu rather than on the stack: 239 bytes is a quarter of a
+ * kernel frame, and this sits under iomap and writeback, where the
+ * frame is already deep. Per cpu rather than from the scratch pool:
+ * this file has no super_block and should not need one -- it is the
+ * codec, not the filesystem.
+ *
+ * Taken with get_cpu_ptr, which disables preemption for the length of
+ * one codeword: 239 bytes of Galois arithmetic, microseconds.
+ */
+static u8 * __percpu *beamfs_rs_scratch_pcpu;
+
+/*
  * beamfs_rs_init_tables - initialize the RS codec
  * Called once from beamfs_init() before any mount.
  */
@@ -60,8 +79,20 @@ void beamfs_rs_init_tables(void)
 	 * Per-CPU: alloc the per-CPU pointer slot, then init_rs once per
 	 * possible CPU. Each rs_control carries its own scratch buffers[].
 	 */
+	beamfs_rs_scratch_pcpu = alloc_percpu(u8 *);
+	if (!beamfs_rs_scratch_pcpu) {
+		/*
+		 * Not fatal: the contiguous paths never touch it and the
+		 * interleaved ones check before use, so a volume that
+		 * needs interleaving refuses rather than the module.
+		 */
+		pr_err("beamfs: no per-CPU RS scratch; interleaved blocks will be refused\n");
+	}
+
 	beamfs_rs_ctrl_pcpu = alloc_percpu(struct rs_control *);
 	if (!beamfs_rs_ctrl_pcpu) {
+		free_percpu(beamfs_rs_scratch_pcpu);
+		beamfs_rs_scratch_pcpu = NULL;
 		pr_err("beamfs: failed to alloc per-CPU RS ctrl array\n");
 		return;
 	}
@@ -75,6 +106,12 @@ void beamfs_rs_init_tables(void)
 			return;
 		}
 		*per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu) = ctrl;
+		/*
+		 * A failure here is not fatal: the contiguous paths do
+		 * not use it, and the interleaved ones check.
+		 */
+		*per_cpu_ptr(beamfs_rs_scratch_pcpu, cpu) =
+			kmalloc(BEAMFS_SUBBLOCK_DATA, GFP_KERNEL);
 	}
 
 	pr_debug("beamfs: RS codec initialized per-CPU (RS(%d,%d), %u CPUs)\n",
@@ -99,6 +136,15 @@ void beamfs_rs_exit_tables(void)
 			free_rs(ctrl);
 			*per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu) = NULL;
 		}
+	}
+
+	if (beamfs_rs_scratch_pcpu) {
+		int cpu2;
+
+		for_each_possible_cpu(cpu2)
+			kfree(*per_cpu_ptr(beamfs_rs_scratch_pcpu, cpu2));
+		free_percpu(beamfs_rs_scratch_pcpu);
+		beamfs_rs_scratch_pcpu = NULL;
 	}
 
 	free_percpu(beamfs_rs_ctrl_pcpu);
@@ -426,24 +472,39 @@ static void rs_scatter(u8 *blk, unsigned int sub, size_t data_len,
  * difference is where the symbols of a codeword are read from.
  */
 int beamfs_rs_encode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
-			   size_t data_len, unsigned int n_subblocks,
-			   u8 *scratch)
+			   size_t data_len, unsigned int n_subblocks)
 {
 	unsigned int i;
+	int ret = 0;
+	u8 **sp, *scratch;
 
-	if (!data_buf || !parity_buf || !scratch)
+	if (!data_buf || !parity_buf || !beamfs_rs_scratch_pcpu)
+		return -EINVAL;
+	if (data_len > BEAMFS_SUBBLOCK_DATA)
 		return -EINVAL;
 
-	for (i = 0; i < n_subblocks; i++) {
-		int rc;
-
-		rs_gather(data_buf, i, data_len, n_subblocks, scratch);
-		rc = beamfs_rs_encode(scratch, data_len,
-				      parity_buf + (size_t)i * parity_stride);
-		if (rc < 0)
-			return rc;
+	/*
+	 * Preemption off for the whole block rather than per codeword:
+	 * sixteen encodes of 239 bytes, and taking the pointer sixteen
+	 * times costs more than holding it once.
+	 */
+	sp = get_cpu_ptr(beamfs_rs_scratch_pcpu);
+	scratch = *sp;
+	if (!scratch) {
+		put_cpu_ptr(beamfs_rs_scratch_pcpu);
+		return -ENOMEM;
 	}
-	return 0;
+
+	for (i = 0; i < n_subblocks; i++) {
+		rs_gather(data_buf, i, data_len, n_subblocks, scratch);
+		ret = beamfs_rs_encode(scratch, data_len,
+				       parity_buf + (size_t)i * parity_stride);
+		if (ret < 0)
+			break;
+	}
+
+	put_cpu_ptr(beamfs_rs_scratch_pcpu);
+	return ret < 0 ? ret : 0;
 }
 
 /*
@@ -455,13 +516,23 @@ int beamfs_rs_encode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
  */
 int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks,
-			   int *results, u8 *scratch, const char *who)
+			   int *results, const char *who)
 {
 	unsigned int i;
 	int worst = 0;
+	u8 **sp, *scratch;
 
-	if (!data_buf || !parity_buf || !scratch)
+	if (!data_buf || !parity_buf || !beamfs_rs_scratch_pcpu)
 		return -EINVAL;
+	if (data_len > BEAMFS_SUBBLOCK_DATA)
+		return -EINVAL;
+
+	sp = get_cpu_ptr(beamfs_rs_scratch_pcpu);
+	scratch = *sp;
+	if (!scratch) {
+		put_cpu_ptr(beamfs_rs_scratch_pcpu);
+		return -ENOMEM;
+	}
 
 	for (i = 0; i < n_subblocks; i++) {
 		int rc;
@@ -480,6 +551,8 @@ int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
 		if (rc > worst)
 			worst = rc;
 	}
+
+	put_cpu_ptr(beamfs_rs_scratch_pcpu);
 	return worst;
 }
 

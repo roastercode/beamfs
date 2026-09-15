@@ -503,11 +503,11 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
  */
 int beamfs_rs_encode_woven(u8 *data_buf, u8 *parity_buf,
 			   size_t parity_stride, size_t data_len,
-			   unsigned int n_subblocks, u8 *scratch);
+			   unsigned int n_subblocks);
 int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf,
 			   size_t parity_stride, size_t data_len,
 			   unsigned int n_subblocks, int *results,
-			   u8 *scratch, const char *who);
+			   const char *who);
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
 			   u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks);
