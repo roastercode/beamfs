@@ -752,16 +752,6 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 	 */
 	beamfs_tc_forget_child(sb, block);
 	beamfs_tc_forget_parent(sb, block);
-	/*
-	 * And its parity slot.
-	 *
-	 * The region keeps a signature per block; leaving it behind
-	 * hands the next owner a description of the previous one's
-	 * contents, and verify then reports the new block as corrupt
-	 * against it. indparity.c already named this as the real
-	 * corruption on a device that flips no bits.
-	 */
-	beamfs_ind_parity_forget(sb, block);
 	beamfs_write_bitmap_block(sb, bit, owner);
 }
 
