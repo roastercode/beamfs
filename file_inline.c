@@ -241,7 +241,22 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it.
+		 *
+		 * lookup_phys took no lock at all while
+		 * lookup_or_alloc_phys installs a pointer holding
+		 * both i_alloc_mutex and lock_buffer, so a reader
+		 * could see a slot mid-install: treecheck reported
+		 * one that held 18806 and read as 0, in the same
+		 * function for the same inode, with the write order
+		 * forced -- so the block was on the medium and the
+		 * read was simply early.
+		 */
+		lock_buffer(ibh);
 		phys = le64_to_cpu(ptrs[indirect_slot]);
+		unlock_buffer(ibh);
 		brelse(ibh);
 
 		if (phys != 0) {
@@ -314,7 +329,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it. See the single-indirect case above.
+		 */
+		lock_buffer(ibh);
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		unlock_buffer(ibh);
 		brelse(ibh);
 
 		if (!l1_blk)
@@ -347,7 +368,22 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l1bh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it.
+		 *
+		 * lookup_phys took no lock at all while
+		 * lookup_or_alloc_phys installs a pointer holding
+		 * both i_alloc_mutex and lock_buffer, so a reader
+		 * could see a slot mid-install: treecheck reported
+		 * one that held 18806 and read as 0, in the same
+		 * function for the same inode, with the write order
+		 * forced -- so the block was on the medium and the
+		 * read was simply early.
+		 */
+		lock_buffer(l1bh);
 		phys = le64_to_cpu(ptrs[l2_slot]);
+		unlock_buffer(l1bh);
 		brelse(l1bh);
 
 		if (phys != 0) {
@@ -423,7 +459,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)ibh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it. See the single-indirect case above.
+		 */
+		lock_buffer(ibh);
 		l1_blk = le64_to_cpu(ptrs[l1_slot]);
+		unlock_buffer(ibh);
 		brelse(ibh);
 
 		if (!l1_blk)
@@ -456,7 +498,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l1bh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it. See the single-indirect case above.
+		 */
+		lock_buffer(l1bh);
 		l2_blk = le64_to_cpu(ptrs[l2_slot]);
+		unlock_buffer(l1bh);
 		brelse(l1bh);
 
 		if (!l2_blk)
@@ -489,7 +537,13 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			return -EUCLEAN;
 		}
 		ptrs = (__le64 *)l2bh->b_data;
+		/*
+		 * Read under the buffer lock, as the writer installs
+		 * under it. See the single-indirect case above.
+		 */
+		lock_buffer(l2bh);
 		phys = le64_to_cpu(ptrs[l3_slot]);
+		unlock_buffer(l2bh);
 		brelse(l2bh);
 
 		if (phys != 0) {
