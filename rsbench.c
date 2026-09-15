@@ -113,6 +113,73 @@ out:
 	return ret;
 }
 
+/*
+ * How long a burst each layout survives.
+ *
+ * Reported rather than asserted: a number in a file anyone can read
+ * beats a BUG_ON nobody triggers, and the answer is a property of the
+ * code, not of this volume.
+ */
+static void beamfs_rsbench_burst(struct seq_file *m)
+{
+	unsigned int subs = BEAMFS_DATA_INLINE_SUBBLOCKS;
+	size_t dlen = BEAMFS_SUBBLOCK_DATA;
+	u8 *blk, *par, *scratch, *saved;
+	unsigned int burst;
+	unsigned int plain_limit = 0, woven_limit = 0;
+	size_t i;
+
+	blk     = kmalloc(dlen * subs, GFP_KERNEL);
+	saved   = kmalloc(dlen * subs, GFP_KERNEL);
+	par     = kmalloc((size_t)subs * BEAMFS_RS_PARITY, GFP_KERNEL);
+	scratch = kmalloc(dlen, GFP_KERNEL);
+	if (!blk || !saved || !par || !scratch)
+		goto out;
+
+	for (i = 0; i < dlen * subs; i++)
+		saved[i] = (u8)(i * 31 + 7);
+
+	/*
+	 * Walk the burst length up until each layout stops correcting.
+	 * The first failure is the limit.
+	 */
+	for (burst = 1; burst <= 160; burst++) {
+		int rc;
+
+		/* Contiguous. */
+		memcpy(blk, saved, dlen * subs);
+		beamfs_rs_encode_region(blk, dlen, par, BEAMFS_RS_PARITY,
+					dlen, subs);
+		for (i = 0; i < burst; i++)
+			blk[100 + i] ^= 0xff;
+		rc = beamfs_rs_decode_region(blk, dlen, par, BEAMFS_RS_PARITY,
+					     dlen, subs, NULL, NULL, 0,
+					     "rsbench");
+		if (rc >= 0 && plain_limit == burst - 1)
+			plain_limit = burst;
+
+		/* Interleaved. */
+		memcpy(blk, saved, dlen * subs);
+		beamfs_rs_encode_woven(blk, par, BEAMFS_RS_PARITY, dlen,
+				       subs, scratch);
+		for (i = 0; i < burst; i++)
+			blk[100 + i] ^= 0xff;
+		rc = beamfs_rs_decode_woven(blk, par, BEAMFS_RS_PARITY, dlen,
+					    subs, NULL, scratch, "rsbench");
+		if (rc >= 0 && woven_limit == burst - 1)
+			woven_limit = burst;
+	}
+
+	seq_printf(m, "BURST_BYTES_CONTIGUOUS=%u\n", plain_limit);
+	seq_printf(m, "BURST_BYTES_INTERLEAVED=%u\n", woven_limit);
+
+out:
+	kfree(scratch);
+	kfree(par);
+	kfree(saved);
+	kfree(blk);
+}
+
 static int beamfs_rsbench_show(struct seq_file *m, void *v)
 {
 	u64 enc_ns = 0, dec_ns = 0;
@@ -140,6 +207,18 @@ static int beamfs_rsbench_show(struct seq_file *m, void *v)
 	seq_printf(m, "DECODE_NS_TOTAL=%llu\n", dec_ns);
 	seq_printf(m, "ENCODE_NS_PER_BLOCK=%llu\n", enc_ns / iters);
 	seq_printf(m, "DECODE_NS_PER_BLOCK=%llu\n", dec_ns / iters);
+
+	/*
+	 * And what a burst costs, either way.
+	 *
+	 * Nine consecutive bytes is one ion track through a die. Laid
+	 * out contiguously they all land in one codeword and it is lost;
+	 * interleaved they land one per codeword and the block comes
+	 * back whole. The bench measured that in userspace; this is the
+	 * same question asked of the kernel's own codec, which is the
+	 * one that will be under the beam.
+	 */
+	beamfs_rsbench_burst(m);
 
 	/*
 	 * Throughput in KiB/s, computed here rather than left to the
