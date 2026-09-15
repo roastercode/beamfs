@@ -59,7 +59,7 @@ config BEAMFS_DEBUG_TREE
 
 config BEAMFS_ORDERED_META
 	bool "Write metadata in dependency order (slow, experimental)"
-	depends on BEAMFS
+	depends on BEAMFS_FS
 	default n
 	help
 	  Write every metadata block to the medium before anything names
