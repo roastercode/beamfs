@@ -371,7 +371,14 @@ under `sbi->s_lock`. Superblock buffer marked dirty after each write.
 ## Known Limitations (current version)
 
 - No indirect block support: files limited to 48 KiB (12 direct blocks)
-- No journaling: crash consistency relies on `mark_buffer_dirty()` ordering
+- No journaling: crash consistency relies on `mark_buffer_dirty()`
+  ordering -- which is not a guarantee. mark_buffer_dirty establishes
+  no order at all: writeback decides when, sorting by age and by
+  position on the device. A write through triple indirection touches
+  nine objects and exactly one of their 362880 orders is safe.
+  This is the reason nine xfstests fail and 723 pass: the nine are the
+  ones that write hard enough to meet a bad permutation.
+  See Documentation/journal-design.md.
 - No xattr/ACL support
 - `RENAME_EXCHANGE` and `RENAME_WHITEOUT` return `-EINVAL`
 - `SB_RDONLY` not yet checked before superblock writes
