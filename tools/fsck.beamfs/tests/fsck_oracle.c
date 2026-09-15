@@ -419,8 +419,22 @@ static void case_nine_byte_burst(void)
 	close(fd);
 
 	v = check();
-	report("nine-byte burst: the inode survives it", v.rc == 0,
-	       "rc=%d -- an inode's 172 bytes carry 16 of parity, correcting eight",
+	/*
+	 * Expected to report damage, and it will keep doing so.
+	 *
+	 * An inode is 172 bytes under one codeword: there is nothing to
+	 * interleave and eight symbols is all it corrects, wherever they
+	 * fall. Interleaving takes a data block from nine bytes to 139
+	 * and leaves this at nine.
+	 *
+	 * So the case asserts the limit rather than hoping it goes away.
+	 * It fails the day an inode is protected some other way -- a
+	 * replica, most likely -- and that is when it should be
+	 * revisited.
+	 */
+	report("nine bytes in an inode: still fatal, as expected",
+	       v.rc != 0,
+	       "rc=%d -- one codeword over 172 bytes, eight symbols corrected",
 	       v.rc);
 }
 
