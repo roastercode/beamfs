@@ -1004,6 +1004,16 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 
 		/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
+			/*
+			 * The inode's own pointer is a slot store too.
+			 *
+			 * parent 0 and level 0, as for the direct array:
+			 * there is no block above an inode's pointer. Without
+			 * it a probe following a block from allocation to its
+			 * tree loses every root indirect block.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+							indirect_blk, 0);
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1249,6 +1259,16 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 		/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
+			/*
+			 * The inode's own pointer is a slot store too.
+			 *
+			 * parent 0 and level 0, as for the direct array:
+			 * there is no block above an inode's pointer. Without
+			 * it a probe following a block from allocation to its
+			 * tree loses every root indirect block.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+							dindirect_blk, 0);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1330,6 +1350,19 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
+			/*
+			 * Traced like every other slot install.
+			 *
+			 * Three of the ten allocation sites called tc_store
+			 * and not this, so a probe pairing allocations with
+			 * stores counted every L1 and L2 indirect block as an
+			 * allocation that went nowhere: 4126 of them in one
+			 * generic/476, against the one block fsck found
+			 * leaked.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+						l1_slot, le64_to_cpu(ptrs[l1_slot]),
+						l1_blk, 2);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
@@ -1584,6 +1617,16 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 */
 		/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
+			/*
+			 * The inode's own pointer is a slot store too.
+			 *
+			 * parent 0 and level 0, as for the direct array:
+			 * there is no block above an inode's pointer. Without
+			 * it a probe following a block from allocation to its
+			 * tree loses every root indirect block.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+							tindirect_blk, 0);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1665,6 +1708,19 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
+			/*
+			 * Traced like every other slot install.
+			 *
+			 * Three of the ten allocation sites called tc_store
+			 * and not this, so a probe pairing allocations with
+			 * stores counted every L1 and L2 indirect block as an
+			 * allocation that went nowhere: 4126 of them in one
+			 * generic/476, against the one block fsck found
+			 * leaked.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+						l1_slot, le64_to_cpu(ptrs[l1_slot]),
+						l1_blk, 2);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
 					(u32)l1_slot, le64_to_cpu(ptrs[l1_slot]), l1_blk,
 				__func__);
@@ -1760,6 +1816,19 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
+			/*
+			 * Traced like every other slot install.
+			 *
+			 * Three of the ten allocation sites called tc_store
+			 * and not this, so a probe pairing allocations with
+			 * stores counted every L1 and L2 indirect block as an
+			 * allocation that went nowhere: 4126 of them in one
+			 * generic/476, against the one block fsck found
+			 * leaked.
+			 */
+			trace_beamfs_slot_store(inode->i_ino, l1bh->b_blocknr,
+						l2_slot, le64_to_cpu(ptrs[l2_slot]),
+						l2_blk, 3);
 			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
 					(u32)l2_slot, le64_to_cpu(ptrs[l2_slot]), l2_blk,
 				__func__);
