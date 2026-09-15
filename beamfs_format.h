@@ -762,6 +762,29 @@ static inline int beamfs_rs_event_subblock(__u32 flags)
  */
 #define BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC  BIT(17)
 
+/*
+ * Set when a block's RS symbols are interleaved across its codewords.
+ *
+ * Without it, codeword j owns bytes [j*239, (j+1)*239) -- 239
+ * consecutive bytes. A heavy ion through a die corrupts neighbouring
+ * cells, so a nine-byte burst lands entirely in one codeword and takes
+ * it past correction: "subblock N beyond correction" has meant exactly
+ * that every time it has appeared.
+ *
+ * With it, symbol i of codeword j sits at byte i*16 + j. The same burst
+ * puts one symbol in each of the sixteen codewords, and it takes 129
+ * consecutive bytes to lose one -- sixteen times the burst resistance
+ * for not one byte of extra parity and no measurable time
+ * (tools/fsck.beamfs/tests/interleave_test.c).
+ *
+ * Incompatible: reading an interleaved block with the contiguous
+ * arithmetic gathers the wrong symbols and decodes to noise, so a
+ * kernel without this refuses the mount rather than returning it.
+ *
+ * This is why CCSDS interleaves every code it puts in orbit.
+ */
+#define BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE  BIT(18)
+
 enum beamfs_ind_parity_mode {
 	BEAMFS_IND_PARITY_NONE = 0,
 	BEAMFS_IND_PARITY_CRC  = 1,
@@ -952,7 +975,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
-				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC | \
+				    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
 
 /*
  * On-disk superblock - block 0

@@ -368,6 +368,121 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
  * Returns 0 on success, negative on the first encode failure.
  * On failure the buffer is in an indeterminate state.
  */
+/*
+ * Where symbol @i of codeword @sub lives once interleaved.
+ *
+ * Contiguous, codeword j owns bytes [j*239, (j+1)*239): a nine-byte
+ * burst lands entirely in it and takes it past correction, which is
+ * what a heavy ion through a die produces and what "subblock N beyond
+ * correction" has meant every time it has appeared.
+ *
+ * Interleaved, the same burst puts one symbol in each of the sixteen
+ * codewords. 129 consecutive bytes are needed to lose one, for not a
+ * byte of extra parity and no measurable time.
+ *
+ * The parity stays with its codeword: spreading it too would gain
+ * nothing -- a burst in the parity region costs the same either way --
+ * and cost a second indirection on every encode.
+ */
+static inline size_t rs_woven_off(unsigned int sub, size_t i,
+				  unsigned int n_subblocks)
+{
+	return i * n_subblocks + sub;
+}
+
+/*
+ * Gather one codeword out of an interleaved block.
+ *
+ * @scratch must hold @data_len bytes. The caller owns it: this runs on
+ * the writeback path and an allocation here would be one more thing to
+ * fail under the memory pressure that writeback is trying to relieve.
+ */
+static void rs_gather(const u8 *blk, unsigned int sub, size_t data_len,
+		      unsigned int n_subblocks, u8 *scratch)
+{
+	size_t i;
+
+	for (i = 0; i < data_len; i++)
+		scratch[i] = blk[rs_woven_off(sub, i, n_subblocks)];
+}
+
+static void rs_scatter(u8 *blk, unsigned int sub, size_t data_len,
+		       unsigned int n_subblocks, const u8 *scratch)
+{
+	size_t i;
+
+	for (i = 0; i < data_len; i++)
+		blk[rs_woven_off(sub, i, n_subblocks)] = scratch[i];
+}
+
+/*
+ * beamfs_rs_encode_woven -- encode a block whose symbols are interleaved.
+ *
+ * @data_buf:    the interleaved data area, @data_len * @n_subblocks bytes
+ * @parity_buf:  where the parity goes, @n_subblocks codewords of it
+ * @scratch:     @data_len bytes the caller owns
+ *
+ * Same contract as beamfs_rs_encode_region, same return values. The
+ * difference is where the symbols of a codeword are read from.
+ */
+int beamfs_rs_encode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
+			   size_t data_len, unsigned int n_subblocks,
+			   u8 *scratch)
+{
+	unsigned int i;
+
+	if (!data_buf || !parity_buf || !scratch)
+		return -EINVAL;
+
+	for (i = 0; i < n_subblocks; i++) {
+		int rc;
+
+		rs_gather(data_buf, i, data_len, n_subblocks, scratch);
+		rc = beamfs_rs_encode(scratch, data_len,
+				      parity_buf + (size_t)i * parity_stride);
+		if (rc < 0)
+			return rc;
+	}
+	return 0;
+}
+
+/*
+ * beamfs_rs_decode_woven -- decode one, correcting in place.
+ *
+ * A codeword that decodes is written back into the block; one that
+ * does not is left as it was, so a caller that ignores the result
+ * reads what the medium gave rather than a half-corrected mixture.
+ */
+int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf, size_t parity_stride,
+			   size_t data_len, unsigned int n_subblocks,
+			   int *results, u8 *scratch, const char *who)
+{
+	unsigned int i;
+	int worst = 0;
+
+	if (!data_buf || !parity_buf || !scratch)
+		return -EINVAL;
+
+	for (i = 0; i < n_subblocks; i++) {
+		int rc;
+
+		rs_gather(data_buf, i, data_len, n_subblocks, scratch);
+		rc = beamfs_rs_decode(scratch, data_len,
+				      parity_buf + (size_t)i * parity_stride,
+				      NULL, 0, who);
+		if (results)
+			results[i] = rc;
+		if (rc < 0) {
+			worst = rc;
+			continue;
+		}
+		rs_scatter(data_buf, i, data_len, n_subblocks, scratch);
+		if (rc > worst)
+			worst = rc;
+	}
+	return worst;
+}
+
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
 			   u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks)
