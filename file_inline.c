@@ -651,6 +651,32 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 						      phys_out, NULL);
 }
 
+/*
+ * Seal a block: encode it in whichever layout the volume uses.
+ *
+ * Four sites encode a freshly allocated data block with the same six
+ * arguments, and a fifth and sixth do it for writeback. One function
+ * so a layout change touches one place -- the four were identical
+ * character for character, which is how a fifth comes to differ by
+ * accident.
+ */
+static int beamfs_seal_block(struct super_block *sb, u8 *block)
+{
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+		return beamfs_rs_encode_woven(block + BEAMFS_CAPSULE_DATA_OFF,
+					      block + BEAMFS_CAPSULE_PARITY_OFF,
+					      BEAMFS_RS_PARITY,
+					      BEAMFS_SUBBLOCK_DATA,
+					      BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+	return beamfs_rs_encode_region(block, BEAMFS_SUBBLOCK_TOTAL,
+				       block + BEAMFS_SUBBLOCK_DATA,
+				       BEAMFS_SUBBLOCK_TOTAL,
+				       BEAMFS_SUBBLOCK_DATA,
+				       BEAMFS_DATA_INLINE_SUBBLOCKS);
+}
+
 static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						  u64 iblock_logical,
 						  u64 *phys_out,
@@ -779,12 +805,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_rs_encode_region(
-				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_DATA_INLINE_SUBBLOCKS);
+			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -987,12 +1008,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_rs_encode_region(
-				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_DATA_INLINE_SUBBLOCKS);
+			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -1328,12 +1344,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_rs_encode_region(
-				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_DATA_INLINE_SUBBLOCKS);
+			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -1763,12 +1774,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_rs_encode_region(
-				(u8 *)dbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-				(u8 *)dbh->b_data + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_DATA_INLINE_SUBBLOCKS);
+			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -2007,14 +2013,33 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 */
 	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
 
-	beamfs_rs_decode_region(
-		tmp, BEAMFS_SUBBLOCK_TOTAL,
-		tmp + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-		BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS,
-		rs_results,
-		rs_positions,
-		BEAMFS_RS_PARITY / 2,
-				"file data");
+	/*
+	 * A capsule is gathered, not walked.
+	 *
+	 * Interleaved, symbol i of codeword j is at byte i*16 + j rather
+	 * than j*239 + i, and the header sits inside the coded area. The
+	 * two layouts share no arithmetic: reading one with the other's
+	 * gathers the wrong symbols and decodes to noise with every
+	 * check passing. The feature bit is what keeps them apart.
+	 */
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE) {
+		beamfs_rs_decode_woven(tmp + BEAMFS_CAPSULE_DATA_OFF,
+				       tmp + BEAMFS_CAPSULE_PARITY_OFF,
+				       BEAMFS_RS_PARITY,
+				       BEAMFS_SUBBLOCK_DATA,
+				       BEAMFS_DATA_INLINE_SUBBLOCKS,
+				       rs_results, "file data");
+	} else {
+		beamfs_rs_decode_region(
+			tmp, BEAMFS_SUBBLOCK_TOTAL,
+			tmp + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
+			BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS,
+			rs_results,
+			rs_positions,
+			BEAMFS_RS_PARITY / 2,
+			"file data");
+	}
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		int rc = rs_results[i];
@@ -3213,13 +3238,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			       scratch + (size_t)sb_idx * BEAMFS_SUBBLOCK_DATA,
 			       BEAMFS_SUBBLOCK_DATA);
 
-		ret = beamfs_rs_encode_region((u8 *)bh->b_data,
-					      BEAMFS_SUBBLOCK_TOTAL,
-					      (u8 *)bh->b_data +
-					      BEAMFS_SUBBLOCK_DATA,
-					      BEAMFS_SUBBLOCK_TOTAL,
-					      BEAMFS_SUBBLOCK_DATA,
-					      BEAMFS_DATA_INLINE_SUBBLOCKS);
+		ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
 		if (ret < 0) {
 			pr_err_ratelimited("beamfs/inline: writeback_range: rs_encode_region failed: %d\n",
 					   ret);
@@ -3965,10 +3984,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		       BEAMFS_SUBBLOCK_DATA);
 	}
 
-	ret = beamfs_rs_encode_region(
-		(u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
-		(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-		BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS);
+	ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
 	if (ret < 0) {
 		pr_err_ratelimited("beamfs/inline: zero_tail: rs_encode_region failed: %d\n",
 				   ret);
