@@ -110,3 +110,20 @@ Feature bit 18, `BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE`. Reading an
 interleaved block with the contiguous arithmetic gathers the wrong
 symbols and decodes to noise, so a kernel without it refuses the mount
 rather than returning that.
+
+## Measured on a live volume
+
+2026-09-15, x86-01, kernel 7.3.0-rc2, 1 GiB volume.
+
+A 100 kB file written, the volume unmounted, nine consecutive bytes
+flipped in its first data block, remounted, and the file read back:
+
+    ordinary      the file is unreadable
+    interleaved   the file is byte-for-byte what it was
+
+The same nine bytes. One is a codeword past correction; the other is
+one symbol in each of nine codewords.
+
+And before that, the plain question -- does the filesystem return what
+it was given: eight megabytes written to each layout, unmounted,
+remounted, identical both times, with fsck clean on both.
