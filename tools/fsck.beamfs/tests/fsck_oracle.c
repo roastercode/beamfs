@@ -23,7 +23,9 @@
  * Usage: fsck_oracle <fsck-binary> <mkfs-binary> [image]
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -359,6 +361,67 @@ static void case_pristine(void)
 	       && v.pass4_ran && !v.sb_bad,
 	       "rc=%d lost=%ld dangling=%ld pass4=%s",
 	       v.rc, v.lost, v.dangling, v.pass4_ran ? "ran" : "SKIPPED");
+}
+
+/*
+ * Nine consecutive bytes flipped in one block.
+ *
+ * What a heavy ion through a die produces: neighbouring cells, not
+ * scattered ones. With a codeword owning 239 consecutive bytes they
+ * all land in the same one, which corrects eight, and the subblock is
+ * lost -- "subblock N beyond correction", every time it has appeared.
+ *
+ * This case says what the checker makes of that on a real volume,
+ * which is the number that matters. It is expected to report damage
+ * until the layout groups data and parity; the point is that the
+ * expectation is written down and checked rather than remembered.
+ */
+static void case_nine_byte_burst(void)
+{
+	struct beamfs_super_block sb;
+	struct verdict v;
+	uint8_t blk[BEAMFS_BLOCK_SIZE];
+	uint64_t where;
+	int fd;
+	size_t i;
+
+	fresh();
+
+	fd = open(image, O_RDWR);
+	if (fd < 0)
+		die("cannot open %s", image);
+	if (pread(fd, &sb, sizeof(sb), 0) != (ssize_t)sizeof(sb))
+		die("cannot read the superblock");
+
+	/*
+	 * The first block of the inode table.
+	 *
+	 * pass 3 decodes every inode on the volume, so a burst there is
+	 * one the checker actually meets -- unlike a data block, whose
+	 * contents it never reads.
+	 */
+	where = le64toh(sb.s_inode_table_blk);
+	if (pread(fd, blk, sizeof(blk), (off_t)where * BEAMFS_BLOCK_SIZE)
+	    != (ssize_t)sizeof(blk))
+		die("cannot read block %llu", (unsigned long long)where);
+
+	/*
+	 * Nine bytes inside the first inode's RS-covered area. An inode
+	 * is 172 bytes of data with 16 of parity, so nine consecutive
+	 * flips are one more than it corrects.
+	 */
+	for (i = 0; i < 9; i++)
+		blk[8 + i] ^= 0xff;
+
+	if (pwrite(fd, blk, sizeof(blk), (off_t)where * BEAMFS_BLOCK_SIZE)
+	    != (ssize_t)sizeof(blk))
+		die("cannot write block %llu", (unsigned long long)where);
+	close(fd);
+
+	v = check();
+	report("nine-byte burst: the inode survives it", v.rc == 0,
+	       "rc=%d -- an inode's 172 bytes carry 16 of parity, correcting eight",
+	       v.rc);
 }
 
 /*
@@ -931,6 +994,7 @@ int main(int argc, char **argv)
 	}
 
 	case_pristine();
+	case_nine_byte_burst();
 	case_one_leak();
 	case_many_leaks();
 	case_dangling();

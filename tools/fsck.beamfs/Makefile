@@ -72,6 +72,10 @@ tests/test_rs_vectors: tests/test_rs_vectors.o rs_decode.o
 # A heavy ion corrupts neighbouring cells, so today's nine-byte burst
 # lands in one codeword and takes it past correction. Interleaved it
 # takes 129, for no extra parity.
+# The oracle: mkfs a volume, damage it, and see what the checker says.
+tests/fsck_oracle: tests/fsck_oracle.c rs_decode.o crc32.o beamfs_format.h rs_decode.h
+	$(CC) $(CFLAGS) -I. $(LDFLAGS) -o $@ tests/fsck_oracle.c rs_decode.o crc32.o
+
 # The failing test: a nine-byte burst on a block as laid out today.
 tests/burst_test: tests/burst_test.o rs_decode.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
