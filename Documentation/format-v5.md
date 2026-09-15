@@ -629,8 +629,24 @@ high-order bytes produces a value outside the valid range.
 
 ### 7.2 UNIVERSAL_INLINE layout (scheme = 2)
 
-Each 4096-byte data block is laid out as **16 interleaved RS(255,239)
-shortened subblocks**:
+Each 4096-byte data block is laid out as **16 RS(255,239) shortened
+subblocks, data and parity alternating**:
+
+The word "interleaved" stood here and meant that data and parity
+alternate. In coding it means something else -- the symbols of one
+codeword dispersed across the block -- and beamfs does not do that.
+The distinction matters: with the layout below, a codeword owns 239
+consecutive bytes, so a nine-byte burst lands entirely in one and takes
+it past correction. A heavy ion through a die produces exactly that,
+and "subblock N beyond correction" has meant exactly that every time
+it has appeared.
+
+Interleaving the symbols would raise the survivable burst from 8 bytes
+to 139, measured, for no extra parity and no measurable time
+(tools/fsck.beamfs/tests/interleave_test.c and
+/sys/kernel/debug/beamfs/rs_bench). It is feature bit 18,
+RS_INTERLEAVE, and is not yet implemented: it needs the data and
+parity grouped rather than alternating, which is a layout change.
 
 Disk block (4096 bytes): [SB0 data (239) | SB0 parity (16)] = 255 bytes [SB1 data (239) | SB1 parity (16)] = 255 bytes ... [SB15 data (239) | SB15 parity (16)] = 255 bytes [zero pad (16)]
 

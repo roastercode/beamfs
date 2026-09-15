@@ -565,6 +565,33 @@ int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
 	if (!data_buf || !parity_buf)
 		return -EINVAL;
 
+	/*
+	 * A stride of BEAMFS_SUBBLOCK_TOTAL means a 4096-byte block laid
+	 * out as sixteen data-plus-parity subblocks: a data block, an
+	 * indirect block, a directory block. Those are the ones that sit
+	 * across a die and meet bursts, and those are the ones that get
+	 * interleaved.
+	 *
+	 * The superblock's own geometry and rsbench pass other strides
+	 * and stay contiguous, which is right -- neither is laid out
+	 * that way.
+	 *
+	 * Keyed on the stride rather than a flag because every caller
+	 * already passes it and none would have to change. The cost is
+	 * that the layout is implicit: change a stride and the layout
+	 * changes with it. Anyone doing that must read this.
+	 */
+	/*
+	 * Not yet: the woven functions take a compact data area and the
+	 * callers pass a block whose data and parity already alternate
+	 * every 255 bytes. Wiring one to the other without reconciling
+	 * the two geometries would gather the wrong symbols and write
+	 * noise where a block used to be.
+	 *
+	 * The layout change belongs with mkfs and fsck, in one step, on
+	 * a volume that says so in its feature bits.
+	 */
+
 	for (i = 0; i < n_subblocks; i++) {
 		u8 *d = data_buf   + (size_t)i * data_stride;
 		u8 *p = parity_buf + (size_t)i * parity_stride;
