@@ -487,7 +487,18 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 			 * wrong one reports every large file as owning
 			 * fewer blocks than it claims.
 			 */
-			uint64_t per_block = p.rd->interleaved
+			/*
+			 * A directory is not a capsule.
+			 *
+			 * dirent.c lays one out in the alternating layout
+			 * whatever the volume's data blocks do, so its
+			 * payload is 3824. Applying 3808 to it reports
+			 * the root directory as needing two blocks when
+			 * it owns one, on every interleaved volume.
+			 */
+			uint64_t per_block =
+				(p.rd->interleaved &&
+				 (mode & S_FMT) != S_DIR)
 					   ? BEAMFS_CAPSULE_DATA_BYTES
 					   : BEAMFS_DATA_INLINE_BYTES;
 
