@@ -69,6 +69,16 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 	} else {
 		u64 p = (u64)ctx->pos - 2;
 
+		/*
+		 * A directory block is not a capsule.
+		 *
+		 * dirent.c encodes and decodes one in the alternating
+		 * layout, so its payload is 3824 whatever the volume's
+		 * data blocks do. Following beamfs_block_payload here
+		 * would have the reader seek by 3808 into blocks laid
+		 * out in 3824 -- every entry past the first block off by
+		 * sixteen bytes.
+		 */
 		start_block = (int)(p / BEAMFS_DATA_INLINE_BYTES);
 		start_off   = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
 	}

@@ -82,6 +82,28 @@ work on.
 
 What would protect one is a replica. See `burst-resistance.md`.
 
+## Which blocks are capsules
+
+Only the ones holding file data.
+
+| block | layout | payload |
+|---|---|---|
+| file data | capsule, interleaved | 3808 |
+| directory | alternating | 3824 |
+| indirect | alternating | 3824 |
+| bitmap | alternating | 3824 |
+| inode table | one codeword per inode | 172 per inode |
+
+The gain is on file data, which is what a volume mostly holds and what
+a burst mostly hits. The others keep their layout, and with it their
+payload: `beamfs_block_payload()` answers for a data block, and a
+directory block is 3824 whatever the volume's data blocks do.
+
+Getting that backwards has a specific shape. A reader seeking by 3808
+into directory blocks laid out in 3824 finds every entry past the first
+block sixteen bytes off, and nothing says so -- the checksums are over
+the block, not over where the reader thought an entry started.
+
 ## Compatibility
 
 Feature bit 18, `BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE`. Reading an

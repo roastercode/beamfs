@@ -501,6 +501,29 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
  * positions_buf may be NULL (and positions_stride == 0) if the caller
  * does not need entropy logging for any of the subblocks.
  */
+/*
+ * How many bytes of a file one block holds.
+ *
+ * 3824 in the alternating layout, where the whole coded area is user
+ * data. 3808 in a capsule, where the last sixteen of it are the
+ * descriptor -- the csum and the selfid, moved inside the codewords so
+ * a burst cannot condemn a block whose data is intact.
+ *
+ * Every place that turns a file offset into a block number goes
+ * through this. Writing the constant instead reads a file back shifted
+ * by sixteen bytes on a capsule volume, silently: measured on a live
+ * volume as eight megabytes in and a different md5sum out, with every
+ * check green.
+ */
+static inline u32 beamfs_block_payload(struct super_block *sb)
+{
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+		return BEAMFS_CAPSULE_DATA_BYTES;
+
+	return BEAMFS_DATA_INLINE_BYTES;
+}
+
 int beamfs_rs_encode_block(u8 *block);
 int beamfs_rs_decode_block(u8 *block, int *results, const char *who);
 void beamfs_block_read(const u8 *block, size_t off, size_t len, u8 *out);

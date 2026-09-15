@@ -2399,7 +2399,8 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 				     struct iomap *srcmap)
 {
 	loff_t i_size = i_size_read(inode);
-	u64 b = (u64)pos / BEAMFS_DATA_INLINE_BYTES;
+	u32 payload = beamfs_block_payload(inode->i_sb);
+	u64 b = (u64)pos / payload;
 	u64 phys = 0;
 	int ret;
 
@@ -2493,7 +2494,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * shorter than a 4096-byte folio.
 	 */
 	if (flags & IOMAP_REPORT) {
-		u64 in_block = (u64)pos % BEAMFS_DATA_INLINE_BYTES;
+		u64 in_block = (u64)pos % payload;
 
 		iomap->length = min_t(u64, (u64)length,
 				      BEAMFS_DATA_INLINE_BYTES - in_block);
@@ -2644,11 +2645,11 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 	}
 
 	while (pos < end) {
-		u64    b            = pos / BEAMFS_DATA_INLINE_BYTES;
-		u32    slice_offset = (u32)(pos % BEAMFS_DATA_INLINE_BYTES);
+		u32    payload      = beamfs_block_payload(inode->i_sb);
+		u64    b            = pos / payload;
+		u32    slice_offset = (u32)(pos % payload);
 		u32    slice_length = (u32)min_t(u64, end - pos,
-						 BEAMFS_DATA_INLINE_BYTES -
-						 slice_offset);
+						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, pos);
 		struct buffer_head *bh;
 		u64    phys = 0;
@@ -2845,11 +2846,11 @@ static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
 	}
 
 	while (p < end) {
-		u64    b            = p / BEAMFS_DATA_INLINE_BYTES;
-		u32    slice_offset = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
+		u32    payload      = beamfs_block_payload(inode->i_sb);
+		u64    b            = p / payload;
+		u32    slice_offset = (u32)(p % payload);
 		u32    slice_length = (u32)min_t(u64, end - p,
-						 BEAMFS_DATA_INLINE_BYTES -
-						 slice_offset);
+						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
 		struct buffer_head *bh;
 		u64    phys = 0;
@@ -3067,11 +3068,11 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	}
 
 	while (p < end) {
-		u64    b            = p / BEAMFS_DATA_INLINE_BYTES;
-		u32    slice_offset = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
+		u32    payload      = beamfs_block_payload(inode->i_sb);
+		u64    b            = p / payload;
+		u32    slice_offset = (u32)(p % payload);
 		u32    slice_length = (u32)min_t(u64, end - p,
-						 BEAMFS_DATA_INLINE_BYTES -
-						 slice_offset);
+						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
 		struct buffer_head *bh;
 		unsigned int sb_idx;
@@ -4047,14 +4048,16 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 			/* Logical block index of the first block to be
 			 * fully freed: ceil(new_size / 3824).
 			 */
-			b_first_freed = (new_size + BEAMFS_DATA_INLINE_BYTES - 1)
-					/ BEAMFS_DATA_INLINE_BYTES;
+			b_first_freed = (new_size +
+					 beamfs_block_payload(inode->i_sb) - 1)
+					/ beamfs_block_payload(inode->i_sb);
 
 			/* If new_size is not block-aligned, the surviving
 			 * last block has stale user bytes beyond new_size.
 			 * Zero them via RMW + RS re-encode.
 			 */
-			tail_off = (u32)(new_size % BEAMFS_DATA_INLINE_BYTES);
+			tail_off = (u32)(new_size %
+					 beamfs_block_payload(inode->i_sb));
 			if (tail_off != 0 && new_size > 0) {
 				u64 b_last_kept = new_size /
 						  BEAMFS_DATA_INLINE_BYTES;
