@@ -80,6 +80,16 @@ struct fsck_reader {
 	uint64_t         inode_table_blk;
 	uint64_t         inode_count;
 	uint32_t         inodes_per_block;
+	/*
+	 * Whether this volume's blocks are capsules.
+	 *
+	 * Interleaved, a codeword's symbols are at every sixteenth byte
+	 * and the parity is one block of 256 at offset 3824. Contiguous,
+	 * a codeword owns 239 bytes with its parity behind them. Reading
+	 * one as the other gathers the wrong symbols and decodes to
+	 * noise, so the reader has to know which it is looking at.
+	 */
+	int              interleaved;
 	/* Indirect-block parity region, zero when the volume predates
 	 * it -- v4 and earlier have none, and a checker that insists on
 	 * it cannot read them.

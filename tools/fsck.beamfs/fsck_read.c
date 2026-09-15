@@ -64,6 +64,7 @@ enum fsck_read_status fsck_reader_open(struct fsck_reader *r, int fd)
 
 	memset(r, 0, sizeof(*r));
 	r->fd = fd;
+	r->interleaved = 0;
 	r->rs = rs_init();
 	if (!r->rs)
 		return FSCK_READ_IO;
@@ -130,6 +131,16 @@ enum fsck_read_status fsck_reader_open(struct fsck_reader *r, int fd)
 			st = FSCK_READ_CORRECTED;
 		}
 	}
+
+	/*
+	 * Which layout, read from the volume rather than passed in.
+	 *
+	 * Three passes open a reader and none of them has any reason to
+	 * know about block layouts; the reader is already reading the
+	 * superblock for the geometry, and this is one more field of it.
+	 */
+	r->interleaved = (sb.s_feat_incompat &
+			  BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE) ? 1 : 0;
 
 	r->data_start       = sb.s_data_start_blk;
 	r->nblocks          = sb.s_block_count > sb.s_data_start_blk
@@ -428,6 +439,44 @@ enum fsck_read_status fsck_read_data(struct fsck_reader *r, uint64_t blk,
 
 	if (!read_exact(r->fd, (off_t)blk * BEAMFS_BLOCK_SIZE, raw, sizeof(raw)))
 		return FSCK_READ_IO;
+
+	if (r->interleaved) {
+		/*
+		 * A capsule: gather each codeword from every sixteenth
+		 * byte, decode it, and put it back. The data comes out
+		 * where it already is -- interleaving moves symbols
+		 * within a codeword, not the bytes a reader sees.
+		 */
+		static uint8_t word[BEAMFS_SUBBLOCK_DATA];
+
+		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
+			int positions[BEAMFS_RS_PARITY / 2];
+			size_t k;
+			int rc;
+
+			for (k = 0; k < BEAMFS_SUBBLOCK_DATA; k++)
+				word[k] = raw[k * BEAMFS_DATA_INLINE_SUBBLOCKS + i];
+
+			rc = rs_decode_subblock(r->rs, word,
+						BEAMFS_SUBBLOCK_DATA,
+						raw + BEAMFS_CAPSULE_PARITY_OFF
+						    + (size_t)i * BEAMFS_RS_PARITY,
+						positions);
+			if (rc == RS_UNCORRECTABLE) {
+				r->uncorrectable++;
+				return FSCK_READ_UNCORRECTABLE;
+			}
+			if (rc > 0)
+				st = FSCK_READ_CORRECTED;
+
+			for (k = 0; k < BEAMFS_SUBBLOCK_DATA; k++)
+				raw[k * BEAMFS_DATA_INLINE_SUBBLOCKS + i] = word[k];
+		}
+		memcpy(out, raw, BEAMFS_CAPSULE_DATA_BYTES);
+		if (st == FSCK_READ_CORRECTED)
+			r->corrected++;
+		return st;
+	}
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		int positions[BEAMFS_RS_PARITY / 2];

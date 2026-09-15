@@ -1034,18 +1034,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
-				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
-
-/*
- * RS_INTERLEAVE is deliberately absent from the mask above.
- *
- * The bit is defined and the codec exists, and nothing reads a volume
- * with it yet. Listing it as supported would have the kernel accept a
- * volume whose blocks it gathers wrong -- every read decoding to noise
- * with every check passing, which is the failure this whole format
- * exists to avoid. It joins the mask in the commit that makes the
- * read path honour it, and not before.
- */
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC | \
+				    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
 
 /*
  * On-disk superblock - block 0
