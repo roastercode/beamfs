@@ -67,6 +67,17 @@ tests/test_rs_vectors: tests/test_rs_vectors.o rs_decode.o
 # A function doing read-modify-write on a region went onto the free
 # path untested and produced 56 "beyond correction" messages in one
 # sweep. These are the questions that should have come first.
+# What interleaving buys against bursts.
+#
+# A heavy ion corrupts neighbouring cells, so today's nine-byte burst
+# lands in one codeword and takes it past correction. Interleaved it
+# takes 129, for no extra parity.
+tests/interleave_test: tests/interleave_test.o rs_decode.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+tests/interleave_test.o: tests/interleave_test.c rs_decode.h beamfs_format.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+
 tests/region_test: tests/region_test.o rs_decode.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
@@ -84,3 +95,4 @@ test: tests/test_rs_vectors
 	elif [ $$rc -eq 77 ]; then echo "SKIPPED (decoder skeleton)"; \
 	else echo "FAIL rc=$$rc"; exit $$rc; fi
 	./tests/region_test
+	./tests/interleave_test
