@@ -184,6 +184,43 @@ typedef uint32_t u32;
  * Same 4096 bytes, same 272 of overhead, same tail pad. Only the
  * positions change, and with them the burst a block survives.
  */
+/*
+ *   0 .. 3807   user data          |
+ *   3808 .. 3815 csum              | covered by the sixteen codewords,
+ *   3816 .. 3823 selfid            | interleaved
+ *   3824 .. 4079 parity, 16 x 16   |
+ *   4080 .. 4095 generation + free
+ *
+ * The descriptor moves inside the coded area. Today the csum that says
+ * whether a block is sound and the selfid that says whether it is the
+ * right one sit in the tail pad, outside every codeword: a nine-byte
+ * burst there condemns a block the rest of which would have survived
+ * intact. A capsule that cannot protect its own header is not a unit
+ * of survival.
+ *
+ * It costs sixteen bytes of capacity per block -- 3808 rather than
+ * 3824, 0.42%, four megabytes on a gigabyte -- and buys the header the
+ * same 139-byte burst resistance as the data.
+ *
+ * The sixteen bytes freed at the end hold the generation, which needs
+ * no correction: a stale generation is caught by disagreeing with what
+ * the tree expects, not by being decoded.
+ */
+#define BEAMFS_CAPSULE_DATA_OFF       0
+#define BEAMFS_CAPSULE_DATA_BYTES     3808
+#define BEAMFS_CAPSULE_CSUM_OFF       3808   /* u8 type, 3 rsvd, __le32 crc */
+#define BEAMFS_CAPSULE_SELFID_OFF     3816   /* __le64 digest(ino, iblock)  */
+#define BEAMFS_CAPSULE_CODED_BYTES    3824   /* data + csum + selfid        */
+#define BEAMFS_CAPSULE_PARITY_OFF     3824
+#define BEAMFS_CAPSULE_PARITY_LEN     (BEAMFS_DATA_INLINE_SUBBLOCKS * BEAMFS_RS_PARITY)
+#define BEAMFS_CAPSULE_GEN_OFF        4080   /* __le64 generation           */
+#define BEAMFS_CAPSULE_GEN_BYTES      8
+#define BEAMFS_CAPSULE_FREE_OFF       4088   /* 8 bytes, zero, reserved     */
+
+/*
+ * Kept: the woven names above describe the same geometry without the
+ * descriptor moved, which is what rs_bench and the tests use.
+ */
 #define BEAMFS_DATA_WOVEN_OFF         0
 #define BEAMFS_DATA_WOVEN_BYTES       BEAMFS_DATA_INLINE_BYTES          /* 3824 */
 #define BEAMFS_DATA_WOVEN_PARITY_OFF  BEAMFS_DATA_INLINE_BYTES          /* 3824 */
