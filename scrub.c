@@ -64,6 +64,11 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	u8   *staging;
 	unsigned int i, n_corrected = 0;
 	int ret = 0;
+	/*
+	 * Which layout the first decode settled on, so the confirming
+	 * read takes the same one.
+	 */
+	bool woven = false;
 
 	*corrected = 0;
 
@@ -123,6 +128,43 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	memcpy(staging, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
 	unlock_buffer(bh);
 
+	/*
+	 * Which layout, when the sweep does not know what it is holding.
+	 *
+	 * Two of the three callers know: the children of a level-one
+	 * indirect block and an inode's i_direct are data blocks, and on
+	 * an interleaved volume they are capsules. The third walks the
+	 * wear map and visits whatever is allocated -- a capsule, an
+	 * indirect block, a directory block -- with nothing to say
+	 * which.
+	 *
+	 * So: try the layout the volume uses for data, and fall back to
+	 * the alternating one. A block does not decode cleanly under
+	 * both by accident -- sixteen codewords of sixteen parity bytes
+	 * each agreeing on the wrong symbols is not something that
+	 * happens -- so whichever succeeds is the one it was written in.
+	 *
+	 * Without this the sweep reported "block 17725 subblock 6/16
+	 * uncorrectable" on a block that was intact, which is worse than
+	 * missing damage: it condemns what it was meant to protect.
+	 */
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE) {
+		woven = true;
+		ret = beamfs_rs_decode_woven(staging + BEAMFS_CAPSULE_DATA_OFF,
+					     staging + BEAMFS_CAPSULE_PARITY_OFF,
+					     BEAMFS_RS_PARITY,
+					     BEAMFS_SUBBLOCK_DATA,
+					     BEAMFS_DATA_INLINE_SUBBLOCKS,
+					     results, "sweep");
+		if (ret != -EUCLEAN)
+			goto decoded;
+
+		/* Not a capsule: an indirect or directory block. */
+		woven = false;
+		memcpy(staging, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
+	}
+
 	ret = beamfs_rs_decode_region(staging, BEAMFS_SUBBLOCK_TOTAL,
 				      staging + BEAMFS_SUBBLOCK_DATA,
 				      BEAMFS_SUBBLOCK_TOTAL,
@@ -131,6 +173,7 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 				      results, positions,
 				      BEAMFS_RS_PARITY / 2,
 				"sweep");
+decoded:
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {
@@ -179,14 +222,30 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 				memcpy(staging, (u8 *)rbh->b_data,
 				       BEAMFS_BLOCK_SIZE);
 				unlock_buffer(rbh);
-				beamfs_rs_decode_region(staging,
-					BEAMFS_SUBBLOCK_TOTAL,
-					staging + BEAMFS_SUBBLOCK_DATA,
-					BEAMFS_SUBBLOCK_TOTAL,
-					BEAMFS_SUBBLOCK_DATA,
-					BEAMFS_DATA_INLINE_SUBBLOCKS,
-					r2, p2, BEAMFS_RS_PARITY / 2,
-					"sweep-confirm");
+				/*
+				 * The confirming read takes the layout
+				 * the first decode settled on. Reading
+				 * it the other way would confirm damage
+				 * that is not there, which is the whole
+				 * reason this second read exists.
+				 */
+				if (woven)
+					beamfs_rs_decode_woven(
+						staging + BEAMFS_CAPSULE_DATA_OFF,
+						staging + BEAMFS_CAPSULE_PARITY_OFF,
+						BEAMFS_RS_PARITY,
+						BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_DATA_INLINE_SUBBLOCKS,
+						r2, "sweep-confirm");
+				else
+					beamfs_rs_decode_region(staging,
+						BEAMFS_SUBBLOCK_TOTAL,
+						staging + BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_SUBBLOCK_TOTAL,
+						BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_DATA_INLINE_SUBBLOCKS,
+						r2, p2, BEAMFS_RS_PARITY / 2,
+						"sweep-confirm");
 				rc2 = r2[i];
 				brelse(rbh);
 			}

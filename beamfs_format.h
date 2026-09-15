@@ -1034,32 +1034,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
-				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
-
-/*
- * RS_INTERLEAVE: not supported, and the list of what is left.
- *
- * Every piece corrected so far was a site that read a capsule with the
- * alternating arithmetic, and each was found by the next measurement
- * rather than by reading the code:
- *
- *   - the data path payload            done
- *   - fsck's block-count per inode     done, and directories excepted
- *   - mkfs sizing and filling files    done
- *   - dir.c, which must NOT follow     reverted
- *   - scrub.c, the sweep               NOT done: it decodes every
- *                                      block it walks with the
- *                                      alternating layout and reports
- *                                      sound capsules uncorrectable
- *
- * Measured: eight megabytes to an interleaved volume, unmounted,
- * remounted, different md5sum, and "sweep: block 17725 subblock 6/16
- * uncorrectable" from a kernel reading a block that was fine.
- *
- * The scrub is the known one. What this needs before the bit goes back
- * is a list of every reader of a data block, checked against the code
- * rather than against the next failure.
- */
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC | \
+				    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
 
 /*
  * On-disk superblock - block 0
