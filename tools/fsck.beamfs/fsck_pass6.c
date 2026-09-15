@@ -480,8 +480,18 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 		 * fits, so its size says nothing about blocks at all.
 		 */
 		if ((mode & S_FMT) != S_LNK) {
-			need = (le64toh(in.i_size) + BEAMFS_DATA_INLINE_BYTES - 1)
-			     / BEAMFS_DATA_INLINE_BYTES;
+			/*
+			 * How many blocks a file of this size needs, in
+			 * this volume's layout. A capsule holds 3808 and
+			 * the alternating layout 3824, and using the
+			 * wrong one reports every large file as owning
+			 * fewer blocks than it claims.
+			 */
+			uint64_t per_block = p.rd->interleaved
+					   ? BEAMFS_CAPSULE_DATA_BYTES
+					   : BEAMFS_DATA_INLINE_BYTES;
+
+			need = (le64toh(in.i_size) + per_block - 1) / per_block;
 			if (need > owned) {
 				p.r.size_ahead_of_blocks++;
 				note(&p, "fsck.beamfs: pass 6: inode %llu claims %llu bytes, needing %llu block(s), but owns %llu\n",

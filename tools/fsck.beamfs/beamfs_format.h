@@ -1034,26 +1034,8 @@ enum beamfs_clock_quality {
 				    BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
 				    BEAMFS_FEATURE_INCOMPAT_DIR_RS | \
 				    BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL | \
-				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)
-
-/*
- * RS_INTERLEAVE stays out until the capacity follows the layout.
- *
- * A capsule holds 3808 bytes of user data and 16 of descriptor, and
- * the data path writes 3824 per block: the last sixteen bytes of data
- * land on the descriptor and the descriptor lands on them. Measured on
- * a live volume -- eight megabytes written, unmounted, remounted, and
- * a different md5sum, with every check green and the kernel silent.
- *
- * iblock = offset / 3824 is the logical-to-physical mapping of the
- * whole filesystem, in 14 arithmetic sites out of 91 that name the
- * constant, across the kernel, fsck and mkfs. Making it depend on the
- * format is the change this needs, and one site missed reads a file
- * back shifted by sixteen bytes with nothing to say so.
- *
- * The layout, the codec, the checker and mkfs are all in place and
- * tested. This is the mapping, and it is not done.
- */
+				    BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC | \
+				    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
 
 /*
  * On-disk superblock - block 0
