@@ -579,10 +579,29 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 */
 	beamfs_ind_parity_touched(sbi);
 
-	if (inode)
+	if (inode) {
 		mmb_mark_buffer_dirty(pbh, &BEAMFS_I(inode)->i_metadata_bhs);
-	else
+		/*
+		 * And the inode, so the list gets flushed.
+		 *
+		 * mmb_sync empties the metadata list from write_inode,
+		 * which the VFS calls only for an inode it believes is
+		 * dirty. Updating a region changes no field of the
+		 * inode, so nothing marked it, and the region stayed in
+		 * memory holding the only parity that matches the block
+		 * just written.
+		 *
+		 * What is on the medium is then the parity of what the
+		 * block held before, and verify reports the block beyond
+		 * correction -- 17 of them in one generic/013, on a
+		 * volume where treecheck saw no lost pointer and every
+		 * indirect block had its parity updated. The update ran;
+		 * it just never landed.
+		 */
+		mark_inode_dirty(inode);
+	} else {
 		mark_buffer_dirty(pbh);
+	}
 	brelse(pbh);
 }
 
