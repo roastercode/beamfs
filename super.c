@@ -121,12 +121,20 @@ static void beamfs_put_super(struct super_block *sb)
 			for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
 				struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
 
-				if (bh && buffer_dirty(bh))
-					sync_dirty_buffer(bh);
+				if (bh && buffer_dirty(bh) &&
+				    sync_dirty_buffer(bh))
+					pr_err("beamfs: umount: bitmap block %u did not reach the medium\n",
+					       k);
 			}
 		}
-		if (sbi->s_sbh && buffer_dirty(sbi->s_sbh))
-			sync_dirty_buffer(sbi->s_sbh);
+		/*
+		 * The superblock last, and loudly: a volume whose
+		 * superblock did not land is one the next mount reads as
+		 * it was before everything above.
+		 */
+		if (sbi->s_sbh && buffer_dirty(sbi->s_sbh) &&
+		    sync_dirty_buffer(sbi->s_sbh))
+			pr_err("beamfs: umount: the superblock did not reach the medium\n");
 
 		beamfs_destroy_bitmap(sb);
 		mempool_destroy(sbi->s_scratch_pool);
@@ -324,11 +332,19 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 		 * is never flushed by __writeback_single_inode.
 		 */
 		beamfs_ind_parity_update(sb, ibh, inode);
-		if (inode)
+		if (inode) {
 			mmb_mark_buffer_dirty(ibh,
 					      &BEAMFS_I(inode)->i_metadata_bhs);
-		else
+			/*
+			 * And the inode: a list nothing marks is a list
+			 * write_inode never empties, and the comment
+			 * above is exactly about a buffer that reaches
+			 * the medium late.
+			 */
+			mark_inode_dirty(inode);
+		} else {
 			mark_buffer_dirty(ibh);
+		}
 	}
 	brelse(ibh);
 
@@ -470,7 +486,20 @@ static void beamfs_evict_inode(struct inode *inode)
 		beamfs_free_data_blocks(inode);
 		mutex_unlock(&BEAMFS_I(inode)->i_alloc_mutex);
 		inode->i_mode = 0;
-		beamfs_write_inode_raw(inode);
+		{
+			int _w = beamfs_write_inode_raw(inode);
+
+			/*
+			 * The blocks are already free. An inode that
+			 * does not reach the medium leaves the next
+			 * mount reading a mode that is not zero, over
+			 * blocks the bitmap has given away.
+			 */
+			if (_w)
+				pr_err_ratelimited("beamfs: evict: inode %llu not written: %d\n",
+						   (unsigned long long)inode->i_ino,
+						   _w);
+		}
 	}
 	/*
 	 * Written before the list is thrown away.
@@ -967,10 +996,21 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 			pr_warn_ratelimited("beamfs: dirty_super: no staging buffer; skipping RS re-encode\n");
 		} else {
 			beamfs_sb_to_rs_staging(fsb, staging);
-			beamfs_rs_encode_region(staging, BEAMFS_SB_RS_DATA_LEN,
+			{
+				int _e = beamfs_rs_encode_region(staging,
+						BEAMFS_SB_RS_DATA_LEN,
 						parity_dst, BEAMFS_RS_PARITY,
 						BEAMFS_SB_RS_DATA_LEN,
 						BEAMFS_SB_RS_SUBBLOCKS);
+
+				/*
+				 * The superblock: a failure here costs
+				 * the whole volume on the next mount.
+				 */
+				if (_e < 0)
+					pr_err("beamfs: superblock encode failed: %d\n",
+					       _e);
+			}
 		}
 	}
 

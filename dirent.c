@@ -146,11 +146,21 @@ void beamfs_dirent_encode(struct buffer_head *bh)
 			b + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 			BEAMFS_SUBBLOCK_DATA);
 
-	beamfs_rs_encode_region(b, BEAMFS_SUBBLOCK_TOTAL,
+	{
+		int _e = beamfs_rs_encode_region(b, BEAMFS_SUBBLOCK_TOTAL,
 				b + BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_TOTAL,
 				BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+		/*
+		 * A directory block with no valid parity is one a
+		 * verify will later call beyond correction.
+		 */
+		if (_e < 0)
+			pr_err_ratelimited("beamfs/dirent: encode failed: %d\n",
+					   _e);
+	}
 }
 
 /*

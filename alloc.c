@@ -213,7 +213,14 @@ int beamfs_setup_bitmap(struct super_block *sb)
 
 			if (corrected) {
 				mark_buffer_dirty(bh);
-				sync_dirty_buffer(bh);
+				/*
+				 * A repair that does not land is a bitmap
+				 * that decodes the same way on the next
+				 * mount, and the same correction again.
+				 */
+				if (sync_dirty_buffer(bh))
+					pr_err("beamfs: bitmap block %u repair did not reach the medium\n",
+					       k);
 				corrected = false;
 			}
 		}
@@ -380,10 +387,22 @@ static void beamfs_bitmap_encode_sub_locked(struct beamfs_sb_info *sbi,
 			memset(subdata + nbytes, 0,
 			       BEAMFS_SUBBLOCK_DATA - nbytes);
 
-		beamfs_rs_encode_region(subdata, BEAMFS_SUBBLOCK_TOTAL,
+		{
+			int _e = beamfs_rs_encode_region(subdata,
+					BEAMFS_SUBBLOCK_TOTAL,
 					subdata + BEAMFS_SUBBLOCK_DATA,
 					BEAMFS_SUBBLOCK_TOTAL,
 					BEAMFS_SUBBLOCK_DATA, 1);
+
+			/*
+			 * An encode that fails leaves a block whose
+			 * parity describes nothing, written with every
+			 * check passing.
+			 */
+			if (_e < 0)
+				pr_err_ratelimited("beamfs: bitmap subblock encode failed: %d\n",
+						   _e);
+		}
 	}
 }
 
@@ -491,8 +510,19 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * synchronous sync_dirty_buffer itself, and on the free path from
 	 * beamfs_free_data_blocks.
 	 */
-	if (owner && !(inode_state_read_once(owner) & I_FREEING))
+	if (owner && !(inode_state_read_once(owner) & I_FREEING)) {
 		mmb_mark_buffer_dirty(bh, &BEAMFS_I(owner)->i_metadata_bhs);
+		/*
+		 * And the owner, or the list is never walked.
+		 *
+		 * The ordering above holds only if __writeback_single_inode
+		 * runs, and the VFS runs it for an inode it believes is
+		 * dirty. Attaching the bitmap block to an inode nothing
+		 * marked leaves it in memory, which is the case this
+		 * attachment exists to prevent.
+		 */
+		mark_inode_dirty(owner);
+	}
 
 	unlock_buffer(bh);
 	return 0;

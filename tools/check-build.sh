@@ -46,18 +46,32 @@ done
 PATH="$NATIVE/usr/bin/x86_64-poky-linux:$PATH"
 export PATH
 
-make -C "$K" O="$B" \
+OUT=$(make -C "$K" O="$B" \
      ARCH=x86_64 CROSS_COMPILE=x86_64-poky-linux- \
-     fs/beamfs/ 2>&1 |
+     fs/beamfs/ 2>&1)
+echo "$OUT" |
 	grep -E "(error|warning):|CC \[M\]|CC " |
 	sed "s|$K/||"
+
+# How many files it actually compiled.
+#
+# A make that compiles nothing returns zero, and "clean" then means
+# "nothing was checked". The sources are copied in above so kbuild
+# always has something newer to build, but saying the number out loud
+# is what makes that visible rather than assumed.
+N=$(echo "$OUT" | grep -cE "^  CC")
 
 # The pipeline's status is grep's, so ask make again -- it is a no-op
 # the second time and answers in a fraction of a second.
 if make -C "$K" O="$B" ARCH=x86_64 CROSS_COMPILE=x86_64-poky-linux- \
 	fs/beamfs/ >/dev/null 2>&1; then
 	echo
-	echo "  clean against $(basename "$(dirname "$B")")"
+	echo "  clean against $(basename "$(dirname "$B")") -- $N file(s) compiled"
+	[ "$N" -eq 0 ] && echo "  nothing was compiled: this says nothing about the code"
+	echo
+	echo "  and this is not bitbake: the kernel the node boots is only"
+	echo "  rebuilt by 'bitbake linux-mainline', and only deployed by"
+	echo "  'beamfs-xfstests deploy'." 
 else
 	echo
 	echo "  it does not build"

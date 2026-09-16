@@ -841,7 +841,20 @@ static int beamfs_unlink(struct inode *dir, struct dentry *dentry)
 
 	inode_set_ctime_to_ts(inode, current_time(inode));
 	inode_dec_link_count(inode);
-	beamfs_write_inode_raw(dir);
+	/*
+	 * The operation has succeeded and the name is gone from the
+	 * tree; failing it now would be a lie. But an inode that does
+	 * not reach the medium is a link count the next mount disagrees
+	 * with, and saying nothing is how that becomes a checker's
+	 * problem weeks later.
+	 */
+	{
+		int _w = beamfs_write_inode_raw(dir);
+
+		if (_w)
+			pr_err_ratelimited("beamfs: unlink: parent inode %llu not written: %d\n",
+					   (unsigned long long)dir->i_ino, _w);
+	}
 	return 0;
 }
 
@@ -950,7 +963,14 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 	inode_dec_link_count(inode);
 	inode_dec_link_count(inode);
 	inode_dec_link_count(dir);
-	beamfs_write_inode_raw(dir);
+	{
+		int _w = beamfs_write_inode_raw(dir);
+
+		/* See unlink: the rmdir has happened either way. */
+		if (_w)
+			pr_err_ratelimited("beamfs: rmdir: parent inode %llu not written: %d\n",
+					   (unsigned long long)dir->i_ino, _w);
+	}
 	return 0;
 }
 
@@ -974,8 +994,16 @@ static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
 		return ret;
 	}
 
-	beamfs_write_inode_raw(inode);
-	beamfs_write_inode_raw(dir);
+	{
+		int _w = beamfs_write_inode_raw(inode);
+
+		if (!_w)
+			_w = beamfs_write_inode_raw(dir);
+		if (_w)
+			pr_err_ratelimited("beamfs: link: inode %llu or parent %llu not written: %d\n",
+					   (unsigned long long)inode->i_ino,
+					   (unsigned long long)dir->i_ino, _w);
+	}
 	d_instantiate(dentry, inode);
 	ihold(inode);
 	return 0;
@@ -1038,11 +1066,18 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 		memcpy((u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
 		       staging + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 		       BEAMFS_SUBBLOCK_DATA);
-	beamfs_rs_encode_region((u8 *)bh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+	{
+		int _e = beamfs_rs_encode_region((u8 *)bh->b_data,
+				BEAMFS_SUBBLOCK_TOTAL,
 				(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_TOTAL,
 				BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+		if (_e < 0)
+			pr_err_ratelimited("beamfs: directory block encode failed: %d\n",
+					   _e);
+	}
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
 	mark_buffer_dirty(bh);
@@ -1397,8 +1432,13 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 			return ret;
 	}
 
-	if (new_inode)
-		beamfs_write_inode_raw(new_inode);
+	if (new_inode) {
+		int _w = beamfs_write_inode_raw(new_inode);
+
+		if (_w)
+			pr_err_ratelimited("beamfs: rename: replaced inode %llu not written: %d\n",
+					   (unsigned long long)new_inode->i_ino, _w);
+	}
 
 	return 0;
 }

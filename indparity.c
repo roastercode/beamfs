@@ -408,11 +408,22 @@ static void ind_region_write(struct super_block *sb,
 		       scratch + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
 		       BEAMFS_SUBBLOCK_DATA);
 
-	beamfs_rs_encode_region((u8 *)pbh->b_data, BEAMFS_SUBBLOCK_TOTAL,
+	{
+		int _e = beamfs_rs_encode_region((u8 *)pbh->b_data,
+				BEAMFS_SUBBLOCK_TOTAL,
 				(u8 *)pbh->b_data + BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_TOTAL,
 				BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_DATA_INLINE_SUBBLOCKS);
+
+		/*
+		 * The region's own FEC. Without it the region is
+		 * unreadable, and every block it covers with it.
+		 */
+		if (_e < 0)
+			pr_err_ratelimited("beamfs: parity region encode failed: %d\n",
+					   _e);
+	}
 #ifdef CONFIG_BEAMFS_DEBUG_TREE
 	ind_region_selfcheck(sb, pbh);
 #else
