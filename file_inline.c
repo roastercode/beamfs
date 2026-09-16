@@ -725,7 +725,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
  *
  * Paired with beamfs_seal_block, which encodes what this writes.
  */
-static void beamfs_lay_payload(struct super_block *sb, u8 *block,
+void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
 			       const u8 *payload)
 {
 	unsigned int i;
@@ -743,7 +743,7 @@ static void beamfs_lay_payload(struct super_block *sb, u8 *block,
 		       BEAMFS_SUBBLOCK_DATA);
 }
 
-static int beamfs_seal_block(struct super_block *sb, u8 *block)
+int beamfs_seal_data_block(struct super_block *sb, u8 *block)
 {
 	if (BEAMFS_SB(sb)->s_feat_incompat &
 	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
@@ -888,7 +888,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
+			int _e = beamfs_seal_data_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -1101,7 +1101,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
+			int _e = beamfs_seal_data_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -1490,7 +1490,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
+			int _e = beamfs_seal_data_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -2016,7 +2016,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * start.
 		 */
 		{
-			int _e = beamfs_seal_block(sb, (u8 *)dbh->b_data);
+			int _e = beamfs_seal_data_block(sb, (u8 *)dbh->b_data);
 
 			if (_e < 0)
 				pr_err_ratelimited("beamfs/inline: encode of new data block %llu failed: %d\n",
@@ -3610,9 +3610,9 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			kunmap_local(src);
 		}
 
-		beamfs_lay_payload(sb, (u8 *)bh->b_data, scratch);
+		beamfs_lay_data_payload(sb, (u8 *)bh->b_data, scratch);
 
-		ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
+		ret = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
 		if (ret < 0) {
 			pr_err_ratelimited("beamfs/inline: writeback_range: rs_encode_region failed: %d\n",
 					   ret);
@@ -4366,9 +4366,9 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	memset(scratch + zero_offset, 0,
 	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
 
-	beamfs_lay_payload(sb, (u8 *)bh->b_data, scratch);
+	beamfs_lay_data_payload(sb, (u8 *)bh->b_data, scratch);
 
-	ret = beamfs_seal_block(sb, (u8 *)bh->b_data);
+	ret = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
 	if (ret < 0) {
 		pr_err_ratelimited("beamfs/inline: zero_tail: rs_encode_region failed: %d\n",
 				   ret);

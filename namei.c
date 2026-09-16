@@ -1062,20 +1062,23 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 
 	lock_buffer(bh);
 	memset(bh->b_data, 0, BEAMFS_BLOCK_SIZE);
-	for (unsigned int i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
-		memcpy((u8 *)bh->b_data + (size_t)i * BEAMFS_SUBBLOCK_TOTAL,
-		       staging + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-		       BEAMFS_SUBBLOCK_DATA);
+	/*
+	 * A symlink's target is a data block, so it follows the volume's
+	 * data layout.
+	 *
+	 * This laid it down in sixteen runs 255 apart and encoded it the
+	 * same way, whatever the volume did, so on a capsule volume the
+	 * kernel read back sixteen uncorrectable subblocks and an empty
+	 * path. generic/360 is exactly that: md5 of nothing where the
+	 * target should be, on a block holding 1051 intact bytes of it
+	 * and a parity area of zeros.
+	 */
+	beamfs_lay_data_payload(sb, (u8 *)bh->b_data, staging);
 	{
-		int _e = beamfs_rs_encode_region((u8 *)bh->b_data,
-				BEAMFS_SUBBLOCK_TOTAL,
-				(u8 *)bh->b_data + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_DATA_INLINE_SUBBLOCKS);
+		int _e = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
 
 		if (_e < 0)
-			pr_err_ratelimited("beamfs: directory block encode failed: %d\n",
+			pr_err_ratelimited("beamfs: symlink block encode failed: %d\n",
 					   _e);
 	}
 	set_buffer_uptodate(bh);

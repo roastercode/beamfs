@@ -524,6 +524,18 @@ static inline u32 beamfs_block_payload(struct super_block *sb)
 	return BEAMFS_DATA_INLINE_BYTES;
 }
 
+/*
+ * Lay a data block's payload down, and seal it, in the volume's
+ * layout.
+ *
+ * Shared because a symlink's target is a data block written from
+ * namei.c, and it followed the alternating layout on a capsule volume
+ * until generic/360 read back an empty path.
+ */
+void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
+			     const u8 *payload);
+int  beamfs_seal_data_block(struct super_block *sb, u8 *block);
+
 int beamfs_rs_encode_block(u8 *block);
 int beamfs_rs_decode_block(u8 *block, int *results, const char *who);
 void beamfs_block_read(const u8 *block, size_t off, size_t len, u8 *out);
