@@ -2100,16 +2100,54 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
  * in it yields at worst a false-positive fail-closed on read, never a
  * silent accept of wrong data.
  */
+/*
+ * Where the descriptor lives, and how much it covers.
+ *
+ * Alternating: at 4080, outside every codeword, over the 3824 bytes of
+ * payload. A flip there fails a read closed rather than accepting
+ * wrong data, which is what format-v6 3.3 argues for.
+ *
+ * Capsule: at 3808, inside the coded area, over the 3808 bytes of
+ * payload. The argument for staying outside was that a descriptor
+ * cannot be repaired -- interleaved it can, along with everything
+ * else, and nine bad bytes there stop condemning a block whose data is
+ * intact. The sixteen bytes it costs are already spent: the payload is
+ * 3808 and the encoder covers 3824, so 3808..3823 were protected and
+ * empty.
+ */
+static u32 beamfs_desc_off(struct super_block *sb)
+{
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+		return BEAMFS_CAPSULE_CSUM_OFF;
+
+	return BEAMFS_DATA_CSUM_TYPE_OFF;
+}
+
+static u32 beamfs_selfid_off(struct super_block *sb)
+{
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+		return BEAMFS_CAPSULE_SELFID_OFF;
+
+	return BEAMFS_DATA_SELFID_OFF;
+}
+
 static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 					 u8 *block, const u8 *payload,
 					 u64 ino, u64 iblock)
 {
+	struct super_block *sb = sbi->s_sb;
+	u32 doff = beamfs_desc_off(sb);
+	u32 soff = beamfs_selfid_off(sb);
+	u32 covered = beamfs_block_payload(sb);
+
 	memset(block + BEAMFS_DATA_INLINE_TOTAL, 0, BEAMFS_DATA_INLINE_PAD);
 	if (sbi->s_data_csum) {
-		u32 crc = beamfs_crc32(payload, BEAMFS_DATA_INLINE_BYTES);
+		u32 crc = beamfs_crc32(payload, covered);
 
-		block[BEAMFS_DATA_CSUM_TYPE_OFF] = BEAMFS_CSUM_CRC32;
-		put_unaligned_le32(crc, block + BEAMFS_DATA_CSUM_VALUE_OFF);
+		block[doff] = BEAMFS_CSUM_CRC32;
+		put_unaligned_le32(crc, block + doff + 4);
 	}
 	/*
 	 * DATA_SELFID: bind the block to the (inode, logical index) pair it
@@ -2119,7 +2157,7 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 	if (sbi->s_data_selfid) {
 		u64 id = beamfs_data_selfid(ino, iblock);
 
-		put_unaligned_le64(id, block + BEAMFS_DATA_SELFID_OFF);
+		put_unaligned_le64(id, block + soff);
 	}
 }
 
@@ -2132,10 +2170,23 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
  * the value the write path stored (see beamfs_inline_stamp_tail_pad and
  * beamfs_crc32_sb for the same non-contiguous chaining idiom). No alloc.
  */
-static u32 beamfs_inline_payload_crc(const u8 *codeword)
+/*
+ * The CRC of a block's payload, in whichever layout it is written.
+ *
+ * A capsule holds it contiguously; the alternating layout holds it in
+ * sixteen runs 255 apart. Walking one as the other hashes the parity
+ * along with the data and disagrees with what was stamped.
+ */
+static u32 beamfs_inline_payload_crc(struct super_block *sb,
+				     const u8 *codeword)
 {
 	u32 c = 0xFFFFFFFF;
 	unsigned int i;
+
+	if (BEAMFS_SB(sb)->s_feat_incompat &
+	    BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE)
+		return crc32_le(c, codeword + BEAMFS_CAPSULE_DATA_OFF,
+				BEAMFS_CAPSULE_DATA_BYTES) ^ 0xFFFFFFFF;
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
 		c = crc32_le(c,
@@ -2361,9 +2412,10 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 * mechanism of Theorem v2.2a extended to data regions (v2.2b).
 	 */
 	if (sbi->s_data_csum) {
-		u8  ctype = tmp[BEAMFS_DATA_CSUM_TYPE_OFF];
-		u32 want = get_unaligned_le32(tmp + BEAMFS_DATA_CSUM_VALUE_OFF);
-		u32 got  = beamfs_inline_payload_crc(tmp);
+		u32 doff  = beamfs_desc_off(sb);
+		u8  ctype = tmp[doff];
+		u32 want  = get_unaligned_le32(tmp + doff + 4);
+		u32 got   = beamfs_inline_payload_crc(sb, tmp);
 
 		/*
 		 * csum_type gates the whole check, and the descriptor is
@@ -2441,7 +2493,8 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	if (sbi->s_data_selfid) {
 		u64 want_id = beamfs_data_selfid(inode->i_ino,
 						 iblock_logical_for_log);
-		u64 got_id  = get_unaligned_le64(tmp + BEAMFS_DATA_SELFID_OFF);
+		u64 got_id  = get_unaligned_le64(tmp +
+						 beamfs_selfid_off(sb));
 
 		if (want_id != got_id) {
 			/*
