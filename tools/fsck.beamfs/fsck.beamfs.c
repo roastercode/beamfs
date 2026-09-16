@@ -41,6 +41,13 @@
  * checker claiming support the moment the kernel gains it would walk
  * volumes it cannot read.
  */
+/*
+ * And the read-only-compatible ones. Same reasoning: the checker's own
+ * list, not the kernel's, because the two move at different times.
+ */
+#define FSCK_FEAT_RO_COMPAT_SUPP (BEAMFS_FEATURE_RO_COMPAT_DATA_CSUM | \
+				  BEAMFS_FEATURE_RO_COMPAT_DATA_SELFID)
+
 #define FSCK_FEAT_INCOMPAT_SUPP  (BEAMFS_FEATURE_INCOMPAT_PER_INODE_RS | \
 				  BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY | \
 				  BEAMFS_FEATURE_INCOMPAT_ERROR_BUDGET | \
@@ -293,6 +300,30 @@ static int pass1_superblock(struct fsck_opts *o)
 	 * A checker that cannot read a volume has to say so rather than
 	 * guess about it.
 	 */
+	/*
+	 * A read-only-compatible bit this build does not know.
+	 *
+	 * The volume is readable either way, so a check-only run goes
+	 * ahead. --repair is another matter: writing to a volume whose
+	 * every feature is not understood is how a checker turns a
+	 * question into damage.
+	 */
+	{
+		uint64_t unknown_ro = sb.s_feat_ro_compat &
+				      ~FSCK_FEAT_RO_COMPAT_SUPP;
+
+		if (unknown_ro) {
+			fprintf(stderr,
+				"fsck.beamfs: volume uses read-only feature(s) 0x%016llx that this build does not know\n",
+				(unsigned long long)unknown_ro);
+			if (o->repair) {
+				fprintf(stderr,
+					"fsck.beamfs: refusing to repair a volume with features it cannot account for\n");
+				return FSCK_ERROR;
+			}
+		}
+	}
+
 	{
 		uint64_t unknown = sb.s_feat_incompat & ~FSCK_FEAT_INCOMPAT_SUPP;
 
