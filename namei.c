@@ -114,7 +114,7 @@ static int beamfs_write_inode_raw_flags(struct inode *inode, bool sync)
 	       sizeof(raw->i_reserved) - BEAMFS_RS_PARITY);
 	beamfs_rs_encode((u8 *)raw, BEAMFS_INODE_RS_DATA, raw->i_reserved);
 
-	trace_beamfs_write_inode(inode->i_ino, sync,
+	trace_beamfs_write_inode(inode->i_sb->s_dev, inode->i_ino, sync,
 				 (u64)le64_to_cpu(fi->i_indirect), 0);
 	mark_buffer_dirty(bh);
 	if (sync) {
@@ -714,7 +714,8 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode)
 		return ERR_PTR(-EIO);
 	}
 	mark_inode_dirty(inode);
-	trace_beamfs_inode_dirty(inode->i_ino, (unsigned long)inode_state_read_once(inode));
+	trace_beamfs_inode_dirty(inode->i_sb->s_dev, inode->i_ino,
+				 (unsigned long)inode_state_read_once(inode));
 	return inode;
 }
 
@@ -1298,7 +1299,8 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 		int had = mmb_has_buffers(&BEAMFS_I(inode)->i_metadata_bhs);
 
 		mret = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
-		trace_beamfs_mmb(inode->i_ino, "write_inode sync", had, mret);
+		trace_beamfs_mmb(inode->i_sb->s_dev, inode->i_ino,
+				 "write_inode sync", had, mret);
 	}
 	if (!ret)
 		ret = mret;

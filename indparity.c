@@ -583,7 +583,8 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		for (k = 0; k < BEAMFS_INDIRECT_PTRS; k++)
 			if (((const __le64 *)block)[k])
 				nz++;
-		trace_beamfs_parity_slot(inode ? inode->i_ino : 0, phys,
+		trace_beamfs_parity_slot(sb->s_dev, inode ? inode->i_ino : 0,
+					 phys,
 					 region_blk, offset / (u32)stride, nz);
 	}
 	unlock_buffer(pbh);

@@ -6,6 +6,7 @@
 #define _BEAMFS_TRACE_H
 
 #include <linux/tracepoint.h>
+#include <linux/kdev_t.h>
 
 /*
  * One event per store into the block tree, and one per read of a slot.
@@ -13,10 +14,11 @@
  * can be narrowed to the inode that leaked without rebuilding anything.
  */
 TRACE_EVENT(beamfs_slot_store,
-	TP_PROTO(unsigned long ino, u64 parent, u64 slot, u64 old, u64 new,
+	TP_PROTO(dev_t dev, unsigned long ino, u64 parent, u64 slot, u64 old, u64 new,
 		 unsigned int level),
-	TP_ARGS(ino, parent, slot, old, new, level),
+	TP_ARGS(dev, ino, parent, slot, old, new, level),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, parent)
 		__field(u64, slot)
@@ -25,6 +27,7 @@ TRACE_EVENT(beamfs_slot_store,
 		__field(unsigned int, level)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->parent = parent;
 		__entry->slot = slot;
@@ -32,7 +35,8 @@ TRACE_EVENT(beamfs_slot_store,
 		__entry->new = new;
 		__entry->level = level;
 	),
-	TP_printk("ino=%lu parent=%llu slot=%llu %llu->%llu lvl=%u",
+	TP_printk("dev=%u:%u ino=%lu parent=%llu slot=%llu %llu->%llu lvl=%u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->parent, __entry->slot,
 		  __entry->old, __entry->new, __entry->level)
 );
@@ -69,10 +73,11 @@ TRACE_EVENT(beamfs_slot_store,
  * than being inferred from two slot_store events.
  */
 TRACE_EVENT(beamfs_ind_read,
-	TP_PROTO(unsigned long ino, u64 blk, unsigned int slot, u64 slotval,
+	TP_PROTO(dev_t dev, unsigned long ino, u64 blk, unsigned int slot, u64 slotval,
 		 int uptodate, int fresh),
-	TP_ARGS(ino, blk, slot, slotval, uptodate, fresh),
+	TP_ARGS(dev, ino, blk, slot, slotval, uptodate, fresh),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, blk)
 		__field(unsigned int, slot)
@@ -81,6 +86,7 @@ TRACE_EVENT(beamfs_ind_read,
 		__field(int, fresh)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->blk = blk;
 		__entry->slot = slot;
@@ -88,15 +94,17 @@ TRACE_EVENT(beamfs_ind_read,
 		__entry->uptodate = uptodate;
 		__entry->fresh = fresh;
 	),
-	TP_printk("ino=%lu ind=%llu slot=%u val=%llu uptodate=%d fresh=%d",
+	TP_printk("dev=%u:%u ino=%lu ind=%llu slot=%u val=%llu uptodate=%d fresh=%d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->blk, __entry->slot,
 		  __entry->slotval, __entry->uptodate, __entry->fresh)
 );
 TRACE_EVENT(beamfs_parity_slot,
-	TP_PROTO(unsigned long ino, u64 phys, u64 region, unsigned int slot,
+	TP_PROTO(dev_t dev, unsigned long ino, u64 phys, u64 region, unsigned int slot,
 		 unsigned int nz),
-	TP_ARGS(ino, phys, region, slot, nz),
+	TP_ARGS(dev, ino, phys, region, slot, nz),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, phys)
 		__field(u64, region)
@@ -104,47 +112,55 @@ TRACE_EVENT(beamfs_parity_slot,
 		__field(unsigned int, nz)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->phys = phys;
 		__entry->region = region;
 		__entry->slot = slot;
 		__entry->nz = nz;
 	),
-	TP_printk("ino=%lu ind=%llu region=%llu slot=%u ptrs=%u",
+	TP_printk("dev=%u:%u ino=%lu ind=%llu region=%llu slot=%u ptrs=%u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->phys, __entry->region,
 		  __entry->slot, __entry->nz)
 );
 TRACE_EVENT(beamfs_block_alloc,
-	TP_PROTO(unsigned long ino, u64 blk, unsigned int level),
-	TP_ARGS(ino, blk, level),
+	TP_PROTO(dev_t dev, unsigned long ino, u64 blk, unsigned int level),
+	TP_ARGS(dev, ino, blk, level),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, blk)
 		__field(unsigned int, level)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->blk = blk;
 		__entry->level = level;
 	),
-	TP_printk("ino=%lu blk=%llu lvl=%u",
+	TP_printk("dev=%u:%u ino=%lu blk=%llu lvl=%u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->blk, __entry->level)
 );
 
 TRACE_EVENT(beamfs_block_free,
-	TP_PROTO(unsigned long ino, u64 blk, unsigned int site),
-	TP_ARGS(ino, blk, site),
+	TP_PROTO(dev_t dev, unsigned long ino, u64 blk, unsigned int site),
+	TP_ARGS(dev, ino, blk, site),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, blk)
 		__field(unsigned int, site)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->blk = blk;
 		__entry->site = site;
 	),
-	TP_printk("ino=%lu blk=%llu site=%u",
+	TP_printk("dev=%u:%u ino=%lu blk=%llu site=%u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->blk, __entry->site)
 );
 
@@ -167,54 +183,64 @@ TRACE_EVENT(beamfs_block_free,
  * sync that finds nothing and an evict that drops four are told apart.
  */
 TRACE_EVENT(beamfs_mmb,
-	TP_PROTO(unsigned long ino, const char *how, int n, int err),
-	TP_ARGS(ino, how, n, err),
+	TP_PROTO(dev_t dev, unsigned long ino, const char *how, int n, int err),
+	TP_ARGS(dev, ino, how, n, err),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__string(how, how)
 		__field(int, n)
 		__field(int, err)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__assign_str(how);
 		__entry->n = n;
 		__entry->err = err;
 	),
-	TP_printk("ino=%lu %s buffers=%d err=%d",
+	TP_printk("dev=%u:%u ino=%lu %s buffers=%d err=%d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __get_str(how), __entry->n, __entry->err)
 );
 TRACE_EVENT(beamfs_write_inode,
-	TP_PROTO(unsigned long ino, int sync, u64 indirect, int err),
-	TP_ARGS(ino, sync, indirect, err),
+	TP_PROTO(dev_t dev, unsigned long ino, int sync, u64 indirect, int err),
+	TP_ARGS(dev, ino, sync, indirect, err),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(int, sync)
 		__field(u64, indirect)
 		__field(int, err)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->sync = sync;
 		__entry->indirect = indirect;
 		__entry->err = err;
 	),
-	TP_printk("ino=%lu sync=%d i_indirect=%llu err=%d",
+	TP_printk("dev=%u:%u ino=%lu sync=%d i_indirect=%llu err=%d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __entry->sync, __entry->indirect, __entry->err)
 );
 
 TRACE_EVENT(beamfs_inode_dirty,
-	TP_PROTO(unsigned long ino, unsigned long state),
-	TP_ARGS(ino, state),
+	TP_PROTO(dev_t dev, unsigned long ino, unsigned long state),
+	TP_ARGS(dev, ino, state),
 	TP_STRUCT__entry(
+		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(unsigned long, state)
 	),
 	TP_fast_assign(
+		__entry->dev = dev;
 		__entry->ino = ino;
 		__entry->state = state;
 	),
-	TP_printk("ino=%lu state=0x%lx", __entry->ino, __entry->state)
+	TP_printk("dev=%u:%u ino=%lu state=0x%lx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino, __entry->state)
 );
 
 #endif /* _BEAMFS_TRACE_H */

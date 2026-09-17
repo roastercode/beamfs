@@ -224,7 +224,7 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   (unsigned long long)indirect_blk);
 				return -EIO;
 			}
-			trace_beamfs_ind_read(inode->i_ino, indirect_blk,
+			trace_beamfs_ind_read(inode->i_sb->s_dev, inode->i_ino, indirect_blk,
 				(unsigned int)indirect_slot,
 				le64_to_cpu(((__le64 *)ibh->b_data)[indirect_slot]),
 				buffer_uptodate(ibh), fresh);
@@ -910,7 +910,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * parent 0 and level 0: there is no block above a direct
 		 * pointer, and nothing else uses those values.
 		 */
-		trace_beamfs_slot_store(inode->i_ino, 0, iblock_logical,
+		trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, iblock_logical,
 					le64_to_cpu(fi->i_direct[iblock_logical]),
 					new_block, 0);
 
@@ -1012,7 +1012,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * it a probe following a block from allocation to its
 			 * tree loses every root indirect block.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
 							indirect_blk, 0);
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
@@ -1124,7 +1124,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(ibh);
-		trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+		trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, ibh->b_blocknr,
 					indirect_slot, le64_to_cpu(ptrs[indirect_slot]),
 					new_block, 1);
 		beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
@@ -1267,7 +1267,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * it a probe following a block from allocation to its
 			 * tree loses every root indirect block.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
 							dindirect_blk, 0);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
@@ -1375,7 +1375,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, ibh->b_blocknr,
 						l1_slot, le64_to_cpu(ptrs[l1_slot]),
 						l1_blk, 2);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
@@ -1513,7 +1513,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(l1bh);
-		trace_beamfs_slot_store(inode->i_ino, l1bh->b_blocknr,
+		trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, l1bh->b_blocknr,
 					l2_slot, le64_to_cpu(ptrs[l2_slot]),
 					new_block, 2);
 		beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
@@ -1655,7 +1655,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * it a probe following a block from allocation to its
 			 * tree loses every root indirect block.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, 0, 0, 0,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
 							tindirect_blk, 0);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
@@ -1763,7 +1763,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, ibh->b_blocknr,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, ibh->b_blocknr,
 						l1_slot, le64_to_cpu(ptrs[l1_slot]),
 						l1_blk, 2);
 			beamfs_tc_store(sb, inode->i_ino, ibh->b_blocknr,
@@ -1901,7 +1901,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
-			trace_beamfs_slot_store(inode->i_ino, l1bh->b_blocknr,
+			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, l1bh->b_blocknr,
 						l2_slot, le64_to_cpu(ptrs[l2_slot]),
 						l2_blk, 3);
 			beamfs_tc_store(sb, inode->i_ino, l1bh->b_blocknr,
@@ -2039,7 +2039,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * lock too.
 		 */
 		lock_buffer(l2bh);
-		trace_beamfs_slot_store(inode->i_ino, l2bh->b_blocknr,
+		trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, l2bh->b_blocknr,
 					l3_slot, le64_to_cpu(ptrs[l3_slot]),
 					new_block, 3);
 		beamfs_tc_store(sb, inode->i_ino, l2bh->b_blocknr,

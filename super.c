@@ -548,14 +548,24 @@ static void beamfs_evict_inode(struct inode *inode)
 		 *
 		 * The bitmap has a net -- sync_fs and put_super walk
 		 * s_bitmap_blkhs and write every block still dirty. The
-		 * parity region has none.
+		 * parity region has none: dropped here, it is gone, and the
+		 * fourteen indirect blocks it described read as never
+		 * described, each taking its subtree with it. That is what
+		 * fsck reports as "no parity was ever written for it, so
+		 * nothing ever wrote the block" -- a deduction from an
+		 * empty slot, on blocks that were written.
+		 *
+		 * Forcing pointee-before-pointer ordering
+		 * (CONFIG_BEAMFS_ORDERED_META) did not change the count,
+		 * which is what ruled the block itself out and left its
+		 * parity as the thing that never landed.
 		 */
 		err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
 		if (err)
 			pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
 					   (unsigned long long)inode->i_ino,
 					   err);
-		trace_beamfs_mmb(inode->i_ino,
+		trace_beamfs_mmb(inode->i_sb->s_dev, inode->i_ino,
 				 inode->i_nlink ? "evict sync" : "evict sync unlinked",
 				 had, err);
 
