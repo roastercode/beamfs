@@ -53,7 +53,31 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	struct inode            *inode;
 	unsigned long            inodes_per_block;
 	unsigned long            block, offset;
+	u64                      ninodes;
 	__u32                    crc;
+
+	/*
+	 * An inode number is on-disk data, so it is attacker- and
+	 * flip-controlled. beamfs_lookup passes de->d_ino straight here
+	 * and beamfs_dirent_valid checks d_rec_len and d_name_len only,
+	 * never d_ino. Without this bound the block computed just below,
+	 * s_inode_table_blk + (ino - 1) / inodes_per_block, walks out of
+	 * the inode table and an arbitrary block is read as inodes; any
+	 * write to the inode that comes back then allocates blocks under
+	 * a number no volume of this size can hold. Observed as ino=27192
+	 * on a 16384-inode volume, 241 blocks.
+	 *
+	 * The bound comes from the superblock, not from sbi->s_ninodes:
+	 * beamfs_setup_bitmap runs after the root iget in fill_super, so
+	 * s_ninodes is still zero on that first call and every mount
+	 * would be refused here.
+	 */
+	ninodes = le64_to_cpu(sbi->s_beamfs_sb->s_inode_count);
+	if (ino < BEAMFS_RESERVED_INO_ROOT || (u64)ino > ninodes) {
+		pr_err_ratelimited("beamfs: inode number %lu out of range (1..%llu)\n",
+				   ino, ninodes);
+		return ERR_PTR(-EUCLEAN);
+	}
 
 	inode = iget_locked(sb, ino);
 	if (!inode)
