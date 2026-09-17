@@ -115,17 +115,37 @@ static void beamfs_put_super(struct super_block *sb)
 		beamfs_bitmap_encode_pending(sb);
 		beamfs_super_encode_pending(sbi);
 
-		if (sbi->s_bitmap_blkhs) {
+		{
+			unsigned int dirty = 0, written = 0;
+			int first_err = 0;
 			u32 k;
 
-			for (k = 0; k < sbi->s_bitmap_blocks_count; k++) {
+			for (k = 0; sbi->s_bitmap_blkhs &&
+			     k < sbi->s_bitmap_blocks_count; k++) {
 				struct buffer_head *bh = sbi->s_bitmap_blkhs[k];
+				int rc;
 
-				if (bh && buffer_dirty(bh) &&
-				    sync_dirty_buffer(bh))
+				if (!bh || !buffer_dirty(bh))
+					continue;
+				dirty++;
+				rc = sync_dirty_buffer(bh);
+				if (rc) {
+					if (!first_err)
+						first_err = rc;
 					pr_err("beamfs: umount: bitmap block %u did not reach the medium\n",
 					       k);
+				} else {
+					written++;
+				}
 			}
+			/*
+			 * The last chance a freed block has to be recorded
+			 * as free on the medium: nearly half the updates to
+			 * the bitmap are attached to no inode and nothing
+			 * else carries them here.
+			 */
+			trace_beamfs_bitmap_flush(sb->s_dev, "put_super",
+						  dirty, written, first_err);
 		}
 		/*
 		 * The superblock last, and loudly: a volume whose
@@ -696,6 +716,8 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 	pr_debug("beamfs/sync310: wait=%d bitmap_dirty=%u bitmap_synced=%u sb_synced=%u err=%d dt_ns=%llu\n",
 		wait, n_bitmap_dirty, n_bitmap_synced, n_sb_synced,
 		last_err, (unsigned long long)(t1_ns - t0_ns));
+	trace_beamfs_bitmap_flush(sb->s_dev, "sync_fs", n_bitmap_dirty,
+				  n_bitmap_synced, last_err);
 
 	return last_err;
 }

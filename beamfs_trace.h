@@ -203,6 +203,43 @@ TRACE_EVENT(beamfs_mmb,
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->ino, __get_str(how), __entry->n, __entry->err)
 );
+/*
+ * What a flush of the bitmap found, and what it managed to write.
+ *
+ * The bitmap's blocks are the one place a freed block is recorded, and
+ * 47% of the updates to them are attached to no inode at all -- the
+ * free path passes no owner -- so nothing carries them to the medium
+ * except the flusher, sync_fs and put_super. Those two are static and
+ * inlined, so a kprobe cannot count them and the question "did the
+ * free reach the disk" had no answer from outside.
+ *
+ * @dirty is how many bitmap blocks were dirty when the flush started,
+ * @written how many reached the medium, @err the first failure.
+ */
+TRACE_EVENT(beamfs_bitmap_flush,
+	TP_PROTO(dev_t dev, const char *where, unsigned int dirty,
+		 unsigned int written, int err),
+	TP_ARGS(dev, where, dirty, written, err),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__string(where, where)
+		__field(unsigned int, dirty)
+		__field(unsigned int, written)
+		__field(int, err)
+	),
+	TP_fast_assign(
+		__entry->dev = dev;
+		__assign_str(where);
+		__entry->dirty = dirty;
+		__entry->written = written;
+		__entry->err = err;
+	),
+	TP_printk("dev=%u:%u %s dirty=%u written=%u err=%d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __get_str(where), __entry->dirty, __entry->written,
+		  __entry->err)
+);
+
 TRACE_EVENT(beamfs_write_inode,
 	TP_PROTO(dev_t dev, unsigned long ino, int sync, u64 indirect, int err),
 	TP_ARGS(dev, ino, sync, indirect, err),
