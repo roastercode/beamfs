@@ -179,6 +179,7 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int i;
 	int ret = 0;
+	u64 gen_at_read;
 
 	/*
 	 * The same region, decoded a moment ago on this cpu?
@@ -207,6 +208,17 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 			return cached;
 	}
 
+	/*
+	 * Taken before the copy, not after the decode.
+	 *
+	 * A parity update that lands while this decode runs bumps the
+	 * generation. Reading it afterwards stamps a scratch that
+	 * describes the state before that update with the generation
+	 * that came after it, and the stale decode is then served to
+	 * the other thirteen indirect blocks of the region as if it
+	 * were current -- a slot that was written reads back as zero.
+	 */
+	gen_at_read = atomic64_read(&BEAMFS_SB(sb)->s_ind_parity_gen);
 	memcpy(scratch, pbh->b_data, BEAMFS_BLOCK_SIZE);
 
 	beamfs_rs_decode_region(scratch, BEAMFS_SUBBLOCK_TOTAL,
@@ -243,8 +255,6 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * slower filesystem, not a wrong one.
 	 */
 	{
-		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-		u64 gen = atomic64_read(&sbi->s_ind_parity_gen);
 		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
 
 		if (!c->data)
@@ -252,7 +262,7 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 		if (c->data) {
 			memcpy(c->data, scratch, BEAMFS_BLOCK_SIZE);
 			c->blocknr = pbh->b_blocknr;
-			c->gen = gen;
+			c->gen = gen_at_read;
 			c->ret = ret;
 		}
 		put_cpu_ptr(&ind_rcache);
@@ -639,6 +649,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	size_t stride;
 	unsigned int i;
 	int ret = 0;
+	int rc;
 	u8 *rscratch;
 	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
 
@@ -670,7 +681,21 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	 * honest answer -- the block may well be fine and there is now
 	 * nothing to check it against.
 	 */
-	if (ind_region_read(sb, pbh, rscratch) == -EUCLEAN) {
+	/*
+	 * Under the buffer lock, because the update path holds it while
+	 * it rewrites all 4096 bytes.
+	 *
+	 * Copying the block while that rewrite is in flight yields an
+	 * image half old and half new, which no RS code can correct:
+	 * the region is reported beyond correction with nothing wrong
+	 * on the medium, the indirect block it covers stops being
+	 * checked, and its slot stops being maintained.
+	 */
+	lock_buffer(pbh);
+	rc = ind_region_read(sb, pbh, rscratch);
+	unlock_buffer(pbh);
+
+	if (rc == -EUCLEAN) {
 		pr_err_ratelimited("beamfs: parity region block %llu beyond correction; indirect %llu cannot be checked\n",
 				   (unsigned long long)region_blk,
 				   (unsigned long long)phys);
