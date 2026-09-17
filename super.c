@@ -534,16 +534,30 @@ static void beamfs_evict_inode(struct inode *inode)
 		 * list was empty from one whose list was thrown away. @n
 		 * is what the list held when the call started.
 		 */
-		if (inode->i_nlink) {
-			err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
-			if (err)
-				pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
-						   (unsigned long long)inode->i_ino,
-						   err);
-			trace_beamfs_mmb(inode->i_ino, "evict sync", had, err);
-		} else {
-			trace_beamfs_mmb(inode->i_ino, "evict drop", had, 0);
-		}
+		/*
+		 * Written whether or not the inode survives.
+		 *
+		 * A deleted inode used to drop its list on the grounds that
+		 * its blocks are freed above and what they hold no longer
+		 * matters. That holds for its own indirect blocks. It does
+		 * not hold for the two kinds of buffer that sit on the same
+		 * list without belonging to it: the bitmap block, shared by
+		 * the whole volume, and the indirect parity region, which
+		 * carries the parity of fourteen indirect blocks belonging
+		 * to other, living files.
+		 *
+		 * The bitmap has a net -- sync_fs and put_super walk
+		 * s_bitmap_blkhs and write every block still dirty. The
+		 * parity region has none.
+		 */
+		err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+		if (err)
+			pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
+					   (unsigned long long)inode->i_ino,
+					   err);
+		trace_beamfs_mmb(inode->i_ino,
+				 inode->i_nlink ? "evict sync" : "evict sync unlinked",
+				 had, err);
 
 		mmb_invalidate(&BEAMFS_I(inode)->i_metadata_bhs);
 	}
