@@ -783,6 +783,13 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 	 */
 	beamfs_tc_forget_child(sb, block);
 	beamfs_tc_forget_parent(sb, block);
+
+	/*
+	 * And the parity that described it, for the same reason: a
+	 * signature the next owner did not write is a signature that
+	 * condemns it. See beamfs_ind_parity_forget.
+	 */
+	beamfs_ind_parity_forget(sb, block);
 	beamfs_write_bitmap_block(sb, bit, owner);
 }
 

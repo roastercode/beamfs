@@ -628,6 +628,86 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 }
 
 /*
+ * beamfs_ind_parity_forget -- drop the parity describing a freed block.
+ *
+ * The region keeps one signature per block and nothing ever cleared it.
+ * A freed block left its description behind, the allocator handed the
+ * block to somebody else, and verify then measured the new contents
+ * against the old owner's signature and called the block damaged.
+ * capsule.md says it in as many words: "the next owner inherits a
+ * description of the previous one's contents and verify reports the new
+ * block as corrupt against it."
+ *
+ * What that costs is not a warning. beamfs_del_dirent walks the
+ * directory through beamfs_dir_get_block, which verifies every indirect
+ * block it reads; one -EUCLEAN there and del_dirent returns it, and
+ * beamfs_rename has by then already added the new entry -- "del_dirent
+ * failed after add, fs may be inconsistent". The inode keeps two names
+ * or none, its link count stops matching, and every block it owns is
+ * marked used with nothing reaching it.
+ *
+ * Measured 2026-09-18, generic/083 under -I crc, ten trials: the four
+ * that logged that rename message are the four that failed, losing 11,
+ * 13, 78 and 282 blocks and leaving inodes no directory reaches; the
+ * six that did not log it passed with nothing lost. Under -I none,
+ * where no signature is ever checked, the test passes eight times in
+ * ten; under -I rs, which checks every one of them, it passed none.
+ *
+ * Zero is the right value rather than a fresh signature: verify already
+ * treats an all-zero slot as "no parity written yet" and returns 0, so
+ * a recycled block is simply unchecked until its new owner writes its
+ * own parity, which ind_parity_update does on the first install.
+ */
+void beamfs_ind_parity_forget(struct super_block *sb, u64 phys)
+{
+	struct buffer_head *pbh;
+	u64 region_blk;
+	u32 offset;
+	size_t stride;
+	u8 *scratch;
+	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
+
+	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
+		return;
+	if (stride > sizeof(slotbuf))
+		return;
+
+	pbh = beamfs_bread(sb, region_blk, "indirect parity");
+	if (!pbh)
+		return;
+
+	scratch = beamfs_scratch_get(sb);
+	if (!scratch) {
+		brelse(pbh);
+		return;
+	}
+
+	lock_buffer(pbh);
+	/*
+	 * A region beyond correction is left alone, as the update path
+	 * leaves it: re-encoding would write parity over damaged payload
+	 * and make the other slots in it permanently wrong.
+	 */
+	if (ind_region_read(sb, pbh, scratch) == -EUCLEAN) {
+		unlock_buffer(pbh);
+		beamfs_scratch_put(sb, scratch);
+		brelse(pbh);
+		return;
+	}
+
+	memset(slotbuf, 0, stride);
+	ind_slot_scatter(scratch, offset, stride, slotbuf);
+	ind_region_write(sb, pbh, scratch);
+	unlock_buffer(pbh);
+	beamfs_scratch_put(sb, scratch);
+
+	/* Every cached decode of this region is now one slot out of date. */
+	beamfs_ind_parity_touched(BEAMFS_SB(sb));
+	mark_buffer_dirty(pbh);
+	brelse(pbh);
+}
+
+/*
  * beamfs_ind_parity_verify -- check an indirect block against its parity.
  *
  * Under CRC the block is checked and left alone: detection turns the
