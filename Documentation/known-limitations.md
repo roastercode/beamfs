@@ -929,11 +929,22 @@ owner, erasing every pointer installed since. That is the shape of
 the 238-to-636 block losses, and it is why the mode that protects
 least loses least.
 
-**Partial fix** (2026-09-18): `beamfs_ind_parity_forget()` zeroes a
-block's slot in `beamfs_free_block()`, beside the existing
-`beamfs_tc_forget_*` calls. `verify` already treats an all-zero slot
-as "no parity written yet" and returns 0, so a recycled block is
-unchecked until its new owner writes its own parity.
+**Attempted and reverted** (2026-09-18):
+`beamfs_ind_parity_forget()` zeroed a block's slot in
+`beamfs_free_block()`. Measured over ten trials each under `-I crc`:
+without it 6 pass / 4 fail and 214 parity false positives, with it
+0 pass / 10 fail and 322 -- sixty points against a spread of
+forty-four, and the false positives it targeted up by half.
+
+It did a decode-modify-re-encode of the region block followed by a
+plain `mark_buffer_dirty` with no inode to carry it, which is the
+failure `ind_parity_update` documents at length: the region changes
+in memory, the decode cache is invalidated, and the write may never
+land. Memory and medium then disagree, and a later write of the
+region from a stale copy takes the legitimate updates with it.
+
+Clearing at free time is not the answer. Telling a stale signature
+from a valid one is, and that is the per-block generation below.
 
 **Still open.** Freeing is not the only way a signature goes stale.
 `beamfs_ind_parity_update` itself documents two others: a block
