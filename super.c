@@ -366,17 +366,52 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 			mark_buffer_dirty(ibh);
 		}
 	}
-	brelse(ibh);
-
 	/*
 	 * Free the block only once nothing points out of it. A block with
 	 * one surviving pointer is still load-bearing, and freeing it is
 	 * the mistake this rewrite exists to prevent.
 	 */
 	if (survivors == 0) {
+		/*
+		 * bforget, not brelse, for a block that is going away.
+		 *
+		 * ext2_free_branches ends exactly this way -- bforget(bh)
+		 * and then ext2_free_blocks -- and beamfs, which carries
+		 * the same i_metadata_bhs field and the same mmb_*
+		 * helpers, called brelse. __bforget is clear_buffer_dirty,
+		 * remove_assoc_queue and __brelse: the middle one is what
+		 * was missing.
+		 *
+		 * Twenty lines above, this buffer was attached to the
+		 * inode's metadata list. brelse leaves it there while the
+		 * block goes back to the allocator, so the next owner gets
+		 * that same buffer from sb_bread, writes its pointers into
+		 * it -- and when the OLD inode is evicted, mmb_invalidate
+		 * empties its list without writing anything, taking the
+		 * new owner's pointers with it.
+		 *
+		 * generic/083 on 2026-09-18, three captures with the same
+		 * shape. In the clearest, blocks 8890 and 8892 were freed
+		 * from inode 20 at 34.563 and handed to inode 102 at
+		 * 34.656; 8890 became an indirect block, 8892 its first
+		 * child, and fsck found 8892 marked used and referenced by
+		 * nothing -- with 92 of 4096 bytes set, so it had been
+		 * written. No lost pointer was reported, because none was
+		 * lost: the pointers were right and the block holding them
+		 * never reached the medium.
+		 *
+		 * Only on this branch. A block with survivors keeps its
+		 * buffer legitimately dirty and must still be written;
+		 * clearing that is how an earlier attempt at this fix, one
+		 * placed in beamfs_free_block where it caught all twenty-two
+		 * callers, turned 58 leaked blocks into 345 and thousands
+		 * of out-of-range pointers.
+		 */
+		bforget(ibh);
 		beamfs_free_one_block(sb, blk);
 		return true;
 	}
+	brelse(ibh);
 	return false;
 }
 
