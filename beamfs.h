@@ -589,7 +589,6 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 			      struct inode *inode);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
-void beamfs_ind_parity_forget(struct super_block *sb, u64 phys);
 void beamfs_ind_parity_touched(struct beamfs_sb_info *sbi);
 void beamfs_ind_parity_cache_free(void);
 
