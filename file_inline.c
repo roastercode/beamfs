@@ -1020,8 +1020,37 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 
 		/* Read indirect to look up / install the slot. */
 		/* Already held when this call created it. */
-		if (!ibh)
-			ibh = sb_bread(sb, indirect_blk);
+		{
+			int cached = 1;
+
+			if (!ibh) {
+				/*
+				 * Same probe as the read path: was this
+				 * block already in the cache, or does it
+				 * come off the medium?
+				 *
+				 * The allocation path had no tracepoint at
+				 * all, so a slot installed here and read
+				 * back as zero 150 ms later could not be
+				 * told apart from a slot never written.
+				 * generic/083 lost 47 blocks that way and
+				 * the trace could not say which.
+				 */
+				struct buffer_head *probe =
+					sb_find_get_block(sb, indirect_blk);
+
+				cached = !!probe;
+				if (probe)
+					brelse(probe);
+				ibh = sb_bread(sb, indirect_blk);
+			}
+			if (ibh)
+				trace_beamfs_ind_read(inode->i_sb->s_dev,
+					inode->i_ino, indirect_blk,
+					(unsigned int)indirect_slot,
+					le64_to_cpu(((__le64 *)ibh->b_data)[indirect_slot]),
+					buffer_uptodate(ibh), !cached);
+		}
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
 					  (unsigned long long)indirect_blk);
@@ -1274,7 +1303,38 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		}
 
 		/* --- Stage 2: level-1 indirect block --- */
-		ibh = sb_bread(sb, dindirect_blk);
+		{
+			/*
+			 * The last unlit sb_bread of the allocation path.
+			 *
+			 * generic/083 on 2026-09-18, inode 39: block 1067
+			 * became its i_dindirect at 479.487 and slots 0
+			 * to 4 were filled; from 483.756 slots 0, 1, 2 and
+			 * 3 were each written again, every one of them
+			 * reading zero, and treecheck reported three lost
+			 * pointers. Not one of those stores had an
+			 * ind_read beside it, because the read that
+			 * decides them happens here and here alone.
+			 *
+			 * 1067 had been a DATA block of inode 7 until
+			 * 479.485 -- 1.7 ms earlier. A data block recycled
+			 * into an indirect one passes through no path that
+			 * detaches its buffer from the old owner.
+			 */
+			struct buffer_head *probe =
+				sb_find_get_block(sb, dindirect_blk);
+			int cached = !!probe;
+
+			if (probe)
+				brelse(probe);
+			ibh = sb_bread(sb, dindirect_blk);
+			if (ibh)
+				trace_beamfs_ind_read(inode->i_sb->s_dev,
+					inode->i_ino, dindirect_blk,
+					(unsigned int)l1_slot,
+					le64_to_cpu(((__le64 *)ibh->b_data)[l1_slot]),
+					buffer_uptodate(ibh), !cached);
+		}
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read dindirect block %llu\n",
 					   (unsigned long long)dindirect_blk);
@@ -1411,8 +1471,38 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 
 		/* --- Stage 3: data block --- */
 		/* Already held when this call created it. */
-		if (!l1bh)
-			l1bh = sb_bread(sb, l1_blk);
+		{
+			int cached = 1;
+
+			if (!l1bh) {
+				/*
+				 * The level-1 path had this probe and the
+				 * double indirect had none, so every lost
+				 * pointer below a dindirect was invisible.
+				 *
+				 * generic/083 on 2026-09-18: inode 112 put
+				 * 2127 into slot 0 of block 1248, then put
+				 * 11106 into that same slot 4.3 seconds
+				 * later, both stores reading zero. Far too
+				 * far apart for a race, and the trace had
+				 * nothing at all between them because the
+				 * read that returned zero was here.
+				 */
+				struct buffer_head *probe =
+					sb_find_get_block(sb, l1_blk);
+
+				cached = !!probe;
+				if (probe)
+					brelse(probe);
+				l1bh = sb_bread(sb, l1_blk);
+			}
+			if (l1bh)
+				trace_beamfs_ind_read(inode->i_sb->s_dev,
+					inode->i_ino, l1_blk,
+					(unsigned int)l2_slot,
+					le64_to_cpu(((__le64 *)l1bh->b_data)[l2_slot]),
+					buffer_uptodate(l1bh), !cached);
+		}
 		if (!l1bh) {
 			pr_err_ratelimited("beamfs/inline: failed to read L1 indirect block %llu\n",
 					   (unsigned long long)l1_blk);
@@ -2242,7 +2332,7 @@ static u32 beamfs_inline_payload_crc(struct super_block *sb,
 /* the caller's responsibility.                                              */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
-					       struct buffer_head *bh,
+					       const u8 *raw,
 					       u64 phys,
 					       struct inode *inode,
 					       u64 iblock_logical_for_log,
@@ -2304,7 +2394,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 * spurious uncorrectable rather than as damage. Fixing that means
 	 * locking in those two callers, not here.
 	 */
-	memcpy(tmp, bh->b_data, BEAMFS_BLOCK_SIZE);
+	memcpy(tmp, raw, BEAMFS_BLOCK_SIZE);
 
 	/*
 	 * A capsule is gathered, not walked.
@@ -2614,7 +2704,7 @@ int beamfs_inline_decode_symlink(struct super_block *sb,
 	if (len > BEAMFS_DATA_INLINE_BYTES)
 		return -EUCLEAN;
 
-	return beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, 0,
+	return beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys, inode, 0,
 						   dst, 0, len, false);
 }
 
@@ -3029,7 +3119,6 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 		u32    slice_length = (u32)min_t(u64, end - pos,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, pos);
-		struct buffer_head *bh;
 		u64    phys = 0;
 		u8    *dst;
 
@@ -3076,25 +3165,76 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 		 * what ext2 under iomap does and what this still has to
 		 * do.
 		 */
-		bh = sb_bread(sb, phys);
-		if (!bh) {
-			pr_err_ratelimited("beamfs/inline: read_folio_range: sb_bread phys=%llu failed\n",
-					   (unsigned long long)phys);
-			ret = -EIO;
-			break;
-		}
+		/*
+		 * Not sb_bread, and that is the whole point.
+		 *
+		 * __bread_gfp adds __GFP_NOFAIL whatever mask it is given,
+		 * so this read could not fail -- it looped in the
+		 * allocator instead. On a machine whose page cache is full
+		 * of this filesystem's own blocks, that is a machine that
+		 * stops: captured 2026-09-18 with the node at 270% CPU,
+		 * kswapd running, eight tasks on this exact line and
+		 * nothing advancing, with generic/083 under -I crc.
+		 *
+		 * The cache is consulted first and never created. A block
+		 * with a dirty buffer still holds the newest bytes -- the
+		 * medium has the previous ones until writeback lands -- so
+		 * reading past it would hand back stale data. When there
+		 * is no buffer, the block is read straight into a scratch
+		 * page: one bounded allocation that can fail cleanly,
+		 * instead of an unbounded one that cannot fail at all.
+		 *
+		 * A capsule is exactly BEAMFS_BLOCK_SIZE and the scratch
+		 * pool hands out exactly that, so the block lands in one
+		 * piece with no bounce.
+		 */
+		{
+			struct buffer_head *cached = sb_find_get_block(sb, phys);
+			u8 *raw;
 
-		dst = kmap_local_folio(folio, folio_off);
-		lock_buffer(bh);
-		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode,
-							  b, dst,
-							  slice_offset,
-							  slice_length, false);
-		unlock_buffer(bh);
-		kunmap_local(dst);
-		brelse(bh);
-		if (ret < 0)
-			break;
+			if (cached) {
+				raw = beamfs_scratch_get(sb);
+				if (!raw) {
+					brelse(cached);
+					ret = -ENOMEM;
+					break;
+				}
+				lock_buffer(cached);
+				memcpy(raw, cached->b_data, BEAMFS_BLOCK_SIZE);
+				unlock_buffer(cached);
+				brelse(cached);
+			} else {
+				raw = beamfs_scratch_get(sb);
+				if (!raw) {
+					ret = -ENOMEM;
+					break;
+				}
+				ret = bdev_rw_virt(sb->s_bdev,
+						   (sector_t)phys *
+						   (BEAMFS_BLOCK_SIZE >> SECTOR_SHIFT),
+						   raw, BEAMFS_BLOCK_SIZE,
+						   REQ_OP_READ);
+				if (ret) {
+					pr_err_ratelimited("beamfs/inline: read_folio_range: read of phys=%llu failed: %d\n",
+							   (unsigned long long)phys,
+							   ret);
+					beamfs_scratch_put(sb, raw);
+					ret = -EIO;
+					break;
+				}
+			}
+
+			dst = kmap_local_folio(folio, folio_off);
+			ret = beamfs_inline_decode_block_into_buf(sb, raw, phys,
+								  inode, b, dst,
+								  slice_offset,
+								  slice_length,
+								  false);
+			kunmap_local(dst);
+			beamfs_scratch_put(sb, raw);
+			if (ret < 0)
+				break;
+		}
 
 		pos  += slice_length;
 		done += slice_length;
@@ -3267,7 +3407,7 @@ static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
 
 		dst = kmap_local_folio(folio, folio_off);
 		lock_buffer(bh);
-		ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode,
+		ret = beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys, inode,
 							  b, dst, slice_offset,
 							  slice_length, false);
 		unlock_buffer(bh);
@@ -3594,7 +3734,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			memcpy(scratch, src, slice_length);
 			kunmap_local(src);
 		} else {
-			ret = beamfs_inline_decode_block_into_buf(sb, bh, phys,
+			ret = beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys,
 								  inode, b,
 								  scratch, 0,
 								  BEAMFS_DATA_INLINE_BYTES,
@@ -4352,7 +4492,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	 */
 	lock_buffer(bh);
 
-	ret = beamfs_inline_decode_block_into_buf(sb, bh, phys, inode, b,
+	ret = beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys, inode, b,
 						  scratch, 0,
 						  BEAMFS_DATA_INLINE_BYTES,
 						  true);
