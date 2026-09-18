@@ -897,6 +897,102 @@ empirical record is sufficient for the present session.
 
 ---
 
+### 3.13 Indirect parity describes the block's previous owner (PARTIALLY ADDRESSED 2026-09-18)
+
+**Symptom.** `generic/083` fails on every trial when the volume is
+made with the default `--indirect-parity=rs`, losing 238 to 636
+blocks per run; with `crc` it fails four times in ten losing 11 to
+282; with `none` it fails three times in ten losing 7 to 86. Same
+kernel, same image, ten trials each, measured outside the harness.
+
+**Mechanism.** The parity region keeps one signature per block and
+nothing cleared it when a block was freed. The allocator hands the
+block to another file, and `beamfs_ind_parity_verify` then measures
+the new contents against the old owner's signature. `capsule.md`
+states the same thing: "the next owner inherits a description of the
+previous one's contents and verify reports the new block as corrupt
+against it."
+
+What the two modes do with that verdict is what separates them.
+Under `crc` the block is refused: `beamfs_del_dirent` walks the
+directory through `beamfs_dir_get_block`, which verifies every
+indirect block it reads, and one `-EUCLEAN` there returns through
+`beamfs_rename` *after* it has already added the new entry --
+"del_dirent failed after add, fs may be inconsistent". In ten trials
+the four that logged that message are exactly the four that failed,
+each leaving an inode no directory reaches; the six that did not log
+it passed with nothing lost.
+
+Under `rs` the block is *corrected in place*, which is worse: the
+indirect block is rewritten toward what it held under its previous
+owner, erasing every pointer installed since. That is the shape of
+the 238-to-636 block losses, and it is why the mode that protects
+least loses least.
+
+**Partial fix** (2026-09-18): `beamfs_ind_parity_forget()` zeroes a
+block's slot in `beamfs_free_block()`, beside the existing
+`beamfs_tc_forget_*` calls. `verify` already treats an all-zero slot
+as "no parity written yet" and returns 0, so a recycled block is
+unchecked until its new owner writes its own parity.
+
+**Still open.** Freeing is not the only way a signature goes stale.
+`beamfs_ind_parity_update` itself documents two others: a block
+written with no scratch page available "goes to the medium
+undescribed", and a parity region that is never flushed leaves the
+medium holding the parity of what the block contained before. Until
+a block carries something that lets a reader tell a stale signature
+from a valid one, `rs` converts any such desynchronisation into
+corruption. `capsule.md` designs exactly that -- a per-block
+generation, outside the codewords -- and it exists for data capsules
+only. The indirect blocks, whose parity is the one that destroys,
+do not have it.
+
+**Consequence for deployment.** `--indirect-parity=rs` is the mkfs
+default and must not be shipped as such until the generation covers
+indirect blocks. In its present state it is more dangerous than
+`none`: `none` leaves a desynchronisation inert, `rs` acts on it.
+
+---
+
+### 3.14 The read path reached the buffer cache from the fault path (RESOLVED 2026-09-18)
+
+**Symptom.** Under sustained load the node stops: 270% CPU, `kswapd`
+running, eight tasks on the same line of
+`beamfs_inline_read_folio_range`, nothing advancing, SSH refused at
+the banner. Captured 2026-09-18 during `generic/083` under
+`-I crc`, kept as evidence. The same shape had been recorded before
+as a `generic/464` wedge.
+
+**Mechanism.** `read_folio_range` read each block with `sb_bread`.
+`__bread_gfp` adds `__GFP_NOFAIL` whatever mask it is given, so the
+read cannot fail: on a machine whose page cache is already full of
+this filesystem's own blocks, it loops in the allocator instead.
+The block-device cache also holds a second copy of every block the
+page cache already has, which is what fills memory in the first
+place -- the guest's resident size grew from 3.0 to 8.4 GiB across
+three baseline series.
+
+**Resolution.** The path no longer creates a buffer. It consults the
+cache with `sb_find_get_block`, which never allocates, and uses that
+copy when a dirty buffer holds newer bytes than the medium;
+otherwise it reads the block straight into a scratch page with
+`bdev_rw_virt`. The scratch pool is bounded and may fail, which is
+the point: `-ENOMEM` returned cleanly instead of an allocation that
+cannot fail. The capsule being exactly `BEAMFS_BLOCK_SIZE` is what
+makes the single-page read possible with no bounce.
+
+`beamfs_inline_decode_block_into_buf` now takes a raw buffer rather
+than a `buffer_head`; the four callers that hold the buffer locked
+pass `bh->b_data` and keep their locking contract unchanged.
+
+**Verified.** Ten consecutive trials under `-I crc` with no wedge,
+where the node had previously stopped on the fifth. Ten trials do
+not prove a wedge absent; what is established is that the cause
+named in the code was removed and the symptom did not recur.
+
+
+---
+
 ## 4. Filesystem feature limitations
 
 These are deliberate scope restrictions of the current
@@ -927,17 +1023,30 @@ filesystem, which beamfs does not currently aim to be.
 
 ### 5.1 xfstests
 
-Four `generic/*` tests have been validated: 002, 010, 098, 257.
+**Coverage.** A full sweep runs from the `beamfs-xfstests` harness.
+2026-09-18, 734 tests, one verdict each: 727 passed. Of the seven
+that did not, `generic/589` is an upstream test defect (below),
+`generic/074` was cut by the harness budget mid-write and its
+findings are the interruption rather than a result, and five are
+real: 075, 083, 241, and the two counted under 083's mechanisms.
 
-`generic/001` requires a test image larger than 2 GiB to run to
-completion (the test creates 200 sequential copies of approximately
-3 MiB). On the current 512 MiB QEMU test image this exceeds the
-available space and the test exits early. This is an environment
-limit, not a defect in beamfs handling of the test workload.
+The sweep runs with `-I none`. That is not the mkfs default, and
+item 3.13 shows the default fails far more often -- any pass rate
+quoted from a sweep is a pass rate for the unprotected mode.
 
-A full xfstests Yocto recipe with a sized scratch image is not yet
-in place. The four passing tests are run manually with a documented
-procedure (`Documentation/testing.md`).
+**The suite is 1016 commits behind upstream.** The recipe pins
+xfstests 2024.03.03 (`SRCREV 088e5bd4`) against a 7.3.0-rc2 kernel.
+`generic/589` failed identically on beamfs and on ext4 -- run as a
+control -- because the test itself needed `TEST_DIR` to be shared
+and did not say so until upstream `b53217a88c05` (Dave Chinner,
+2024-11-27). That commit is backported in the layer's bbappend.
+Every other verdict in the campaign carries the same doubt until
+the suite is moved forward: a test that is wrong about beamfs looks
+exactly like a beamfs defect.
+
+**Control runs matter.** Running a failing test against ext4 in the
+same harness cost minutes and saved a day of chasing a defect that
+was not ours. It is worth making routine.
 
 ### 5.2 Fault injection
 
