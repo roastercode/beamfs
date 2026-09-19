@@ -2893,11 +2893,51 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * confirmed by disassembly, and a 3824-byte mapping is always
 	 * shorter than a 4096-byte folio.
 	 */
-	if (flags & IOMAP_REPORT) {
+	/*
+	 * A write is bounded by the block it allocated; a read is not.
+	 *
+	 * The write leg allocates exactly one block -- b = pos / payload
+	 * -- and then declared a mapping covering the whole requested
+	 * length. iomap believes it: iomap_write_iter copies the entire
+	 * range into the page cache without asking again, so a 1 MiB
+	 * write allocated one block of 3808 bytes and accepted 275 more
+	 * on the strength of it.
+	 *
+	 * Measured on 2026-09-19: 1.25 GiB written in fourteen seconds
+	 * onto a 256 MiB volume, df moving by 11 MiB, dd returning
+	 * success throughout. The file reached 1.41 GiB before the dirty
+	 * page limit stopped it, and the allocation it needs happens at
+	 * writeback, where ENOSPC has nobody to report to. That is the
+	 * EFBIG generic/015 ends on, and the silent acceptance the whole
+	 * filesystem exists to prevent.
+	 *
+	 * iomap handles a short mapping by calling back for the rest;
+	 * every filesystem in the tree relies on that. The read leg is
+	 * the one that cannot take it -- iomap_read_folio_iter releases
+	 * a folio no iomap_folio_state is attached to and dereferences
+	 * it on the next round, which is what the comment above records
+	 * and disassembly confirmed -- so it keeps the full length.
+	 */
+	if (flags & (IOMAP_REPORT | IOMAP_WRITE)) {
 		u64 in_block = (u64)pos % payload;
 
+		/*
+		 * payload, not BEAMFS_DATA_INLINE_BYTES.
+		 *
+		 * The remainder above is taken modulo payload and the
+		 * bound was taken on the constant. On a capsule volume
+		 * those are 3808 and 3824, so every extent fiemap
+		 * reported ran up to sixteen bytes past the block that
+		 * backs it, and the next one started inside it.
+		 *
+		 * beamfs_block_payload says what this costs in as many
+		 * words: writing the constant instead "reads a file back
+		 * shifted by sixteen bytes on a capsule volume,
+		 * silently". generic/473 is where it shows: the test
+		 * expects [128..255] and gets [128..254].
+		 */
 		iomap->length = min_t(u64, (u64)length,
-				      BEAMFS_DATA_INLINE_BYTES - in_block);
+				      (u64)payload - in_block);
 	} else {
 		iomap->length = length;
 	}
