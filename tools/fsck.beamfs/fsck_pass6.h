@@ -72,6 +72,20 @@ struct fsck_pass6_result {
 	unsigned int unreadable_inodes;
 	unsigned int unreadable_indirect;
 	unsigned int unreadable_dirblocks;
+	/*
+	 * Indirect blocks nothing ever wrote, counted apart.
+	 *
+	 * Both cases leave the subtree unwalked, so both went into
+	 * unreadable_indirect and the report called them all "beyond
+	 * correction". They are opposite findings: beyond correction
+	 * says the medium lost what was written, never described says
+	 * the filesystem never wrote it. A generic/083 run on
+	 * 2026-09-19 reported 26 indirect blocks beyond correction and
+	 * every one of them, named individually, was never described --
+	 * which sent the investigation at the parity code for an
+	 * afternoon while the defect was in the write path.
+	 */
+	unsigned int undescribed_indirect;
 	/* Directories too deep for this walk's single name table. */
 	unsigned int deep_directories;
 };

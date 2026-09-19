@@ -180,7 +180,7 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 		 * 3584 empty.
 		 */
 		if (ist == FSCK_READ_UNDESCRIBED) {
-			p->r.unreadable_indirect++;
+			p->r.undescribed_indirect++;
 			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu was never described -- no parity was ever written for it, so nothing ever wrote the block; the subtree under it is unreachable\n",
 			     (unsigned long long)blk, (unsigned long long)ino);
 			return n;
@@ -609,6 +609,17 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u inode(s), %u indirect block(s) and %u directory block(s) were beyond correction and left unwalked\n",
 			r->unreadable_inodes, r->unreadable_indirect,
 			r->unreadable_dirblocks);
+	/*
+	 * Said separately, and said as what it is.
+	 *
+	 * Nothing wrote these blocks: their parity slot is empty on a
+	 * filesystem that writes parity with every block. Reporting
+	 * them as beyond correction points at the medium and hides the
+	 * one finding that names the write path.
+	 */
+	if (r->undescribed_indirect)
+		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) were never written -- allocated, named by an inode, and no parity was ever filed for them; their subtrees are unreachable\n",
+			r->undescribed_indirect);
 	if (r->deep_directories)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u directory/ies use double or triple indirection and were only partly walked\n",
 			r->deep_directories);
