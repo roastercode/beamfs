@@ -161,7 +161,7 @@ void beamfs_ind_parity_touched(struct beamfs_sb_info *sbi)
  */
 void beamfs_ind_parity_cache_free(void)
 {
-	int cpu;
+	unsigned int cpu;
 
 	for_each_possible_cpu(cpu) {
 		struct ind_region_cache *c = per_cpu_ptr(&ind_rcache, cpu);
@@ -807,7 +807,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		memcpy(copy, block, BEAMFS_BLOCK_SIZE);
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
-			int rc = beamfs_rs_decode_region(
+			int region_rc = beamfs_rs_decode_region(
 				copy + (size_t)i * BEAMFS_SUBBLOCK_DATA,
 				BEAMFS_SUBBLOCK_DATA,
 				slot + (size_t)i * BEAMFS_RS_PARITY,
@@ -816,7 +816,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 				results, positions, BEAMFS_RS_PARITY / 2,
 				"indirect");
 
-			if (rc < 0 || results[0] < 0) {
+			if (region_rc < 0 || results[0] < 0) {
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u uncorrectable\n",
 						   (unsigned long long)phys, i);
 				beamfs_log_rs_event_flagged(sb,

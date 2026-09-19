@@ -139,7 +139,7 @@ void beamfs_rs_exit_tables(void)
 	}
 
 	if (beamfs_rs_scratch_pcpu) {
-		int cpu2;
+		unsigned int cpu2;
 
 		for_each_possible_cpu(cpu2)
 			kfree(*per_cpu_ptr(beamfs_rs_scratch_pcpu, cpu2));
