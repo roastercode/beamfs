@@ -385,6 +385,36 @@ Le commentaire de `matrix.rs` affirmant "scrub is not it" est faux.
   `bitbake -f -c configure linux-mainline` pour que le `.config`
   suive.
 
+## 2026-09-21, soir : l'instrument avant le noyau
+
+### Etabli par lecture du code et des donnees
+
+`beamfs-xfstests` ne compte qu'une des trois classes de defauts que
+fsck.beamfs rapporte. `lost` est le nombre qui precede
+`used-but-unreferenced` dans le `.full` (bench.rs, one_trial).
+`referenced-but-free` (fsck.beamfs.c:1369, meme ligne) et
+`out-of-range pointer(s)` (ligne 875) ne sont lus nulle part. Sur le
+sweep 1789974744 : generic/464 et 476 ont au moins 400
+`referenced-but-free` chacun et sont enregistres "0 bloc perdu" ;
+generic/269 a 6215 pointeurs hors plage, invisibles dans toute
+statistique. Trois defauts de sens different, et l'outil en voit un.
+A corriger en 2.3.6 avant tout correctif du noyau sur ces tests.
+
+Le fichier baseline etait degrade par l'outil, pas par la copie : voir
+runs/2026-09-21-baselines/README.md. Corrige en 2.3.5.
+
+Un essai en erreur de transport n'etait compte nulle part et faisait
+neuf essais sur dix en silence ; corrige en 2.3.5, compte comme
+blocage.
+
+### Non etabli
+
+L'etat de CONFIG_BEAMFS_ORDERED_META dans l'image deployee au moment
+de la campagne du soir. `checkpoint` verifie que l'image est
+posterieure au dernier commit, pas ce que porte son .config. Les
+chiffres de cette campagne (80/50/70) ne se comparent ni a 03 ni a 04
+tant que ce point n'est pas lu dans l'image.
+
 ## 14. Priority matrix
 
 ### Tier 1
@@ -407,6 +437,6 @@ Le commentaire de `matrix.rs` affirmant "scrub is not it" est faux.
 
 | Item | Effort | Note |
 |------|--------|------|
-| parity-pr-debug | 10 min | `indirect block N has no parity written yet` en pr_debug : 1413 lignes par run |
-| stale-comments | 30 min | Les treize appelants de ind_parity_verify disent "corrected in place" ; la fonction décode en scratch depuis longtemps |
+| parity-pr-debug | 10 min | `indirect block N has no parity written yet` est un `pr_warn_ratelimited`, pas un `pr_debug` ; 1456 callbacks suppressed observes sur un seul essai le 2026-09-21 ; a passer en pr_debug ou en compteur par montage rapporte au demontage, comme treecheck.c:79 |
+| stale-comments | 30 min | Les quatorze sites d'appel de ind_parity_verify (13 dans file_inline.c, 1 dans scrub.c) et seize occurrences de "corrected in place" (13 file_inline.c, 2 edac.c, 1 indparity.c) disent "corrected in place" ; la fonction décode en scratch depuis longtemps |
 | man-stop-dup | 5 min | Deux entrées .TP/.B stop dans le manuel de beamfs-xfstests |

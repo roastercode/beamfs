@@ -30,14 +30,27 @@ POINTER` present des deux cotes. Aucun effet etabli.
 la dispersion. `LOST POINTER` present des deux cotes. L'ordonnancement
 des metadonnees ne ferme pas les pointeurs perdus.
 
-## Reserve sur le fichier 03
+## Ce que valent ces quatre fichiers
 
-La campagne de 14h56 a ete ecrasee dans
-`~/.local/share/beamfs-xfstests/baseline-generic-083.log` par celle de
-16h36 : `baseline` ecrit toujours le meme nom de fichier. Les chiffres
-du fichier 03 sont recopies depuis la sortie terminal de la session,
-pas depuis le fichier original. Les autres sont des copies de fichiers.
+Etabli le soir meme en relisant `bench.log`, que `beamfs-xfstests`
+remplit a chaque serie et qui garde le brut : le chemin `baseline` de
+l'outil, jusqu'en 2.3.4, reconstruisait sa ligne depuis les compteurs
+du run et perdait au passage toute perte nulle, l'ordre des essais, la
+colonne des blocages (un `0` litteral) et le commit propre a chaque
+serie. Les fichiers 01, 02 et 04, copies de `baseline-generic-083.log`,
+portent cette degradation. Le fichier 03, recopie depuis le terminal
+qui affiche le brut, est le seul fidele. La reserve initiale de ce
+README etait donc a l'envers.
 
-Consequence a corriger : `baseline` devrait nommer son journal par
-commit et par horodatage, sans quoi deux campagnes du meme jour se
-detruisent.
+Le brut des quatre campagnes est dans `bench.log`, lignes 22 a 34 au
+2026-09-21. Deux fichiers `*-ancien-formateur.log` conservent ce que
+l'ancien code ecrivait, pour montrer l'ecart.
+
+`bench.log` porte aussi, entre 02 et 03, une cinquieme serie sous
+`80e9826` qui n'est archivee nulle part : `4 5 0 0,0,0,0,0`, neuf
+essais, cinq echecs, zero bloc perdu partout. Sans colonne de
+condition, elle n'est attribuable a aucune configuration.
+
+Corrige dans `beamfs-xfstests` 2.3.5 (commit 500bac6) : la ligne est
+ecrite depuis le run lui-meme, identique a celle de `bench.log`.
+Verifie sur trois series de generic/083 a `0eb0e8f`.
