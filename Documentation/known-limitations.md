@@ -42,7 +42,7 @@ of subsequent development stages.
 
 | Threat model constraint | Current implementation state |
 |--------------------------|-------------------------------|
-| 6.1 Universal data block protection (no opt-in) | Not implemented. RS FEC currently protects the on-disk allocation bitmap and, optionally, individual inodes flagged with `BEAMFS_INODE_FL_RS_ENABLED`. Data blocks themselves are not protected. |
+| 6.1 Universal data block protection (no opt-in) | Not met. RS FEC protects the on-disk allocation bitmap and, optionally, inodes flagged with `BEAMFS_INODE_FL_RS_ENABLED`. Since 2026-07-09 DATA_CSUM (format-v6) stores a per-data-block CRC32 and detects a substituted block (3.11), but it is opt-in (`mkfs.beamfs --data-csum`) and detects rather than corrects; the default path leaves data blocks unprotected. The constraint asks for no opt-in and for correction. |
 | 6.2 Burst tolerance through stripe geometry | Not implemented. The bitmap uses 16 RS(255,239) sub-blocks packed within a single 4 KiB block, with no cross-block parity distribution. A burst exceeding 8 symbols within one 256-byte sub-block is uncorrectable in the current design. |
 | 6.3 Unconditional inode RS protection | Implemented in stage 3 (v0.3.0+). All inodes are RS-protected unconditionally under `s_data_protection_scheme = INODE_UNIVERSAL`. The legacy `BEAMFS_INODE_FL_RS_ENABLED` flag is preserved in the bit definition for backward compatibility but is no longer functional. |
 | 6.3 Superblock RS correction | Implemented in stage 3 item 2 (v0.3.0+). The superblock is protected by both CRC32 (detection) and RS(255,239) shortened over 8 sub-blocks of 211 data bytes (correction). On mount, a CRC32 mismatch triggers `beamfs_rs_decode_region()` over the staging buffer, with parity at offset 3968 of the superblock block. Recovery succeeds on up to 8 byte errors per sub-block. The corrected superblock is persisted to disk on the next metadata mutation via `beamfs_dirty_super()`, which encodes RS parity then recomputes CRC32 in that order. See `Documentation/design.md`, sections "Superblock CRC32" and "Superblock RS FEC". |
@@ -1014,7 +1014,7 @@ filesystem, which beamfs does not currently aim to be.
 
 | Feature | Status |
 |---------|--------|
-| Maximum file size | Approximately 478 GiB (12 direct + single/double/triple indirect, `BEAMFS_MAX_IBLOCK_TINDIRECT * 3824` bytes). Measured 2026-08-23 on a freshly formatted volume: a 64 MiB file, well into double indirect, was written and read back byte-identical at 24 MB/s with no `EOPNOTSUPP`. Truncate frees only direct and single indirect blocks; freeing a file larger than 524 blocks leaves the deeper levels allocated (a space leak, not a correctness problem for reads) until sub-step 6 closes it. |
+| Maximum file size | Approximately 478 GiB (12 direct + single/double/triple indirect, `BEAMFS_MAX_IBLOCK_TINDIRECT * 3824` bytes). Measured 2026-08-23 on a freshly formatted volume: a 64 MiB file, well into double indirect, was written and read back byte-identical at 24 MB/s with no `EOPNOTSUPP`. Truncate to a smaller size (`file_inline.c::beamfs_inline_free_blocks_from`) frees only direct and single indirect blocks; shrinking a file that reached past 524 blocks leaves the deeper levels allocated (a space leak, not a correctness problem for reads) until sub-step 6 closes it. Deleting the inode (`super.c::beamfs_free_data_blocks`) walks all three levels and leaks nothing. |
 | Symbolic links | Fast symlink only. Target stored inline in `fi->i_direct[]` (96 bytes), capped at 95 bytes plus zero terminator. Targets longer than 95 bytes return `-ENAMETOOLONG` at `symlink(2)` time. Slow symlink (data-block target) not implemented. Empirical audit on the `beamfs-rootfs-test.bb` rootfs scratch tree (busybox + dropbear + bash minimal): 388 symlinks total, max target length 34 bytes, distribution concentrated at 16-23 bytes. Fast-symlink suffices for minimal rootfs deployment. Empirical audit on the beamfs-research-image rootfs scratch tree (984 MiB, full HPC stack with slurm, openssl, ca-certificates, iperf3, fio, etc.): 1221 symlinks, max target length 106 bytes, 6 symlinks exceed 95 bytes (all in /etc/ssl/certs/ pointing to long-named Mozilla root CA files in /usr/share/ca-certificates/mozilla/). Verified empirically that mkfs.beamfs --from-dir silently skips these 6 entries with a warning on stderr; they do not appear in the produced .beamfs image. The cluster boots and operates normally (R19 cycle 2026-05-15 exit 0) since these specific CA roots are not used by init, sshd, slurm, munge, or the bench workload. A TLS-heavy workload may notice missing roots and need slow symlink support; current rootfs use is unaffected. |
 | Extended attributes (xattr) | Not supported. |
 | SELinux labels (`security.selinux` xattr) | Not supported. |
@@ -1041,9 +1041,13 @@ that did not, `generic/589` is an upstream test defect (below),
 findings are the interruption rather than a result, and five are
 real: 075, 083, 241, and the two counted under 083's mechanisms.
 
-The sweep runs with `-I none`. That is not the mkfs default, and
-item 3.13 shows the default fails far more often -- any pass rate
-quoted from a sweep is a pass rate for the unprotected mode.
+Which mode a sweep ran in is on its own `MKFS_OPTIONS` line, and
+must be read there before its rate is quoted. The sweep of
+2026-09-21 (1789974744) ran with `-N 16384` alone, so with the mkfs
+default, rs: its generic/001 alone logged thirty indirect-parity
+checks, which a volume formatted `-I none` has no region to make.
+Item 3.13 shows the two modes fail at very different rates, so a
+rate from one says nothing about the other.
 
 **The suite is 1016 commits behind upstream.** The recipe pins
 xfstests 2024.03.03 (`SRCREV 088e5bd4`) against a 7.3.0-rc2 kernel.

@@ -438,5 +438,5 @@ tant que ce point n'est pas lu dans l'image.
 | Item | Effort | Note |
 |------|--------|------|
 | parity-pr-debug | 10 min | `indirect block N has no parity written yet` est un `pr_warn_ratelimited`, pas un `pr_debug` ; 1456 callbacks suppressed observes sur un seul essai le 2026-09-21 ; a passer en pr_debug ou en compteur par montage rapporte au demontage, comme treecheck.c:79 |
-| stale-comments | 30 min | Les quatorze sites d'appel de ind_parity_verify (13 dans file_inline.c, 1 dans scrub.c) et seize occurrences de "corrected in place" (13 file_inline.c, 2 edac.c, 1 indparity.c) disent "corrected in place" ; la fonction décode en scratch depuis longtemps |
+| stale-comments | 30 min | Les quatorze sites d'appel de ind_parity_verify (13 dans file_inline.c, 1 dans scrub.c) et les seize occurrences de "corrected in place" (13 file_inline.c, 2 edac.c, 1 indparity.c) décrivent une fonction qui décode en scratch depuis longtemps |
 | man-stop-dup | 5 min | Deux entrées .TP/.B stop dans le manuel de beamfs-xfstests |
