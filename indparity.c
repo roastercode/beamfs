@@ -577,7 +577,15 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
 
-	{
+	/*
+	 * The pointer count serves the tracepoint and nothing else.
+	 * Counted unconditionally it is 512 loads for every pointer
+	 * installed, on a path that already pays seventeen RS
+	 * operations, and it ran with tracing off as readily as on.
+	 * generic/013 spends 950 seconds here where ext2 spends
+	 * sixty.
+	 */
+	if (trace_beamfs_parity_slot_enabled()) {
 		unsigned int nz = 0, k;
 
 		for (k = 0; k < BEAMFS_INDIRECT_PTRS; k++)
