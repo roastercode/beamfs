@@ -2,3 +2,10 @@
 *.o
 fsck.beamfs
 tests/test_rs_vectors
+# Built by make; a binary in the tree is one more thing to
+# keep in step with its source, and it never is.
+tests/burst_test
+tests/capsule_test
+tests/fsck_oracle
+tests/interleave_test
+tests/region_test

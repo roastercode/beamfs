@@ -98,6 +98,8 @@ struct verdict {
 	bool sb_bad;
 	bool pass4_ran;
 	bool uncorrectable;
+	long free_dirents;  /* pass 6: entries naming a free inode */
+	long orphans;       /* pass 6: allocated inodes nothing reaches */
 };
 
 static struct verdict check(void)
@@ -121,6 +123,31 @@ static struct verdict check(void)
 			v.lost = b;
 			v.pass4_ran = true;
 		}
+		/*
+		 * The two counts generic/076 came back with. Parsed like
+		 * the others: what matters is not that the checker says
+		 * something is wrong but that it says the right thing and
+		 * the right number of times.
+		 */
+		/*
+		 * strstr first, sscanf second.
+		 *
+		 * sscanf returns how many conversions succeeded, not whether
+		 * the literal text matched: "%ld directory entr" against
+		 * "1 inode(s) whose size runs ahead" converts the 1, returns
+		 * 1, and the line is taken for something it is not. Both
+		 * counters read each other's lines that way, and two cases
+		 * failed against a checker that was right.
+		 */
+		if (strstr(line, "pass 6:") &&
+		    strstr(line, "directory entr") &&
+		    strstr(line, "naming a free inode") &&
+		    sscanf(line, "fsck.beamfs: pass 6: %ld", &a) == 1)
+			v.free_dirents = a;
+		if (strstr(line, "pass 6:") &&
+		    strstr(line, "allocated inode(s) no directory reaches") &&
+		    sscanf(line, "fsck.beamfs: pass 6: %ld", &a) == 1)
+			v.orphans = a;
 		if (strstr(line, "pass 4: bitmap consistent"))
 			v.pass4_ran = true;
 		if (strstr(line, "superblock unreadable") ||
@@ -359,8 +386,8 @@ static void case_pristine(void)
 	v = check();
 	report("pristine volume", v.rc == 0 && v.lost == 0 && v.dangling == 0
 	       && v.pass4_ran && !v.sb_bad,
-	       "rc=%d lost=%ld dangling=%ld pass4=%s",
-	       v.rc, v.lost, v.dangling, v.pass4_ran ? "ran" : "SKIPPED");
+	       "rc=%d lost=%ld dangling=%ld orphans=%ld free_dirents=%ld pass4=%s",
+	       v.rc, v.lost, v.dangling, v.orphans, v.free_dirents, v.pass4_ran ? "ran" : "SKIPPED");
 }
 
 /*
@@ -944,6 +971,100 @@ static void case_out_of_range_pointer(void)
 	       "expected to survive with lost=0, got rc=%d lost=%ld", v.rc, v.lost);
 }
 
+
+/*
+ * A name pointing at an inode that was never written.
+ *
+ * generic/076 came back with five of these and nothing in the oracle
+ * could produce one, so there was no way to tell whether the checker
+ * had found a real defect or invented a category. The entry goes into
+ * the root; the inode it names keeps i_mode == 0, which is what pass 6
+ * calls free.
+ */
+static void case_dirent_to_free_inode(void)
+{
+	struct beamfs_super_block sb;
+	struct rs_codec *rs = rs_init();
+	struct verdict v;
+	int fd;
+
+	fresh();
+	fd = open(image, O_RDWR);
+	if (fd < 0 || !rs)
+		die("cannot open %s", image);
+	read_sb(fd, &sb);
+	/* Named, never written: the inode stays as mkfs left it. */
+	link_into_root(fd, &sb, 2048, "ghost", rs);
+	close(fd);
+	rs_free(rs);
+
+	v = check();
+	report("a name for an inode that does not exist",
+	       v.free_dirents == 1 && v.orphans == 0,
+	       "expected free_dirents=1 orphans=0, got %ld/%ld rc=%d",
+	       v.free_dirents, v.orphans, v.rc);
+}
+
+/* Five of them, because 076 reported five and a count that is only
+ * ever one proves nothing about a count.
+ */
+static void case_five_dirents_to_free_inodes(void)
+{
+	struct beamfs_super_block sb;
+	struct rs_codec *rs = rs_init();
+	struct verdict v;
+	char name[16];
+	int fd, i;
+
+	fresh();
+	fd = open(image, O_RDWR);
+	if (fd < 0 || !rs)
+		die("cannot open %s", image);
+	read_sb(fd, &sb);
+	for (i = 0; i < 5; i++) {
+		snprintf(name, sizeof(name), "ghost%d", i);
+		link_into_root(fd, &sb, 2048 + (uint64_t)i, name, rs);
+	}
+	close(fd);
+	rs_free(rs);
+
+	v = check();
+	report("five names for inodes that do not exist",
+	       v.free_dirents == 5,
+	       "expected free_dirents=5, got %ld rc=%d", v.free_dirents, v.rc);
+}
+
+/*
+ * An inode in service that no directory names.
+ *
+ * The other half of what 076 reported. build_file writes the inode and
+ * marks its block used, so nothing leaks: the only thing wrong is that
+ * no name reaches it.
+ */
+static void case_unreachable_inode(void)
+{
+	struct beamfs_super_block sb;
+	struct rs_codec *rs = rs_init();
+	struct verdict v;
+	int fd;
+
+	fresh();
+	fd = open(image, O_RDWR);
+	if (fd < 0 || !rs)
+		die("cannot open %s", image);
+	read_sb(fd, &sb);
+	/* Written and its block accounted for, simply not linked. */
+	build_file(fd, &sb, 2148, sb.s_data_start_blk + 300, 0, rs);
+	close(fd);
+	rs_free(rs);
+
+	v = check();
+	report("an inode no directory reaches",
+	       v.orphans == 1 && v.lost == 0 && v.free_dirents == 0,
+	       "expected orphans=1 lost=0 free_dirents=0, got %ld/%ld/%ld rc=%d",
+	       v.orphans, v.lost, v.free_dirents, v.rc);
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 3) {
@@ -1031,6 +1152,9 @@ int main(int argc, char **argv)
 
 	case_correctable_indirect();
 	case_out_of_range_pointer();
+	case_dirent_to_free_inode();
+	case_five_dirents_to_free_inodes();
+	case_unreachable_inode();
 
 	printf("\n%u case(s), %u failed\n", cases_run, cases_failed);
 	if (cases_failed)
