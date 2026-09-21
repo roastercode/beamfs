@@ -753,7 +753,7 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 		return;
 	}
 	trace_beamfs_block_free(sb->s_dev, owner ? owner->i_ino : 0,
-				block, 0);
+				block, _RET_IP_);
 
 	/*
 	 * Pull the goal back to what was just freed, if it is behind.

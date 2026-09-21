@@ -145,13 +145,13 @@ TRACE_EVENT(beamfs_block_alloc,
 );
 
 TRACE_EVENT(beamfs_block_free,
-	TP_PROTO(dev_t dev, unsigned long ino, u64 blk, unsigned int site),
+	TP_PROTO(dev_t dev, unsigned long ino, u64 blk, unsigned long site),
 	TP_ARGS(dev, ino, blk, site),
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(unsigned long, ino)
 		__field(u64, blk)
-		__field(unsigned int, site)
+		__field(unsigned long, site)
 	),
 	TP_fast_assign(
 		__entry->dev = dev;
@@ -159,9 +159,21 @@ TRACE_EVENT(beamfs_block_free,
 		__entry->blk = blk;
 		__entry->site = site;
 	),
-	TP_printk("dev=%u:%u ino=%lu blk=%llu site=%u",
+	/*
+	 * site names the caller, by its return address.
+	 *
+	 * It was the constant 0 in every one of 56215 frees, so a capture
+	 * could say a block had been freed and never which of the
+	 * twenty-nine call sites did it. That matters here more than
+	 * anywhere: freeing a block whose buffer is still on an inode's
+	 * metadata list is how a later owner's pointers are lost, the
+	 * fix is right for some callers and wrong for others -- applied
+	 * to all of them it turned 58 leaked blocks into 345 -- and
+	 * telling them apart needs the caller's name.
+	 */
+	TP_printk("dev=%u:%u ino=%lu blk=%llu site=%pS",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->ino, __entry->blk, __entry->site)
+		  __entry->ino, __entry->blk, (void *)__entry->site)
 );
 
 /*
