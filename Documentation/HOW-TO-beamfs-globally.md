@@ -73,7 +73,7 @@ runtime.
 
 ### 1.4 Canonical image deployment
 
-The image `hpc-arm64-research-beamfs-qemuarm64.beamfs` is the
+The image `beamfs-research-image-qemuarm64.beamfs` is the
 **only** thing each VM disk gets. It is byte-identical across the 4
 VMs. Per-VM hostname differentiation happens via kernel cmdline
 `beamfs.hostname=<name>` set in the libvirt XML.
@@ -170,7 +170,7 @@ revealed v0.2.1 (different work-dir alphabetical ordering picked
 by `find ... | head -1`).
 
 ```bash
-IMG=~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
+IMG=~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs
 ls -la $IMG | head -1
 sudo sha256sum $IMG | head -1
 
@@ -464,11 +464,11 @@ source oe-init-build-env build-qemu-arm64
 
 # Force rebuild from new sources (cleansstate cascades to image).
 bitbake -c cleansstate <product>-module
-bitbake -c cleansstate hpc-arm64-research-beamfs
-bitbake hpc-arm64-research-beamfs
+bitbake -c cleansstate beamfs-research-image
+bitbake beamfs-research-image
 
 # Verify image was rebuilt.
-ls -la tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
+ls -la tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs
 
 # Verify the new module is inside.
 TMPMNT=/tmp/check-image-$(date +%H%M%S)
@@ -476,7 +476,7 @@ mkdir -p $TMPMNT
 # NOTE: a .beamfs image cannot be `mount -o loop` like ext2.
 # Inspect via `debugfs.beamfs` (planned, Phase 2 fsck.beamfs) or
 # boot a throwaway VM with the image as vda and inspect live.
-#sudo mount -o loop,ro tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs $TMPMNT
+#sudo mount -o loop,ro tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs $TMPMNT
 strings $TMPMNT/lib/modules/7.0.3/updates/<product>.ko | grep version=
 sudo umount $TMPMNT && rmdir $TMPMNT
 ```
@@ -491,7 +491,7 @@ Each VM disk is replaced with a fresh copy of the canonical .beamfs :
 ```bash
 for vm in beamfs-master beamfs-compute01 beamfs-compute02 beamfs-compute03 ; do
     sudo virsh destroy $vm 2>/dev/null
-    sudo cp tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs \
+    sudo cp tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs \
             /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
     sudo chown qemu:qemu /var/lib/libvirt/images/hpc-arm64/$vm.beamfs
 done
@@ -832,13 +832,13 @@ guard, not for substring presence. See section 3.2 last block.
 
 ### 4.3 `bitbake` apparent success but stale artefacts (phase G)
 
-**Symptom** : `bitbake hpc-arm64-research-beamfs` exits 0 but the
+**Symptom** : `bitbake beamfs-research-image` exits 0 but the
 new module is not in the .beamfs.
 
 **Cause** : the rootfs cache was reused. `cleansstate` was
 applied to the module recipe but not to the image recipe.
 
-**Fix** : `bitbake -c cleansstate hpc-arm64-research-beamfs`
+**Fix** : `bitbake -c cleansstate beamfs-research-image`
 **before** the rebuild. Section 3.7 G.1.
 
 ### 4.4 The 543-flip / 0-diff paradox (phase G)
@@ -1117,7 +1117,7 @@ bitbake <product>-module
 ### 5.4 R31 redeploy (4 VMs)
 ```
 cd ~/yocto/poky/build-qemu-arm64
-IMG=tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs
+IMG=tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs
 for vm in beamfs-master beamfs-compute01 beamfs-compute02 beamfs-compute03 ; do
     sudo virsh destroy $vm 2>/dev/null
     sudo cp $IMG /var/lib/libvirt/images/hpc-arm64/$vm.beamfs

@@ -50,7 +50,7 @@ into v2.2a proven + v2.2b conjecture in the v2 paper).
 
 The reference target is the Yocto styhead research image built by
 `~/git/yocto-beamfs/` (layer `yocto-beamfs`), producing
-`hpc-arm64-research-beamfs-qemuarm64.beamfs` for the 4-VM aarch64
+`beamfs-research-image-qemuarm64.beamfs` for the 4-VM aarch64
 cluster. The `~/git/beamfs/` tree is the canonical source; it is
 mirrored byte-exact under `yocto-beamfs/recipes-kernel/beamfs/files/
 beamfs-0.1.3/` (lockstep, enforced by R9/R19 pipeline).

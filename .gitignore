@@ -52,7 +52,7 @@ pn-buildlist
 *.tar.gz
 *.tar.xz
 task-depends.dot
-  tests/fsck_oracle
+tools/fsck.beamfs/tests/fsck_oracle
 # This file is the operational contract for Claude on the BEAMFS project.
 Thumbs.db
 .tmp_versions/

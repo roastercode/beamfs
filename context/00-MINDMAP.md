@@ -115,7 +115,7 @@ papers/
 ### yocto-beamfs/
 
 yocto-beamfs/
-├── recipes-core/images/hpc-arm64-research-beamfs.bb   -- R23 canonical
+├── recipes-core/images/beamfs-research-image.bb   -- R23 canonical
 ├── recipes-kernel/{linux,beamfs,radfi}/               -- kernel + modules
 ├── recipes-hpc/{slurm,munge,pmix}/                    -- HPC stack
 └── Documentation/
@@ -142,7 +142,7 @@ yocto-beamfs/
 | R20 | Console output format (#######/#début/#######)                  |
 | R21 | R-isolation FS-test architecture                                 |
 | R22 | R-os-stack Gentoo OpenRC Wayland Sway foot                       |
-| R23 | R-image-canonique hpc-arm64-research-beamfs.bb                   |
+| R23 | R-image-canonique beamfs-research-image.bb                   |
 | R24 | R-CWD bench invocation from yocto-beamfs/                        |
 | R25 | R-bg-detach SSH background commands need full FD detach          |
 | R26 | R-tracing-rigueur strace+blktrace+ftrace, not dmesg-grep         |
@@ -176,7 +176,7 @@ Estimated total : 405h. beamfs-bench saved ~85h regression budget.
 - Threat model ? → `Documentation/threat-model.md`
 - On-disk format ? → `Documentation/format-v4.md` (current) + `format-v5.md` (future)
 - Bench harness ? → `~/git/beamfs-bench/README.md`
-- Yocto image ? → `yocto-beamfs/recipes-core/images/hpc-arm64-research-beamfs.bb`
+- Yocto image ? → `yocto-beamfs/recipes-core/images/beamfs-research-image.bb`
 - Plan ? → `Documentation/roadmap.md`
 
 End of mindmap.

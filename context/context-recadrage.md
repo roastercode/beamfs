@@ -889,7 +889,7 @@ Contraintes operationnelles qui en decoulent :
 
 Le recipe Yocto canonique de l'image cluster BEAMFS est :
 
-  ~/git/yocto-beamfs/recipes-core/images/hpc-arm64-research-beamfs.bb
+  ~/git/yocto-beamfs/recipes-core/images/beamfs-research-image.bb
 
 C'est le coeur des travaux. C'est le seul recipe d'image actif dans
 BBLAYERS et le seul qui produit les rootfs .beamfs deployes sur les 4 VMs
@@ -925,12 +925,12 @@ Recipes connexes dans yocto-beamfs :
 
 Build :
 
-  bitbake hpc-arm64-research-beamfs
+  bitbake beamfs-research-image
 
 Image produite :
 
   ~/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/
-    hpc-arm64-research-beamfs-qemuarm64.beamfs
+    beamfs-research-image-qemuarm64.beamfs
 
 Deployee aux 4 VMs via copie binaire vers
 /var/lib/libvirt/images/hpc-arm64/beamfs-{master,compute01,compute02,compute03}.img
@@ -1242,11 +1242,11 @@ sont bien integres dans le `beamfs.ko` charge par les VMs cluster.
    pointant vers `recipes-kernel/beamfs/files/beamfs-0.1.0/`. Si les
    fichiers de cette branche ont change depuis le dernier build,
    bitbake refait do_compile au prochain `bitbake beamfs-module` ou
-   `bitbake hpc-arm64-research-beamfs`.
+   `bitbake beamfs-research-image`.
 
 3. L'image `.beamfs` canonique doit avoir ete regeneree APRES le delta
    source. Verifier le timestamp de
-   `tmp/deploy/images/qemuarm64/hpc-arm64-research-beamfs-qemuarm64.beamfs`
+   `tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.beamfs`
    et s'assurer qu'il est posterieur au dernier `mv`/`write_text` sur
    la copie yocto-beamfs des sources.
 
@@ -1507,7 +1507,7 @@ ghost rule resolue).
 beamfs est un module kernel out-of-tree dont la cible de build
 EST et SERA TOUJOURS l'environnement Yocto cluster (4-node aarch64
 libvirt VMs, kernel 7.0+, recipe canonique
-hpc-arm64-research-beamfs.bb par R23, invocation depuis
+beamfs-research-image.bb par R23, invocation depuis
 ~/git/yocto-beamfs par R24).
 
 Le poste de travail spartian-1 (Gentoo OpenRC, kernel 6.18 host
@@ -1525,7 +1525,7 @@ lancee. La seule chaine de build legitime est :
 Cette commande declenche en interne :
 
 1. bitbake recipes-kernel/beamfs sur le sysroot Yocto aarch64 ;
-2. integration du beamfs.ko dans l'image hpc-arm64-research-beamfs ;
+2. integration du beamfs.ko dans l'image beamfs-research-image ;
 3. deploiement de l'image sur les 4 VMs cluster ;
 4. R31 verification d'identite (sha256 beamfs.ko in-VM == sha256
    sysroot) ;

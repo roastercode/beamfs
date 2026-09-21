@@ -105,7 +105,7 @@ vdg -> beamfs   SanDisk Cruzer ...09503233
 beamfs-bench (Rust binary, deployed to /usr/bin/beamfs-bench)
 |
 +-- pipeline (R19 validation chain, 8 phases 0.0..0.7)
-|     -> bitbake hpc-arm64-research-beamfs (setscene cache hit)
+|     -> bitbake beamfs-research-image (setscene cache hit)
 |     -> deploy beamfs.ko on 4 VMs in parallel
 |     -> verify in-VM ko SHA256 == reference SHA256
 |     -> emit GPG-signed manifest.json

@@ -23,7 +23,7 @@ Storage canonique : `~/git/beamfs/context/STATUS.md` (NEVER published).
   R21).
 
 ### Yocto
-- Image canonique `hpc-arm64-research-beamfs.bb` (R23).
+- Image canonique `beamfs-research-image.bb` (R23).
 - Recipe enrichi : strace, perf, trace-cmd, blktrace dans IMAGE_INSTALL.
 - Image redeploy 4 VMs cluster.
 
