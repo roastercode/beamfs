@@ -40,6 +40,30 @@
 #define BEAMFS_SCRUB_DEFAULT_INTERVAL_MS  100
 
 /*
+ * The pace a volume starts at, in milliseconds between blocks.
+ *
+ * Per-volume it is settable through sysfs once mounted, which is no
+ * help for a volume something else mounts: xfstests makes and mounts
+ * its scratch device itself, and the scrubber is running on it before
+ * anything outside the kernel can say otherwise. Worse, the root
+ * filesystem here is beamfs too, so a sweep was running under every
+ * measurement ever taken on this machine -- ten blocks a second, each
+ * one seventeen Reed-Solomon decodes, halving its interval again on
+ * every correction.
+ *
+ * As a parameter it is settable before the mount rather than after:
+ * beamfs.scrub_interval_ms= on the kernel command line, or through
+ * /sys/module/beamfs/parameters/ for the mounts still to come. 0 parks
+ * the scrubber, which is a measurement decision and not a safe
+ * default: correction on read is unaffected, but nothing then goes
+ * looking for the block nobody reads.
+ */
+static unsigned int scrub_interval_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
+module_param(scrub_interval_ms, uint, 0644);
+MODULE_PARM_DESC(scrub_interval_ms,
+		 "milliseconds between blocks for newly mounted volumes (0 parks the scrubber)");
+
+/*
  * beamfs_scrub_check_block -- decode one block, report what it found.
  *
  * @corrected receives the number of subblocks that needed correction.
@@ -968,8 +992,8 @@ int beamfs_scrub_init(struct super_block *sb)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	int ret;
 
-	sbi->s_scrub_interval_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
-	sbi->s_scrub_base_ms = BEAMFS_SCRUB_DEFAULT_INTERVAL_MS;
+	sbi->s_scrub_interval_ms = READ_ONCE(scrub_interval_ms);
+	sbi->s_scrub_base_ms = READ_ONCE(scrub_interval_ms);
 	sbi->s_scrub_last_corrected = 0;
 	sbi->s_wear_cursor = 0;
 	sbi->s_wear_visits = 0;
