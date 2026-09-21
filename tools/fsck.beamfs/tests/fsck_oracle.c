@@ -495,6 +495,71 @@ static void case_one_leak(void)
 	       v.lost, v.dangling, v.rc);
 }
 
+/*
+ * An indirect block written without its parity keeps its children.
+ *
+ * The parity region describes indirect blocks from outside them, so a
+ * block can reach the medium while its slot stays zero -- which is not
+ * damage to the block and says nothing about what it holds.
+ *
+ * fsck_read_indirect answered that case by returning UNDESCRIBED
+ * before filling the caller's pointer array, and every caller tested
+ * only for UNCORRECTABLE, so the walk went on through 4 KiB of
+ * uninitialised stack. Every child of such a block was then reported
+ * as marked used and referenced by nothing. On one generic/083 volume
+ * that was 266 blocks of 266, and pass 6 walked 2 inodes where it
+ * should have walked 2106.
+ *
+ * Here the block is written directly rather than through
+ * write_indirect, which is what leaves the region holding zeroes.
+ */
+static void case_indirect_without_parity(void)
+{
+	struct beamfs_super_block sb;
+	struct rs_codec *rs = rs_init();
+	struct beamfs_inode in;
+	uint64_t ptrs[BEAMFS_INDIRECT_PTRS];
+	uint8_t raw[BEAMFS_BLOCK_SIZE];
+	struct verdict v;
+	uint64_t data, ind;
+	int fd;
+
+	fresh();
+	fd = open(image, O_RDWR);
+	if (fd < 0 || !rs)
+		die("cannot open %s", image);
+	read_sb(fd, &sb);
+
+	data = sb.s_data_start_blk + 300;
+	ind  = sb.s_data_start_blk + 301;
+
+	set_block_used(fd, &sb, data, true, rs);
+	set_block_used(fd, &sb, ind, true, rs);
+
+	/* The block alone: the parity region keeps the zeroes mkfs left. */
+	memset(ptrs, 0, sizeof(ptrs));
+	ptrs[0] = data;
+	memset(raw, 0, sizeof(raw));
+	memcpy(raw, ptrs, sizeof(ptrs));
+	pwrite_at(fd, (off_t)ind * BEAMFS_BLOCK_SIZE, raw, sizeof(raw));
+
+	memset(&in, 0, sizeof(in));
+	in.i_mode = 0x8000 | 0644;
+	in.i_nlink = 1;
+	in.i_size = BEAMFS_BLOCK_SIZE;
+	in.i_indirect = ind;
+	write_inode(fd, &sb, 12, &in, rs);
+	link_into_root(fd, &sb, 12, "noparity", rs);
+	close(fd);
+	rs_free(rs);
+
+	v = check();
+	report("an indirect block with no parity keeps its children",
+	       v.lost == 0 && v.dangling == 0,
+	       "expected lost=0 dangling=0, got lost=%ld dangling=%ld rc=%d",
+	       v.lost, v.dangling, v.rc);
+}
+
 /* Seventeen, to catch a checker that reports presence rather than count. */
 static void case_many_leaks(void)
 {
@@ -1094,6 +1159,10 @@ int main(int argc, char **argv)
 		if (!strcmp(only, "leak"))
 			case_one_leak();
 
+		if (!strcmp(only, "noparity"))
+			case_indirect_without_parity();
+
+
 		if (!strcmp(only, "many"))
 			case_many_leaks();
 
@@ -1131,6 +1200,7 @@ int main(int argc, char **argv)
 	case_pristine();
 	case_nine_byte_burst();
 	case_one_leak();
+	case_indirect_without_parity();
 	case_many_leaks();
 	case_dangling();
 	case_both();

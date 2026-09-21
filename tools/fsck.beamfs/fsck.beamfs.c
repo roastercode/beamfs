@@ -71,7 +71,7 @@
 #define FSCK_CANCELED     32  /* fsck canceled by user */
 #define FSCK_LIB         128  /* Shared library error */
 
-#define FSCK_BEAMFS_VERSION "0.1.0"
+#define FSCK_BEAMFS_VERSION "0.1.1"
 
 struct fsck_opts {
 	const char *device;

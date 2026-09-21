@@ -330,7 +330,33 @@ enum fsck_read_status fsck_read_indirect(struct fsck_reader *r, uint64_t blk,
 			}
 		}
 		if (!described) {
+			/*
+			 * No parity was written for this block. That says
+			 * nothing about the block itself, and the two cases
+			 * have to be told apart by the caller, not here:
+			 * a block that was never written is all zeros and
+			 * its pointers lead nowhere, while a block that was
+			 * written without its parity holds perfectly good
+			 * pointers.
+			 *
+			 * This used to return before filling out[], and the
+			 * callers test only for UNCORRECTABLE, so they
+			 * walked 4 KiB of uninitialised stack instead. Every
+			 * child of such a block was then reported as marked
+			 * used and referenced by nothing: 94 of the 266
+			 * blocks generic/083 called lost on 2026-09-21 were
+			 * in their file, in the tree, reachable from the
+			 * inode, and named by a block whose only fault was a
+			 * missing parity slot.
+			 */
 			r->undescribed++;
+			for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
+				uint64_t le;
+
+				memcpy(&le, raw + (size_t)i * sizeof(uint64_t),
+				       sizeof(le));
+				out[i] = le64toh(le);
+			}
 			return FSCK_READ_UNDESCRIBED;
 		}
 
