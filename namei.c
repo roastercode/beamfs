@@ -1381,13 +1381,76 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 	ret = beamfs_add_dirent(new_dir, &new_dentry->d_name,
 			       old_inode->i_ino,
 			       is_dir ? DT_DIR : DT_REG);
-	if (ret)
+	if (ret) {
+		/*
+		 * The destination was unlinked above, before this was
+		 * attempted. Failing now without putting it back loses
+		 * a file that existed when the call started, and the
+		 * caller is told the rename did not happen -- so the
+		 * loss is silent.
+		 *
+		 * The name goes back to the inode it named. The link
+		 * counts were lowered above and are raised again here,
+		 * in the same order.
+		 */
+		if (new_inode) {
+			int back = beamfs_add_dirent(new_dir,
+						     &new_dentry->d_name,
+						     new_inode->i_ino,
+						     S_ISDIR(new_inode->i_mode)
+						     ? DT_DIR : DT_REG);
+
+			if (back) {
+				pr_err("beamfs: rename: '%.*s' was removed from inode %llu and could not be restored: add %d, restore %d\n",
+				       (int)new_dentry->d_name.len,
+				       new_dentry->d_name.name,
+				       (unsigned long long)new_dir->i_ino,
+				       ret, back);
+			} else {
+				if (S_ISDIR(new_inode->i_mode)) {
+					inode_inc_link_count(new_inode);
+					inode_inc_link_count(new_inode);
+					inode_inc_link_count(new_dir);
+				} else {
+					inode_inc_link_count(new_inode);
+				}
+			}
+		}
 		return ret;
+	}
 
 	/* Remove entry from old_dir */
 	ret = beamfs_del_dirent(old_dir, &old_dentry->d_name);
 	if (ret) {
-		pr_err("beamfs: rename: del_dirent failed after add, fs may be inconsistent\n");
+		int undo;
+
+		/*
+		 * Put it back, rather than leaving two names for one
+		 * inode.
+		 *
+		 * The inode's link count was not raised for the name
+		 * just added, so two entries share one link: the first
+		 * unlink frees the inode and the other entry is left
+		 * naming a free one. generic/076 came back with five of
+		 * those and two inodes no directory reached, which is
+		 * the same event seen from the other side.
+		 *
+		 * Removing what this call added restores the directory
+		 * to what it was, and the caller gets an honest error
+		 * instead of a filesystem that disagrees with itself.
+		 * It cannot fail for want of space -- the record is
+		 * there and only its d_ino is cleared -- and if it does
+		 * fail anyway there is nothing further to try, so say
+		 * both errors and let fsck see a bounded mess rather
+		 * than a silent one.
+		 */
+		undo = beamfs_del_dirent(new_dir, &new_dentry->d_name);
+		pr_err("beamfs: rename: could not remove '%.*s' from inode %llu after adding '%.*s' to inode %llu: %d; rollback %s\n",
+		       (int)old_dentry->d_name.len, old_dentry->d_name.name,
+		       (unsigned long long)old_dir->i_ino,
+		       (int)new_dentry->d_name.len, new_dentry->d_name.name,
+		       (unsigned long long)new_dir->i_ino,
+		       ret, undo ? "FAILED" : "done");
 		return ret;
 	}
 
