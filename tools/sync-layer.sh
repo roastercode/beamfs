@@ -26,6 +26,18 @@ rsync -a --include="*.c" --include="*.h" --include="Kconfig" \
 # under tools/ in the repository and flat in the layer, because the
 # recipe unpacks one directory.
 rsync -a "$B/tools/mkfs.beamfs/mkfs.beamfs.c" "$L/"
+# The checker, whole.
+#
+# Only mkfs and the RS decoder were mirrored, so the layer kept a copy
+# of fsck from whenever it was last edited by hand: 0.1.1 fixed a walk
+# through uninitialised stack in the repository while the node went on
+# running 0.1.0 and reporting leaks that were not there.
+F="$(dirname "$L")/fsck-beamfs-0.1.1"
+mkdir -p "$F"
+rsync -a --include="*.c" --include="*.h" --include="Makefile" \
+         --include="*.8" --include="COPYING" --exclude="*" \
+         "$B/tools/fsck.beamfs/" "$F/"
+
 rsync -a "$B/tools/fsck.beamfs/rs_decode.c" \
          "$B/tools/fsck.beamfs/rs_decode.h" \
          "$B/tools/fsck.beamfs/rs_decode_internal.h" "$L/"
