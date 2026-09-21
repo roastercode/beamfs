@@ -411,7 +411,30 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 		return 0;
 	}
 
+	/*
+	 * The copy under the buffer lock, for the reason
+	 * beamfs_scrub_check_block gives about data blocks and that was
+	 * never applied to the blocks holding the pointers.
+	 *
+	 * Every site in file_inline.c that installs a pointer holds
+	 * lock_buffer across the store. Copying without it catches the
+	 * block halfway, and the walk below then descends into slots
+	 * holding neither the old pointer nor the new one.
+	 *
+	 * The verify above stays outside the lock on purpose. It reads
+	 * the parity region through beamfs_bread and takes a scratch page
+	 * from a pool of thirty-two, and holding a buffer lock across
+	 * that is the shape super.c documents at the scratch pool: three
+	 * tasks stalled 191 seconds in __bread_gfp under
+	 * beamfs_ind_parity_verify, the machine at 330% CPU, never
+	 * returning. A verify that reads a half-written block reports a
+	 * block that is sound as uncorrectable, which is noise in dmesg;
+	 * a walk over a half-written copy loses pointers, which is not.
+	 * The lock goes where the damage is.
+	 */
+	lock_buffer(ibh);
 	ptrs = kmemdup(ibh->b_data, BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	unlock_buffer(ibh);
 	brelse(ibh);
 	if (!ptrs)
 		return 0;
