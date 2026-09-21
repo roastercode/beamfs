@@ -1435,6 +1435,20 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
+			/*
+			 * Under the buffer lock, like the data installs above.
+			 *
+			 * This stores a pointer into a shared indirect block. Without
+			 * the lock the store races the flusher submitting that same
+			 * buffer: the pointer reaches disk half-written, or a
+			 * concurrent installer's store is lost. treecheck caught it
+			 * from wb_workfn -- LOST POINTER, held N, read as 0 -- and the
+			 * child block then has no parity written for it and its whole
+			 * subtree is unreachable. The three data installs took this
+			 * lock; the three indirect installs did not.
+			 * ind_parity_update reads b_data, so it belongs inside too.
+			 */
+			lock_buffer(ibh);
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, ibh->b_blocknr,
 						l1_slot, le64_to_cpu(ptrs[l1_slot]),
 						l1_blk, 2);
@@ -1445,6 +1459,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			beamfs_order_before_pointer(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh, inode);
+			unlock_buffer(ibh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
@@ -1853,6 +1868,20 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
+			/*
+			 * Under the buffer lock, like the data installs above.
+			 *
+			 * This stores a pointer into a shared indirect block. Without
+			 * the lock the store races the flusher submitting that same
+			 * buffer: the pointer reaches disk half-written, or a
+			 * concurrent installer's store is lost. treecheck caught it
+			 * from wb_workfn -- LOST POINTER, held N, read as 0 -- and the
+			 * child block then has no parity written for it and its whole
+			 * subtree is unreachable. The three data installs took this
+			 * lock; the three indirect installs did not.
+			 * ind_parity_update reads b_data, so it belongs inside too.
+			 */
+			lock_buffer(ibh);
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, ibh->b_blocknr,
 						l1_slot, le64_to_cpu(ptrs[l1_slot]),
 						l1_blk, 2);
@@ -1863,6 +1892,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			beamfs_order_before_pointer(l1bh);
 			ptrs[l1_slot] = cpu_to_le64(l1_blk);
 			beamfs_ind_parity_update(sb, ibh, inode);
+			unlock_buffer(ibh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
@@ -1991,6 +2021,20 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * generic/476, against the one block fsck found
 			 * leaked.
 			 */
+			/*
+			 * Under the buffer lock, like the data installs above.
+			 *
+			 * This stores a pointer into a shared indirect block. Without
+			 * the lock the store races the flusher submitting that same
+			 * buffer: the pointer reaches disk half-written, or a
+			 * concurrent installer's store is lost. treecheck caught it
+			 * from wb_workfn -- LOST POINTER, held N, read as 0 -- and the
+			 * child block then has no parity written for it and its whole
+			 * subtree is unreachable. The three data installs took this
+			 * lock; the three indirect installs did not.
+			 * ind_parity_update reads b_data, so it belongs inside too.
+			 */
+			lock_buffer(l1bh);
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, l1bh->b_blocknr,
 						l2_slot, le64_to_cpu(ptrs[l2_slot]),
 						l2_blk, 3);
@@ -2001,6 +2045,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			beamfs_order_before_pointer(l2bh);
 			ptrs[l2_slot] = cpu_to_le64(l2_blk);
 			beamfs_ind_parity_update(sb, l1bh, inode);
+			unlock_buffer(l1bh);
 			/* Splicing a child into its parent is an install like
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
