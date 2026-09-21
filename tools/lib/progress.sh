@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=bash
 #
-# progress.sh 1.1.0 -- the beamfs way of showing a long background job.
+# progress.sh 1.1.1 -- the beamfs way of showing a long background job.
 #
 # This is the project's display model. Every long-running tool here
 # uses it, so that watching a build, a sweep or a campaign feels the
@@ -51,6 +52,7 @@ _progress_spin=0
 # variable crosses back, a subshell does not.
 progress_spin() {
     local frames='|/-\'
+    # shellcheck disable=SC2034  # read by the caller, which is the point
     PROGRESS_MARK="${frames:_progress_spin%4:1}"
     _progress_spin=$((_progress_spin + 1))
 }

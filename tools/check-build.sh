@@ -77,3 +77,25 @@ else
 	echo "  it does not build"
 	exit 1
 fi
+
+# The shell, held to the same standard as the rest.
+#
+# beamfs compiles with -Werror, the Rust tools with clippy at zero
+# warnings, and the shell that drives both had never been checked at
+# all: shellcheck was not even installed. It found no error and ten
+# real traps -- sudo with a redirect, which writes as the user and not
+# as root, silently.
+if command -v shellcheck > /dev/null 2>&1; then
+	bad=0
+	for f in "$SRC"/tools/*.sh "$SRC"/tools/lib/*.sh; do
+		[ -f "$f" ] || continue
+		shellcheck -S warning "$f" || bad=1
+	done
+	[ "$bad" -eq 0 ] || {
+		echo "shell: shellcheck is not happy"
+		exit 1
+	}
+	echo "shell: shellcheck clean"
+else
+	echo "shell: shellcheck absent, not checked"
+fi

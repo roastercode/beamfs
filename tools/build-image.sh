@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# build-image.sh 0.3.3 -- build the image, and show what it is doing.
+# build-image.sh 0.3.4 -- build the image, and show what it is doing.
 #
 # bitbake redirected to a file says nothing for eight minutes, which
 # cannot be told from a build that has hung. bitbake on the terminal
@@ -44,8 +44,6 @@ echo ""
 bitbake "$IMAGE" > "$LOG" 2>&1 &
 pid=$!
 start=$(date +%s)
-spin=0
-frames='|/-\'
 
 while kill -0 "$pid" 2>/dev/null; do
     progress_spin
