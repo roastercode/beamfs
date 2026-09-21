@@ -335,3 +335,78 @@ un volume qui vient d'être formaté. La racine, elle, a bien l'heure
 courante. Sans conséquence sur la cohérence, mais visible partout et
 de nature à faire douter d'un volume neuf lors d'une relecture.
 Source : yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.3/mkfs.beamfs.c
+
+## 2026-09-21 -- ce que la journée a établi, et ce qu'elle a réfuté
+
+### Établi par mesure
+
+Le stockage hôte dominait toutes les mesures. Les volumes de test
+portaient 179996 et 142283 extents par copy-on-write btrfs, soit un
+extent pour un bloc et demi. Les images vivent désormais sous
+`/var/lib/libvirt/images/x86-nocow/`, répertoire marqué `chattr +C`,
+et tiennent à 3 extents après trente formatages. La dérive monotone de
+38 à 60 secondes par essai a disparu avec elles.
+
+Le scrubber est dans le circuit des pertes de blocs. Garé
+(`XFSTESTS_SCRUB_MS=0`) : zéro bloc perdu. Actif au défaut de 100 ms :
+353 et 376 blocs sur deux séries. La variable qui sépare les essais en
+échec des essais réussis est `host.blk.vdh.rd.bytes`, 1,14 Go lus sur
+un volume de 1 Go contre 69 Mo, sur trois séries. Réserve : quatre
+essais valides seulement avant blocage du nœud.
+
+### Réfuté par mesure
+
+L'ordonnancement des métadonnées ne ferme pas les pointeurs perdus.
+`CONFIG_BEAMFS_ORDERED_META=y`, trois séries de dix essais de
+generic/083 : `LOST POINTER` toujours présent, taux inchangé dans les
+vingt points de dispersion du test. La question posée par le Kconfig
+et par journal-design.md reçoit un non. Un journal de métadonnées
+reste justifié pour la sûreté au redémarrage ; il ne fermera pas ce
+symptôme.
+
+`treecheck` compare des valeurs en mémoire, avant toute écriture. Un
+slot relu à zéro n'est donc pas un désordre d'écriture vers le
+support : le bloc a été remis à zéro entre deux stores, ce que
+`ZEROED IN SERVICE` nomme. `beamfs_alloc_block` est correct sous
+`s_lock`, donc le bloc revient par un autre chemin.
+
+Le commentaire de `matrix.rs` affirmant "scrub is not it" est faux.
+
+### État du lab modifié ce jour
+
+- Images du nœud x86-01 déplacées vers `x86-nocow`, sans
+  copy-on-write. Le XML libvirt pointe dessus ; sauvegarde de
+  l'ancien dans `~/disk-backup/libvirt-xml-20260921-105833/`.
+- `beamfs-xfstests` 2.2.0 vers 2.3.4 : sous-commande `nodes status`,
+  cinq troncatures silencieuses supprimées, `deploy` dérive le chemin
+  du rootfs de `virsh domblklist` au lieu de le coder en dur.
+- `BEAMFS_ORDERED` remis à "0" dans local.conf après l'expérience.
+  Changer cette variable n'invalide pas `do_configure` : il faut
+  `bitbake -f -c configure linux-mainline` pour que le `.config`
+  suive.
+
+## 14. Priority matrix
+
+### Tier 1
+
+| Item | Phase | Effort | Note |
+|------|-------|--------|------|
+| leak-1 | 1 | 2-5 j | Double attribution d'un bloc indirect : ZEROED IN SERVICE et LOST POINTER survivent à ORDERED_META |
+| wedge-1 | 1 | 1-3 j | known-limitations 3.14 non résolu : RSS de 0,8 à 8,4 Go sur trente essais, blocage reproduit deux fois le 2026-09-21 |
+| fsck-mounted | 2 | 1 j | Le fsck de capture lit TEST_DEV monté, ce qui concerne seize des vingt-quatre tests du dernier sweep |
+
+### Tier 2
+
+| Item | Effort | Note |
+|------|--------|------|
+| doc-refutations | 2 h | Porter les réfutations du 2026-09-21 dans known-limitations.md, sections 3.13 et 3.14 |
+| sonde-volume | 2-3 j | Module optionnel pour vérifier un volume monté : gel, copie, vérification hors ligne |
+| scrub-lock-measure | 1 j | Mesurer l'effet du verrou de scrub_walk_level en mode rs, seul mode où la parité agit |
+
+### Tier 3
+
+| Item | Effort | Note |
+|------|--------|------|
+| parity-pr-debug | 10 min | `indirect block N has no parity written yet` en pr_debug : 1413 lignes par run |
+| stale-comments | 30 min | Les treize appelants de ind_parity_verify disent "corrected in place" ; la fonction décode en scratch depuis longtemps |
+| man-stop-dup | 5 min | Deux entrées .TP/.B stop dans le manuel de beamfs-xfstests |
