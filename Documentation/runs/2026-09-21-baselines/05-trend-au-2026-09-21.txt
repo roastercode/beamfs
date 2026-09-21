@@ -1,0 +1,13 @@
+  test                worst   best   last  runs  
+  generic/269        103239      0 103239    29  a race
+  generic/464         24813      0  24813    21  a race
+  generic/075         10307      0   5629    17  a race
+  generic/476          1763      0   1763    12  a race
+  generic/013          1086      0      0    69  a race
+  generic/083           397      0      0   196  a race
+  generic/076           162      0      0    25  a race
+  generic/109           133      0    133     7  a race
+  generic/074            57      0      0    12  a race
+  generic/002            31      0      0    16  a race
+  generic/241            31      0      0    11  a race
+  generic/589            22      0      0    20  a race
