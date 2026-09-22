@@ -415,6 +415,54 @@ posterieure au dernier commit, pas ce que porte son .config. Les
 chiffres de cette campagne (80/50/70) ne se comparent ni a 03 ni a 04
 tant que ce point n'est pas lu dans l'image.
 
+## 2026-09-22 : ce que la journée a établi
+
+### Instrument
+
+- La sonde invité de `beamfs-xfstests` n'a jamais rendu une valeur
+  avant 2.3.7 : quatre `grep` portaient des `\"` sous `sh -c '...'`,
+  le shell sortait en erreur, `run()` jetait la sortie. 204 essais de
+  083 dans `state-generic-083.log` avec des clés `host.*` seules. Tout
+  rapport de séparation antérieur comparait des compteurs libvirt.
+  Corrigé, dit quand ça échoue, tenu par un test.
+- `mem.orphan_file` mesuré par BX à chaque capture ; 1 822 168 kio au
+  premier relevé. Voir known-limitations 3.15.
+- `Trial` porte `referenced_free` et `out_of_range`, lus dans le
+  `.full` comme `lost`. Cinq nombres sur chaque ligne `FAIL`.
+- Ouvert, 2.3.8 : `speak` compte des formes repliées et l'écrit comme
+  des blocs. « 1 blocks marked used that nothing references » pour un
+  fsck qui en liste 6803 (essai 2 de 476). Le nombre à imprimer est
+  celui de la ligne de résumé de fsck, pas celui de `Case::collapse`.
+
+### generic/476, essai 2, `.full` de xfstests, scratch démonté
+
+- pass 4 : 6803 blocs utilisés non référencés, « the first 64 span
+  18521..24176 in 63 run(s), longest 2 », le premier « 0 of 4096
+  bytes set -- allocated and never written ».
+- pass 6 : 5084 blocs indirects « never written -- allocated, named
+  by an inode, and no parity was ever filed », sous-arbres
+  inaccessibles ; 792 entrées de répertoire nommant un inode libre.
+- dmesg du même essai : `volume full, first refusal at data`, `at
+  dindirect data`, `at L1 indirect`.
+- Lecture cohérente, non établie : les branches `-ENOSPC` de
+  l'installation d'un bloc indirect, après que le parent a reçu le
+  pointeur, laissent le bloc nommé et jamais écrit, et les dirents
+  vers un inode libre sont l'autre moitié du même chemin d'erreur
+  (§3.2). À vérifier dans file_inline.c avant tout patch. 476 échoue
+  9 fois sur 12 : compatible avec un chemin d'erreur, pas seulement
+  avec une course.
+- Les trois essais ont duré 480 à 577 s contre un budget de 570 ;
+  `trend` a treize runs de 476 terminés. Le nœud portait 1,74 Gio
+  d'orphelins.
+
+### Sweep de nuit 1790043166
+
+- 734 tests, 3 échecs : 074 par budget, 075 (12611, pire connu),
+  476 (36). Non lancés : 102, 103, 650, 651. `compare` contre le
+  sweep de 23 : 3 corrigés, 0 régressé.
+- 075 est bimodal sur 18 runs : zéro ou plus de cinq mille, jamais
+  entre les deux.
+
 ## 14. Priority matrix
 
 ### Tier 1
@@ -422,7 +470,7 @@ tant que ce point n'est pas lu dans l'image.
 | Item | Phase | Effort | Note |
 |------|-------|--------|------|
 | leak-1 | 1 | 2-5 j | Double attribution d'un bloc indirect : ZEROED IN SERVICE et LOST POINTER survivent à ORDERED_META |
-| wedge-1 | 1 | 1-3 j | known-limitations 3.14 non résolu : RSS de 0,8 à 8,4 Go sur trente essais, blocage reproduit deux fois le 2026-09-21 |
+| wedge-1 | 1 | 1-3 j | known-limitations 3.14 non résolu : RSS de 0,8 à 8,4 Go sur trente essais, blocage reproduit deux fois le 2026-09-21 ; mécanisme mesuré le 22, known-limitations 3.15 : stock de folios sans mapping, 1,74 Gio après le sweep de nuit, à ne pas confondre avec la cause retirée en 3.14 |
 | fsck-mounted | 2 | 1 j | Le fsck de capture lit TEST_DEV monté, ce qui concerne seize des vingt-quatre tests du dernier sweep |
 
 ### Tier 2
@@ -439,4 +487,4 @@ tant que ce point n'est pas lu dans l'image.
 |------|--------|------|
 | parity-pr-debug | 10 min | `indirect block N has no parity written yet` est un `pr_warn_ratelimited`, pas un `pr_debug` ; 1456 callbacks suppressed observes sur un seul essai le 2026-09-21 ; a passer en pr_debug ou en compteur par montage rapporte au demontage, comme treecheck.c:79 |
 | stale-comments | 30 min | Les quatorze sites d'appel de ind_parity_verify (13 dans file_inline.c, 1 dans scrub.c) et les seize occurrences de "corrected in place" (13 file_inline.c, 2 edac.c, 1 indparity.c) décrivent une fonction qui décode en scratch depuis longtemps |
-| man-stop-dup | 5 min | Deux entrées .TP/.B stop dans le manuel de beamfs-xfstests |
+| man-stop-dup | fait | beamfs-xfstests 2.3.6, commit 53cbab2 |

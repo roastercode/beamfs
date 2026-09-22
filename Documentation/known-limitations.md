@@ -1001,6 +1001,59 @@ where the node had previously stopped on the fifth. Ten trials do
 not prove a wedge absent; what is established is that the cause
 named in the code was removed and the symptom did not recur.
 
+The symptom did recur, on 2026-09-21, after thirty trials; 3.15 is
+what it measures as.
+
+### 3.15 File folios held after their mapping drops them (OPEN, measured 2026-09-21)
+
+**Symptom.** The same stop as 3.14: page allocation stalls of 10 to
+43 seconds on `xfs_io`, `sh`, `klogd` and on `beamfs-scrub` inside
+`__bread_gfp`, an RCU stall on `kmemleak`, no OOM kill because the
+allocator reports `all_unreclaimable? no`, and ssh refused at the
+banner. Serial log of `trace generic/464`, 2026-09-21 evening.
+
+**Measurement.** At the stall, `Mem-Info` gave `active_file +
+inactive_file` = 1 733 294 pages, 6.6 GiB of 8, and `total pagecache
+pages` = 29 107, 114 MiB. The second is `NR_FILE_PAGES`, folios that
+some `address_space` holds; the first is the file LRU. A folio leaves
+`NR_FILE_PAGES` when `__filemap_remove_folio` takes it out of its
+mapping and leaves the LRU only when it is freed. The difference,
+6.5 GiB, is folios that their file or block device dropped and that
+something still holds a reference to.
+
+The same difference is in `/proc/meminfo` as `Active(file) +
+Inactive(file) - (Cached - Shmem) - Buffers`. Over the 23-test sweep
+1789974744 of the same day, read test by test from the captures:
+zero through generic/012, then +146 MiB on generic/013, unchanged
+across 014 and the budget-killed 074, +496 MiB on 075, +28 MiB on
+076, +212 MiB on 083, then flat at 887 MiB through 102, 109, 269,
+464 and 476. It never fell: not on unmount, not on mkfs, not across
+twenty-three tests. After the 734-test sweep of the night of the
+21st and three trials of 476 it stood at 1 822 168 kB, 1.74 GiB, and
+a trial of generic/001 added nothing.
+
+`beamfs-xfstests` 2.3.7 derives it as `mem.orphan_file` at every
+capture and prints it at the start and end of a run; before 2.3.7
+the guest probe had never returned a value at all (quoting fault,
+204 trials of 083 with host counters only).
+
+**Established.** The pool exists, is not reclaimable, grows in steps
+on four of twenty-three tests and on none of the write-heavy ones,
+and is what fills the guest until the allocator stalls. 3.14
+removed a real cause; its "resident size grew from 3.0 to 8.4 GiB"
+was this pool seen from the host, and it is still there.
+
+**Not established.** Which path keeps the reference. The four tests
+that grow it -- fsstress, fsx with mmap and holes, 076, ENOSPC on
+083 -- share truncation, holes and error returns that 269, 464 and
+476 do not exercise; a `folio_get` or a `buffer_head` reference not
+released on such a path fits everything above and is not shown by
+it. `kmemleak` follows the slab, not folios, and will not see it.
+
+**Next measurement.** Ten trials of generic/075 alone, reading the
+step per trial, then `matrix` over fsx's operation flags to isolate
+the operation that leaks. Not a patch until then.
+
 
 ---
 
