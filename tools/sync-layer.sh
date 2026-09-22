@@ -32,7 +32,7 @@ rsync -a "$B/tools/mkfs.beamfs/mkfs.beamfs.c" "$L/"
 # of fsck from whenever it was last edited by hand: 0.1.1 fixed a walk
 # through uninitialised stack in the repository while the node went on
 # running 0.1.0 and reporting leaks that were not there.
-F="$(dirname "$L")/fsck-beamfs-0.1.1"
+F="$(dirname "$L")/fsck-beamfs-0.1.2"
 mkdir -p "$F"
 rsync -a --include="*.c" --include="*.h" --include="Makefile" \
          --include="*.8" --include="COPYING" --exclude="*" \
