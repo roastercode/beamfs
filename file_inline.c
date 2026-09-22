@@ -171,11 +171,19 @@ static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 						   sbi->s_data_start + sbi->s_nblocks);
 				return -EUCLEAN;
 			}
-			if (!beamfs_block_is_allocated(sb, phys)) {
+			/*
+			 * dphys, not phys: until 2026-09-22 this tested the
+			 * uninitialised phys, and never once fired across every
+			 * run on record. A direct pointer into a freed block
+			 * walked through here unseen while the same case on an
+			 * indirect pointer is caught by
+			 * beamfs_check_intermediate_block.
+			 */
+			if (!beamfs_block_is_allocated(sb, dphys)) {
 				pr_err_ratelimited("beamfs/inline: unallocated direct pointer ino=%llu iblock=%llu phys=%llu\n",
 						   (unsigned long long)inode->i_ino,
 						   (unsigned long long)iblock_logical,
-						   (unsigned long long)phys);
+						   (unsigned long long)dphys);
 				return -EUCLEAN;
 			}
 		}
@@ -4411,9 +4419,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		u64                 slot_first;
 		u64                 j;
 
-		/* Already held when this call created it. */
-		if (!ibh)
-			ibh = sb_bread(sb, indirect_blk);
+		ibh = sb_bread(sb, indirect_blk);
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: truncate: failed to read indirect block %llu\n",
 					   (unsigned long long)indirect_blk);

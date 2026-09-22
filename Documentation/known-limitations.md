@@ -1132,6 +1132,45 @@ device's page cache (generic/076); 074 reaches a similar state
 through mmap writes and the unlink of a 10 MiB file.
 
 
+### 3.17 Direct-pointer allocation check inoperative (FIXED 2026-09-22)
+
+**Symptom.** None visible, which is the defect. `beamfs_inline_lookup_phys`
+bounds-checks a direct pointer against `[s_data_start, s_data_start +
+s_nblocks)` and then asks `beamfs_block_is_allocated` about it -- but
+asked about `phys`, a local not yet assigned in that branch, instead of
+`dphys`. The message "unallocated direct pointer" appears in no evidence
+file of any run on record (16 096 files searched), so either the stale
+stack value always fell below `s_data_start` (reserved zone, answered
+"allocated") or the compiler dropped the branch as undefined. Either way
+a direct pointer into a freed block passed unseen, while the same case
+on an indirect pointer is caught by `beamfs_check_intermediate_block`.
+
+**Found by.** cppcheck 2.13 `uninitvar` on the d14ad29 tree, confirmed
+by reading; the only behavioural defect out of 32 tool findings, the
+rest being three-line NULL checks the scanner misread.
+
+**Fix.** `phys` -> `dphys` at the call and in the message (module
+0.1.6). Expect the check to fire on volumes fsck already reports as
+holding referenced-but-free blocks (generic/075: 59 351): that is the
+check working, not a regression.
+
+### 3.18 INODE_UNIVERSAL scheme kept no parity for indirect blocks (CLOSED 2026-09-22, by refusal)
+
+**Symptom.** `beamfs_iomap_begin` in file.c (scheme 5, "legacy iomap
+path", still selected by inode.c and namei.c when `s_scheme` says so)
+installs indirect, L1 and L2 pointers at six sites without
+`beamfs_ind_parity_update`, and reads them without
+`beamfs_ind_parity_verify` -- zero occurrences of `ind_parity` in the
+file. mkfs lays out the parity region for every scheme, so such a volume
+is born with indirect blocks no parity describes, and fsck reports each
+one as never described.
+
+**Decision.** Not implemented, refused: mkfs.beamfs no longer accepts
+`--scheme inode-universal`, and mount returns -EINVAL for scheme 5 with
+the reason. file.c stays compiled and unreachable; retiring it is a
+separate change. No xfstests run ever used this scheme (all UNIVERSAL_INLINE).
+
+
 ---
 
 ## 4. Filesystem feature limitations

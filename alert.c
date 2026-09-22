@@ -117,7 +117,7 @@ void beamfs_alert_margin(struct super_block *sb, u64 phys, unsigned int used)
 
 	snprintf(detail, sizeof(detail),
 		 "block %llu has consumed all %u correctable symbols",
-		 (unsigned long long)phys, BEAMFS_ERROR_BUDGET_MAX);
+		 (unsigned long long)phys, (unsigned int)BEAMFS_ERROR_BUDGET_MAX);
 	beamfs_alert(sb, BEAMFS_ALERT_MARGIN, "no-margin", detail);
 }
 

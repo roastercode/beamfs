@@ -3,6 +3,14 @@
 
 ---
 
+## 2026-09-22 cross-analysis of d14ad29 (cppcheck + per-function scan)
+
+- [x] file_inline.c:174 uninitialised `phys` in the direct-pointer allocation check (3.17, module 0.1.6)
+- [x] INODE_UNIVERSAL path without parity maintenance: refused at mkfs and mount (3.18)
+- [x] dead test on NULL `ibh` in truncate, dead `ret = 0` after scrub_init, `%u` given an int in alert.c, redundant `mode` read in scrub.c
+- [ ] yocto-beamfs: rename files/beamfs-0.1.5 -> beamfs-0.1.6 and the recipe before the next bitbake (sync-layer.sh already points at 0.1.6)
+- [ ] retire file.c (legacy iomap path) once 3.18 has held through a full sweep
+
 ## CLOSED this session (2026-07-08)
 
 ### §3.10 evict_inode BUG_ON (CLOSED)

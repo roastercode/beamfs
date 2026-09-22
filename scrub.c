@@ -533,7 +533,6 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	if (!bh)
 		return;
 	raw = (struct beamfs_inode *)bh->b_data + offset;
-	mode = le16_to_cpu(raw->i_mode);
 
 	/*
 	 * Take a copy of what the sweep needs, then let the buffer go.

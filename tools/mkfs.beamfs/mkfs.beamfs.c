@@ -1016,11 +1016,13 @@ int main(int argc, char *argv[])
 				scheme_name = "UNIVERSAL_INLINE";
 			} else if (strcmp(optarg, "inode-universal") == 0 ||
 				   strcmp(optarg, "inode_universal") == 0) {
-				scheme = BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL;
-				scheme_name = "INODE_UNIVERSAL";
+				fprintf(stderr,
+					"mkfs.beamfs: scheme '%s' is refused: the kernel path for it keeps no parity for indirect blocks (see known-limitations 3.18)\n",
+					optarg);
+				return 1;
 			} else {
 				fprintf(stderr,
-					"mkfs.beamfs: unknown scheme '%s' (expected: inline, inode-universal)\n",
+					"mkfs.beamfs: unknown scheme '%s' (expected: inline)\n",
 					optarg);
 				return 1;
 			}
@@ -1155,7 +1157,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr,
 				"Usage: %s [-N inodes] [-s scheme] [--profile=embedded] [-O feat,..] [--from-dir=path] <device_or_image>\n"
 				"  -b size         block size; only 4096 is supported\n"
-				"  -s scheme       inline | inode-universal (default: inline)\n"
+				"  -s scheme       inline (default: inline; inode-universal is refused)\n"
 				"  --profile=name  embedded (writes v5.0 minimal format)\n"
 				"  -O / --features list of INCOMPAT bits (per_inode_rs)\n"
 				"  -I / --indirect-parity  rs (default) | crc | none\n"

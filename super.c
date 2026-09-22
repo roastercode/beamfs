@@ -1635,6 +1635,19 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	sbi->s_scheme = le32_to_cpu(fsb->s_data_protection_scheme);
+	/*
+	 * The legacy iomap path (file.c) installs indirect pointers
+	 * without maintaining their parity slot and reads them without
+	 * verifying it, while mkfs lays out the parity region for every
+	 * scheme. A volume formatted with it carries indirect blocks no
+	 * parity describes, by construction. Refused rather than mounted
+	 * unprotected; mkfs.beamfs refuses to format it since the same day.
+	 */
+	if (sbi->s_scheme == BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL) {
+		errorf(fc, "beamfs: scheme INODE_UNIVERSAL (5) keeps no parity for its indirect blocks; not mountable");
+		ret = -EINVAL;
+		goto out_free_fsb;
+	}
 
 	/*
 	 * Indirection parity. Zero on volumes formatted without it, which
@@ -1693,7 +1706,6 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (ret) {
 		pr_warn("beamfs: scrubber did not start (%d); correction on read is unaffected\n",
 			ret);
-		ret = 0;
 	}
 
 	return 0;
@@ -1847,6 +1859,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.5");
+MODULE_VERSION("0.1.6");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");
