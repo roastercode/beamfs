@@ -1093,6 +1093,44 @@ iomap_begin path with no release paired to it; same order, same
 kind of buffer. Hypothesis, not yet read in the source. It is 1 %
 of what wedge-1 was and does not fill a guest in a night.
 
+### 3.16 Writeback stops under generic/074 (OPEN, measured 2026-09-22)
+
+**Symptom.** `fstest` with `mmap=1`, a 10 MiB file, ten loops: the
+first two runs of the test finish, cleanup included; the third never
+prints its header. The node then sits for the whole budget with
+`Dirty` 194 824 kB, `Writeback` 0 and no I/O in flight on the test
+device (`/proc/diskstats`, `/proc/vmstat`: `nr_dirty` 48 706,
+`nr_writeback` 0). The kernel says nothing for thirty-one minutes;
+the hung-task detector did not fire. Reproduced twice out of the last
+thirteen runs of the test (sweep 1790087123, sweep 1790090362); the
+test passes the other times.
+
+**Established.** The flusher submits nothing with 190 MiB of dirty
+pages ahead of it. That is either a buffer it finds locked on every
+pass and redirties without writing, or a lock cycle between the
+writeback path and something holding a folio or buffer of the block
+device's cache. Which one is not known: no stack of a stuck task was
+taken. `beamfs-xfstests` 2.3.18 takes them (`stall.txt`) at the next
+occurrence.
+
+**Consequences on the harness, closed in beamfs-xfstests 2.3.18.**
+The sweep went on to the next test with the stuck tasks still
+holding the device and ran mkfs over it; generic/075 was then
+recorded twice with 12 000-odd lost blocks, and once with 59 351
+blocks referenced by an inode and free in the bitmap. 075 alone
+passes ten benches and two sweeps: those failures were made by the
+harness, not by the filesystem. The 074 fsck in the evidence was
+taken on the mounted device and is not evidence either.
+
+**Not to confuse with.** 3.14 and 3.15 stalled the guest for lack
+of memory; here memory is free (6 GiB) and the disk is idle.
+
+**Where to read while waiting for the stacks.** `file_inline.c`
+around `beamfs_inline_writeback_range` describes a flusher sitting in
+`__lock_buffer` for an hour and a four-party cycle through the block
+device's page cache (generic/076); 074 reaches a similar state
+through mmap writes and the unlink of a 10 MiB file.
+
 
 ---
 

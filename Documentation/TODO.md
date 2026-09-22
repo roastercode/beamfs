@@ -476,7 +476,10 @@ tant que ce point n'est pas lu dans l'image.
 |------|-------|--------|------|
 | leak-1 | 1 | 2-5 j | Double attribution d'un bloc indirect : ZEROED IN SERVICE et LOST POINTER survivent à ORDERED_META |
 | wedge-1 | 1 | fait le 2026-09-22 | known-limitations 3.15 : `get_bh` avant `bh_submit` dans `beamfs_inline_writeback_range`, rendu par personne sur les blocs non derniers d'une plage (`bh_end_write` ne rend rien en 7.3) ; 50 000 buffer_heads par essai de 083, 196 Mio, jusqu'au blocage. Corrigé par `beamfs_inline_wb_end_block`, vérifié par heldfolio : 540 contre 50 752, +4 236 kio contre +411 940 kio. Résidu de 1 % ouvert, candidat : `sb_getblk` passé à `beamfs_ind_parity_update` dans `lookup_or_alloc_phys_new`, déficit de 489 vu par bhbalance |
-| fsck-mounted | 2 | 1 j | Le fsck de capture lit TEST_DEV monté, ce qui concerne seize des vingt-quatre tests du dernier sweep |
+| fsck-mounted | 2 | fait le 2026-09-22 (BX 2.3.17) | Le fsck de capture refuse un volume monté et le dit ; plafond de 5 000 lignes retiré. Les fsck de tests tués pris avant cette version ne sont pas des preuves |
+| stall-074 | 1 | 2-5 j | known-limitations 3.16 : writeback à l'arrêt sous generic/074 (Dirty 190 Mio, Writeback 0, 0 E/S), 2 sur 13 runs, dmesg muet. Aucune pile prise ; BX 2.3.18 les prend (`stall.txt`) et redémarre le nœud avant le test suivant. 075 dans les sweeps était la conséquence (mkfs par le sweep sur un volume tenu par des tâches en D) : retiré des défauts de beamfs |
+| courses | 1 | | generic/109 (133, 910 sur 9 runs), generic/650 (95 sur 1 run), generic/083 (50 %, leak-1 en direct le 22) : même famille à confirmer sur leurs dossiers ; generic/476 chronique (34 à 6 803), generic/464 fuit des blocs indirects sans parité |
+| BX | 2 | | `speak` n'imprime pas les cartes à crochets ni les comptes de fsck ; `compare` ne nomme ni réparés ni nouveaux ; `state` capture après le `dd` du volume (rd_sectors de 2 Mio de secteurs = l'instrument) ; `deploy` ne synchronise pas la couche (`tools/sync-layer.sh`) et la garde juge l'heure des commits ; `stop --hard` garde 1 octet de console ; `nodes restart` absent |
 
 ### Tier 2
 
