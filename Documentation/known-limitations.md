@@ -1004,7 +1004,7 @@ named in the code was removed and the symptom did not recur.
 The symptom did recur, on 2026-09-21, after thirty trials; 3.15 is
 what it measures as.
 
-### 3.15 File folios held after their mapping drops them (OPEN, measured 2026-09-21)
+### 3.15 File folios held after their mapping drops them (FIXED 2026-09-22; 1 % residual open)
 
 **Symptom.** The same stop as 3.14: page allocation stalls of 10 to
 43 seconds on `xfs_io`, `sh`, `klogd` and on `beamfs-scrub` inside
@@ -1043,16 +1043,55 @@ and is what fills the guest until the allocator stalls. 3.14
 removed a real cause; its "resident size grew from 3.0 to 8.4 GiB"
 was this pool seen from the host, and it is still there.
 
-**Not established.** Which path keeps the reference. The four tests
-that grow it -- fsstress, fsx with mmap and holes, 076, ENOSPC on
-083 -- share truncation, holes and error returns that 269, 464 and
-476 do not exercise; a `folio_get` or a `buffer_head` reference not
-released on such a path fits everything above and is not shown by
-it. `kmemleak` follows the slab, not folios, and will not see it.
+**Cause, measured 2026-09-22.** Not an extra reference at the exit
+of the cache. From a freshly booted node, `beamfs-xfstests` 2.3.12
+(`heldfolio` on the `mm_filemap_delete_from_page_cache` tracepoint,
+which both removal paths fire) saw 282 939 and 294 669 folios leave
+the cache in two trials of generic/083, all but a dozen at exactly
+two references, and some seventy held ones in known transient places
+(`aio_free_ring`, shmem eviction, a concurrent reader under
+truncate) -- while the pool grew 196 MiB a trial. What that version
+declared normal was the finding: 2.3.14 counted folios leaving with
+`private` still set, and found 50 752 and 52 235 per trial, all at
+`blkdev_flush_mapping` when the scratch device is released, each
+carrying a `buffer_head` with `b_count` from 1 to 7. 411 948 kB of
+them against 411 940 kB of pool growth. A buffer someone still holds
+survives `block_invalidate_folio`, its folio leaves the mapping at
+three references, batch and cache let go, the buffer's does not, and
+a folio out of every mapping but never freed stays on the LRU.
 
-**Next measurement.** Ten trials of generic/075 alone, reading the
-step per trial, then `matrix` over fsx's operation flags to isolate
-the operation that leaks. Not a patch until then.
+`bhbalance` (2.3.15) then balanced every `sb_bread`, `sb_getblk` and
+`sb_find_get_block` against every `brelse` and `bforget` by calling
+function: beamfs returns what it takes through those, to about 500
+references a trial. The 50 000 were taken elsewhere: `get_bh` before
+`bh_submit` in `beamfs_inline_writeback_range`. In 7.3 `bh_submit`
+takes no reference and `bh_end_write` drops none (fs/buffer.c 1085
+and 200: the caller holds the buffer across the I/O), unlike the
+`submit_bh` and `end_buffer_write_sync` pair the code was written
+against, where the first took one and the second gave it back. The
+last block of a range had beamfs's own completion with its `put_bh`;
+every other block was submitted with `bh_end_write` and its
+reference had no taker. One per block written, as many as the block
+was rewritten: `b_count` 1 on 40 000 blocks, 2 or 3 on 11 000, more
+on 400.
+
+**Fix.** `beamfs_inline_wb_end_block`: what `bh_end_write` does,
+then the `put_bh` that matches the `get_bh`. One site; `get_bh`
+appears nowhere else in beamfs.
+
+**Verified.** Same node, same probe, freshly deployed: 540 and 521
+folios left with a buffer attached (`b_count` 1 on all but two), and
+the pool grew 4 236 kB across the two trials against 411 940 kB
+before, a factor of 97. generic/083 itself is unchanged, one pass and
+one fail, with leak-1 caught live on the failing trial as before.
+
+**Residual, open.** About 530 buffers a trial, 2 MiB, still leave
+the device with `b_count` 1. `bhbalance` on the unpatched kernel
+showed a deficit of 489 on `beamfs_inline_lookup_or_alloc_phys_new`,
+an `sb_getblk` handed to `beamfs_ind_parity_update` in the
+iomap_begin path with no release paired to it; same order, same
+kind of buffer. Hypothesis, not yet read in the source. It is 1 %
+of what wedge-1 was and does not fill a guest in a night.
 
 
 ---

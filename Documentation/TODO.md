@@ -427,6 +427,11 @@ tant que ce point n'est pas lu dans l'image.
   Corrigé, dit quand ça échoue, tenu par un test.
 - `mem.orphan_file` mesuré par BX à chaque capture ; 1 822 168 kio au
   premier relevé. Voir known-limitations 3.15.
+- Cause de 3.15 trouvée le 22 par heldfolio 2.3.14 puis bhbalance
+  2.3.15 (BX) : buffer_heads du writeback jamais rendus. Corrigé, voir
+  known-limitations 3.15. `stop --hard` ne redémarrait pas un nœud
+  muet (BX 2.3.13) ; `deploy` ne synchronise pas la couche, c'est
+  `tools/sync-layer.sh` qui le fait, à appeler avant bitbake.
 - `Trial` porte `referenced_free` et `out_of_range`, lus dans le
   `.full` comme `lost`. Cinq nombres sur chaque ligne `FAIL`.
 - Ouvert, 2.3.8 : `speak` compte des formes repliées et l'écrit comme
@@ -470,7 +475,7 @@ tant que ce point n'est pas lu dans l'image.
 | Item | Phase | Effort | Note |
 |------|-------|--------|------|
 | leak-1 | 1 | 2-5 j | Double attribution d'un bloc indirect : ZEROED IN SERVICE et LOST POINTER survivent à ORDERED_META |
-| wedge-1 | 1 | 1-3 j | known-limitations 3.14 non résolu : RSS de 0,8 à 8,4 Go sur trente essais, blocage reproduit deux fois le 2026-09-21 ; mécanisme mesuré le 22, known-limitations 3.15 : stock de folios sans mapping, 1,74 Gio après le sweep de nuit, à ne pas confondre avec la cause retirée en 3.14 |
+| wedge-1 | 1 | fait le 2026-09-22 | known-limitations 3.15 : `get_bh` avant `bh_submit` dans `beamfs_inline_writeback_range`, rendu par personne sur les blocs non derniers d'une plage (`bh_end_write` ne rend rien en 7.3) ; 50 000 buffer_heads par essai de 083, 196 Mio, jusqu'au blocage. Corrigé par `beamfs_inline_wb_end_block`, vérifié par heldfolio : 540 contre 50 752, +4 236 kio contre +411 940 kio. Résidu de 1 % ouvert, candidat : `sb_getblk` passé à `beamfs_ind_parity_update` dans `lookup_or_alloc_phys_new`, déficit de 489 vu par bhbalance |
 | fsck-mounted | 2 | 1 j | Le fsck de capture lit TEST_DEV monté, ce qui concerne seize des vingt-quatre tests du dernier sweep |
 
 ### Tier 2

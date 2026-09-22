@@ -3520,7 +3520,8 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
  * completion. submit_bh is asynchronous, so the folio cannot be
  * finished when writeback_range returns -- the write is still in
  * flight. One block of the range carries this handler and finishes the
- * folio when its write lands; the rest get end_buffer_write_sync.
+ * folio when its write lands; the rest get beamfs_inline_wb_end_block,
+ * which drops the reference taken for the submission.
  */
 struct beamfs_inline_wb_ctx {
 	struct inode  *inode;
@@ -3571,6 +3572,41 @@ static void beamfs_inline_wb_end_io(struct bio *bio)
 	put_bh(bh);
 
 	iomap_finish_folio_write(inode, folio, len);
+}
+
+/*
+ * Completion for every other block of the range.
+ *
+ * bh_submit takes no reference and bh_end_write drops none: the caller
+ * is expected to hold the buffer across the I/O and let go afterwards.
+ * The pair this code was written against did both, submit_bh taking
+ * one and end_buffer_write_sync giving it back, and the get_bh before
+ * submission was matched against that. With bh_end_write in its place
+ * the reference had no taker: one per block written, a buffer_head
+ * nobody released, its folio taken out of the block device's cache at
+ * release and never freed.
+ *
+ * Measured on 2026-09-22 with beamfs-xfstests heldfolio, on a freshly
+ * booted node: 50 752 and 52 235 folios left the device's cache with a
+ * buffer still attached in two trials of generic/083, b_count from 1
+ * to 7 according to how many times the block had been written, 196 MiB
+ * a trial, pass or fail, until the guest ran out of memory at 6.5 GiB.
+ *
+ * What bh_end_write does, then the put_bh that matches the get_bh.
+ */
+static void beamfs_inline_wb_end_block(struct bio *bio)
+{
+	struct buffer_head *bh;
+	bool uptodate = bio_endio_bh(bio, &bh);
+
+	if (uptodate) {
+		set_buffer_uptodate(bh);
+	} else {
+		mark_buffer_write_io_error(bh);
+		clear_buffer_uptodate(bh);
+	}
+	unlock_buffer(bh);
+	put_bh(bh);
 }
 
 /*
@@ -4025,10 +4061,12 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			}
 			get_bh(bh);
 			/*
-			 * The completion is an argument now. bh_end_write is
-			 * what end_buffer_write_sync became; this filesystem's
-			 * own completion goes in its place on the last buffer
-			 * of the range, the one that finishes the folio.
+			 * The completion is an argument now, and it has to
+			 * drop the reference taken just above: bh_submit
+			 * takes none and bh_end_write drops none, unlike the
+			 * submit_bh and end_buffer_write_sync pair this was
+			 * first written against. The last buffer of the range
+			 * gets the completion that also finishes the folio.
 			 */
 			bh_submit(bh,
 				  REQ_OP_WRITE |
@@ -4036,7 +4074,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
 				   REQ_SYNC : 0),
 				  (bh == last_bh) ? beamfs_inline_wb_end_io
-						  : bh_end_write);
+						  : beamfs_inline_wb_end_block);
 		} else {
 			/*
 			 * Already clean, so no completion is coming. If this
