@@ -59,3 +59,6 @@ Thumbs.db
 tools/raf-decode/target/
 # Versioned on roastercode/beamfs-devel (private) only, never on public.
 *.zip
+tools/mkfs.beamfs/mkfs.beamfs
+tools/fsck.beamfs/fsck.beamfs
+tools/raf-decode/raf-decode
