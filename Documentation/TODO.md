@@ -432,6 +432,15 @@ tant que ce point n'est pas lu dans l'image.
   known-limitations 3.15. `stop --hard` ne redémarrait pas un nœud
   muet (BX 2.3.13) ; `deploy` ne synchronise pas la couche, c'est
   `tools/sync-layer.sh` qui le fait, à appeler avant bitbake.
+- fsck.beamfs 0.1.2 (22) : « never described » distinguait mal deux
+  cas ; la parité d'un bloc nul est nulle, donc un indirect vide sous
+  une case nulle est correct. Sur l'image de 476-001, 1 189 « jamais
+  écrits » = 1 096 vides + 93 à pointeurs sans parité, ces derniers
+  parcourus désormais. Le défaut réel : la case de parité d'environ un
+  indirect à pointeurs sur douze n'atteint pas le médium (93 et 94 sur
+  deux images de 476). Chemin à trouver ; le noyau devrait aussi taire
+  « has no parity written yet » quand le bloc est lui-même nul (à faire
+  avec le prochain bitbake).
 - `Trial` porte `referenced_free` et `out_of_range`, lus dans le
   `.full` comme `lost`. Cinq nombres sur chaque ligne `FAIL`.
 - Ouvert, 2.3.8 : `speak` compte des formes repliées et l'écrit comme

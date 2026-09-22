@@ -167,41 +167,64 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 	{
 		enum fsck_read_status ist = fsck_read_indirect(p->rd, blk, ptrs);
 
-		/*
-		 * Never described is not beyond correction.
-		 *
-		 * The parity slot for this block is empty, and the kernel
-		 * writes parity with every block it writes, so nothing
-		 * ever wrote this one. Calling it beyond correction points
-		 * at the medium; it belongs to the filesystem.
-		 *
-		 * generic/464: block 41641 of inode 24, named by the
-		 * inode, filled with 0xcd, parity slot at region 2482 +
-		 * 3584 empty.
-		 */
-		if (ist == FSCK_READ_UNDESCRIBED) {
-			p->r.undescribed_indirect++;
-			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu was never described -- no parity was ever written for it, so nothing ever wrote the block; the subtree under it is unreachable\n",
+		if (ist == FSCK_READ_UNCORRECTABLE) {
+			/* Not walked: following pointers out of a block that
+			 * failed its own parity is how one bad block becomes a
+			 * report of hundreds.
+			 */
+			p->r.unreadable_indirect++;
+			/*
+			 * Named, not just counted. One indirect block past
+			 * correction orphans everything beneath it -- 273 blocks
+			 * from one block, on the volume this was written for --
+			 * and a count of one says nothing about which block to
+			 * look at or which inode lost its tree.
+			 */
+			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu is beyond correction; the subtree under it is unreachable\n",
 			     (unsigned long long)blk, (unsigned long long)ino);
 			return n;
 		}
-	}
-	if (fsck_read_indirect(p->rd, blk, ptrs) == FSCK_READ_UNCORRECTABLE) {
-		/* Not walked: following pointers out of a block that
-		 * failed its own parity is how one bad block becomes a
-		 * report of hundreds.
-		 */
-		p->r.unreadable_indirect++;
+
 		/*
-		 * Named, not just counted. One indirect block past
-		 * correction orphans everything beneath it -- 273 blocks
-		 * from one block, on the volume this was written for --
-		 * and a count of one says nothing about which block to
-		 * look at or which inode lost its tree.
+		 * An empty parity slot is two different things, and the
+		 * block itself tells them apart.
+		 *
+		 * The parity of an all-zero block is zero: RS(255,239) is
+		 * linear, and the kernel files exactly that slot when it
+		 * creates an indirect block and before any pointer goes in.
+		 * An indirect block that stayed empty -- a file that hit
+		 * ENOSPC right after its tree grew a level, which generic/083
+		 * does eight hundred times a run -- is therefore described
+		 * correctly by a zero slot. Counting it as "never written"
+		 * put 18 to 24 findings on every passing run of 083 and 1189
+		 * on one of 476, none of them a defect, and the number was
+		 * read as one for a day.
+		 *
+		 * A block that holds pointers under a zero slot is the real
+		 * case: it reached the medium and its parity did not. It is
+		 * still walked, with the pointers the reader handed back:
+		 * they are what the writer put there, and not claiming them
+		 * is how a shared block under such a tree goes unseen.
+		 *
+		 * generic/464: block 41641 of inode 24, named by the inode,
+		 * filled with 0xcd, parity slot empty -- that one is the
+		 * second kind, and its pointers are garbage the walk below
+		 * will report as out of range or shared.
 		 */
-		note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu is beyond correction; the subtree under it is unreachable\n",
-		     (unsigned long long)blk, (unsigned long long)ino);
-		return n;
+		if (ist == FSCK_READ_UNDESCRIBED) {
+			unsigned int nz = 0;
+
+			for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++)
+				if (ptrs[i])
+					nz++;
+			if (nz == 0) {
+				p->r.undescribed_empty++;
+				return n;
+			}
+			p->r.undescribed_indirect++;
+			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s) and no parity describes it -- the block reached the medium, its parity slot did not; walked anyway\n",
+			     (unsigned long long)blk, (unsigned long long)ino, nz);
+		}
 	}
 	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
 		if (ptrs[i] == 0)
@@ -618,8 +641,11 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 	 * one finding that names the write path.
 	 */
 	if (r->undescribed_indirect)
-		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) were never written -- allocated, named by an inode, and no parity was ever filed for them; their subtrees are unreachable\n",
+		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers and no parity describes them -- written, named by an inode, parity never filed; walked anyway\n",
 			r->undescribed_indirect);
+	if (r->undescribed_empty)
+		fprintf(stderr, "fsck.beamfs: pass 6: %u empty indirect block(s) under a zero parity slot -- the parity of an all-zero block is zero; not damage\n",
+			r->undescribed_empty);
 	if (r->deep_directories)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u directory/ies use double or triple indirection and were only partly walked\n",
 			r->deep_directories);

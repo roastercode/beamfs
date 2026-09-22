@@ -86,6 +86,10 @@ struct fsck_pass6_result {
 	 * afternoon while the defect was in the write path.
 	 */
 	unsigned int undescribed_indirect;
+	/* Indirect blocks that are all zero under a zero parity slot: the
+	 * parity of nothing is nothing, and these are not damage.
+	 */
+	unsigned int undescribed_empty;
 	/* Directories too deep for this walk's single name table. */
 	unsigned int deep_directories;
 };
