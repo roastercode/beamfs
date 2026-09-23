@@ -677,6 +677,11 @@ void  beamfs_scratch_put(struct super_block *sb, void *p);
  */
 void beamfs_fail(struct super_block *sb, const char *where, int err);
 
+/* Diagnostics at the point of detection: is the buffer still the cache's? */
+void beamfs_bh_diag(struct super_block *sb, u64 blk, const char *why);
+bool beamfs_bh_attached(struct super_block *sb, struct buffer_head *bh,
+			const char *who);
+
 
 /*
  * sb_bread, and mark the volume failed when it comes back empty.

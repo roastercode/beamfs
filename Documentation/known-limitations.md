@@ -1632,3 +1632,33 @@ that let go too early.
 Open, from the same run: fsck reports these blocks and does not count
 them as damage (exit 0). Under the ext4 model a metadata block without
 its checksum is corruption; fsck.beamfs should exit 4 on them.
+
+### 3.28 Buffers that go back to what the medium held (open; diagnostics in 0.1.12)
+
+generic/476 on 0.1.11, scratch image kept by beamfs-xfstests: 97 indirect
+blocks under a zero parity slot, 43 of them under a region block that is
+4096 bytes of zeros on the medium -- the state mkfs left -- although the
+kernel had updated the slot in that region's buffer and the region had
+been written to the device afterwards (parity.bt 2.3.29). In the same
+run treecheck caught an installed pointer reading back as 0 from an
+indirect block ("indirect slot lost its pointer", 13 blocks lost). Two
+kinds of metadata buffer, one symptom: the bytes went back to what the
+device held.
+
+The kernel's own documentation (fs/buffer.c at clean_bdev_aliases, the
+mapping_metadata_bhs series of 2026) names the one mechanism that does
+this: a folio removed from the block device's mapping while a buffer on
+it is still held. The holder keeps writing into an orphan; the next
+reader gets a fresh folio from the device; whichever is written last
+wins. 0.1.12 asks that question at the points of detection
+(`beamfs_bh_diag`: the cache's buffer for the block, its folio, and
+whether the mapping still holds that folio at the block's index) and on
+every parity update (`beamfs_bh_attached`, a pointer compare).
+
+Also recorded from the same reading: the mapping_metadata_bhs series
+assumes metadata buffers are not shared between inodes; beamfs shares
+its bitmap blocks and its parity regions (14 indirect blocks, up to 14
+inodes) across inode lists. And beamfs keeps a dirty buffer-cache alias
+of every data block it allocates (the zero image) beside the iomap page
+that carries the data, where ext4 calls clean_bdev_aliases() to have no
+alias at all.

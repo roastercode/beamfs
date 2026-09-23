@@ -496,6 +496,9 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		return;
 	}
 
+	(void)beamfs_bh_attached(sb, pbh, "parity update: region");
+	(void)beamfs_bh_attached(sb, bh, "parity update: indirect");
+
 	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
 		/*
@@ -780,6 +783,8 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		if (!described) {
 			pr_warn_ratelimited("beamfs: indirect block %llu has no parity written yet; not checked\n",
 					    (unsigned long long)phys);
+			beamfs_bh_diag(sb, region_blk, "undescribed: region");
+			beamfs_bh_diag(sb, phys, "undescribed: indirect");
 			/*
 			 * Nothing to check it against until an update files
 			 * its slot, which marks it verified itself; until
