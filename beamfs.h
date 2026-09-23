@@ -41,6 +41,13 @@ struct beamfs_sb_info {
 	 * than counted by fsck twenty seconds later.
 	 */
 	DECLARE_HASHTABLE(s_tc, 14);
+	/*
+	 * The same entries keyed by child, for beamfs_free_block: it asks
+	 * "which slots name this block", and walking the whole table for
+	 * that, once per freed block under s_tc_lock, was 70 % of the CPU
+	 * of generic/074 (2026-09-23).
+	 */
+	DECLARE_HASHTABLE(s_tc_child, 14);
 	spinlock_t        s_tc_lock;
 	unsigned int      s_tc_entries;
 	unsigned int      s_tc_violations;
@@ -618,6 +625,17 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 			      struct inode *inode);
 int  beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh);
+int  beamfs_ind_parity_verify_medium(struct super_block *sb, struct buffer_head *bh);
+/*
+ * An indirect block whose copy in memory has been checked against its
+ * parity, or written by us with the parity filed: ext4's
+ * buffer_verified. Set once per life of the buffer, so a pointer
+ * lookup does not decode sixteen codewords of the parity region each
+ * time -- 19 % of the CPU of generic/074 (2026-09-23), because the
+ * decode cache was keyed on a counter every parity update bumped.
+ */
+#define BH_BeamfsVerified BH_PrivateStart
+BUFFER_FNS(BeamfsVerified, beamfs_verified)
 void beamfs_ind_parity_touched(struct beamfs_sb_info *sbi);
 void beamfs_ind_parity_cache_free(void);
 

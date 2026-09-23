@@ -1235,6 +1235,35 @@ cursor, outside the windows.
 should move from [4K, 8K) to [64K, 256K), and the test end inside its
 budget.
 
+### 3.21 The tree checker and the parity verify ate the CPU (FIXED 0.1.9, 2026-09-23)
+
+**Symptom.** After 3.19 and 3.20 (module 0.1.8): bios of 128-256 KiB,
+the device 43 % busy, and generic/074 no faster. cpuwho (BX 2.3.27):
+fstest held 74 % of all CPU time, 13 % idle, 16 s off-CPU in 31
+minutes. Of the kernel samples, 68.6 % were under
+beamfs_inline_free_blocks_from (the O_TRUNC of each loop) ->
+beamfs_free_block -> beamfs_tc_forget_child and beamfs_tc_forget_parent,
+46.3 % of them spinning on s_tc_lock; 19 % were decode_rs8 under
+beamfs_ind_parity_verify from beamfs_inline_lookup_or_alloc_phys_new.
+
+**Cause.** (1) treecheck.c forget_child and forget_parent walked the
+whole hash table, under the global spinlock, for every freed block: a
+truncate of 7 500 blocks was 15 000 walks of hundreds of thousands of
+entries, and three writers queued on the lock. (2) The decode cache of
+the parity region was keyed on one counter bumped by every parity
+update; with three writers filing pointers it never hit, and every
+pointer lookup decoded the sixteen codewords of its region block.
+
+**Fix.** (1) A second index keyed by child: forget_child is one probe;
+forget_parent and zeroed probe the 512 (parent, slot) keys of the block
+instead of the table. The checker stays in the image: it is what caught
+the lost pointers of generic/650. (2) ext4's buffer_verified: an
+indirect block's copy in memory is checked once, when first read, or
+marked when we write it with its parity filed; beamfs_ind_parity_verify
+returns at once while the bit is set, and the scrub uses
+beamfs_ind_parity_verify_medium, which clears it first. "has no parity
+written yet" is said once per copy, not once per lookup.
+
 ---
 
 ## 4. Filesystem feature limitations

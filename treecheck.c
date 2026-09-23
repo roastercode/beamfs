@@ -37,6 +37,7 @@
 
 struct beamfs_tc_entry {
 	struct hlist_node node;
+	struct hlist_node cnode;   /* on s_tc_child while child != 0 */
 	u64 parent;
 	u32 slot;
 	u64 child;
@@ -54,9 +55,38 @@ static inline u32 beamfs_tc_key(u64 parent, u32 slot)
 	return hash_64(parent * BEAMFS_INDIRECT_PTRS + slot, BEAMFS_TC_BITS);
 }
 
+static inline u32 beamfs_tc_ckey(u64 child)
+{
+	return hash_64(child, BEAMFS_TC_BITS);
+}
+
+/* Under s_tc_lock. An entry is on the child index while it names a block. */
+static void beamfs_tc_index_child(struct beamfs_sb_info *sbi,
+				  struct beamfs_tc_entry *e)
+{
+	if (e->child)
+		hash_add(sbi->s_tc_child, &e->cnode, beamfs_tc_ckey(e->child));
+}
+
+static void beamfs_tc_unindex_child(struct beamfs_tc_entry *e)
+{
+	if (!hlist_unhashed(&e->cnode))
+		hash_del(&e->cnode);
+}
+
+/* Under s_tc_lock. */
+static void beamfs_tc_drop(struct beamfs_sb_info *sbi, struct beamfs_tc_entry *e)
+{
+	beamfs_tc_unindex_child(e);
+	hash_del(&e->node);
+	sbi->s_tc_entries--;
+	kfree(e);
+}
+
 void beamfs_tc_init(struct beamfs_sb_info *sbi)
 {
 	hash_init(sbi->s_tc);
+	hash_init(sbi->s_tc_child);
 	spin_lock_init(&sbi->s_tc_lock);
 	sbi->s_tc_entries = 0;
 	sbi->s_tc_violations = 0;
@@ -70,6 +100,7 @@ void beamfs_tc_exit(struct beamfs_sb_info *sbi)
 
 	spin_lock(&sbi->s_tc_lock);
 	hash_for_each_safe(sbi->s_tc, bkt, tmp, e, node) {
+		beamfs_tc_unindex_child(e);
 		hash_del(&e->node);
 		kfree(e);
 	}
@@ -116,17 +147,21 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 		       (unsigned long long)child, ino, who);
 		WARN_ONCE(1, "beamfs: indirect slot lost its pointer\n");
 		spin_lock(&sbi->s_tc_lock);
+		beamfs_tc_unindex_child(found);
 		found->child = child;
 		found->ino = ino;
 		found->who = who;
+		beamfs_tc_index_child(sbi, found);
 		spin_unlock(&sbi->s_tc_lock);
 		return;
 	}
 
 	if (found) {
+		beamfs_tc_unindex_child(found);
 		found->child = child;
 		found->ino = ino;
 		found->who = who;
+		beamfs_tc_index_child(sbi, found);
 		spin_unlock(&sbi->s_tc_lock);
 		return;
 	}
@@ -142,9 +177,11 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 	e->child = child;
 	e->ino = ino;
 	e->who = who;
+	INIT_HLIST_NODE(&e->cnode);
 
 	spin_lock(&sbi->s_tc_lock);
 	hash_add(sbi->s_tc, &e->node, key);
+	beamfs_tc_index_child(sbi, e);
 	sbi->s_tc_entries++;
 	spin_unlock(&sbi->s_tc_lock);
 }
@@ -161,15 +198,12 @@ void beamfs_tc_forget_child(struct super_block *sb, u64 child)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct beamfs_tc_entry *e;
 	struct hlist_node *tmp;
-	unsigned int bkt;
+	u32 ckey = beamfs_tc_ckey(child);
 
 	spin_lock(&sbi->s_tc_lock);
-	hash_for_each_safe(sbi->s_tc, bkt, tmp, e, node) {
-		if (e->child == child) {
-			hash_del(&e->node);
-			sbi->s_tc_entries--;
-			kfree(e);
-		}
+	hash_for_each_possible_safe(sbi->s_tc_child, e, tmp, cnode, ckey) {
+		if (e->child == child)
+			beamfs_tc_drop(sbi, e);
 	}
 	spin_unlock(&sbi->s_tc_lock);
 }
@@ -185,14 +219,21 @@ void beamfs_tc_forget_parent(struct super_block *sb, u64 parent)
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct beamfs_tc_entry *e;
 	struct hlist_node *tmp;
-	unsigned int bkt;
+	u32 slot;
 
+	/*
+	 * The 512 slots this block could have, each one probe, rather
+	 * than the whole table for every freed block.
+	 */
 	spin_lock(&sbi->s_tc_lock);
-	hash_for_each_safe(sbi->s_tc, bkt, tmp, e, node) {
-		if (e->parent == parent) {
-			hash_del(&e->node);
-			sbi->s_tc_entries--;
-			kfree(e);
+	for (slot = 0; slot < BEAMFS_INDIRECT_PTRS; slot++) {
+		u32 key = beamfs_tc_key(parent, slot);
+
+		hash_for_each_possible_safe(sbi->s_tc, e, tmp, node, key) {
+			if (e->parent == parent && e->slot == slot) {
+				beamfs_tc_drop(sbi, e);
+				break;
+			}
 		}
 	}
 	spin_unlock(&sbi->s_tc_lock);
@@ -213,6 +254,7 @@ void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot)
 	spin_lock(&sbi->s_tc_lock);
 	hash_for_each_possible(sbi->s_tc, e, node, key) {
 		if (e->parent == parent && e->slot == slot) {
+			beamfs_tc_unindex_child(e);
 			e->child = 0;
 			break;
 		}
@@ -242,23 +284,27 @@ void beamfs_tc_zeroed(struct super_block *sb, unsigned long ino, u64 parent,
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	struct beamfs_tc_entry *e;
 	struct hlist_node *tmp;
-	unsigned int bkt, live = 0;
+	unsigned int live = 0;
 	u64 first = 0;
 	u32 first_slot = 0;
+	u32 slot;
 
 	spin_lock(&sbi->s_tc_lock);
-	hash_for_each_safe(sbi->s_tc, bkt, tmp, e, node) {
-		if (e->parent != parent)
-			continue;
-		if (e->child && !live) {
-			first = e->child;
-			first_slot = e->slot;
+	for (slot = 0; slot < BEAMFS_INDIRECT_PTRS; slot++) {
+		u32 key = beamfs_tc_key(parent, slot);
+
+		hash_for_each_possible_safe(sbi->s_tc, e, tmp, node, key) {
+			if (e->parent != parent || e->slot != slot)
+				continue;
+			if (e->child && !live) {
+				first = e->child;
+				first_slot = e->slot;
+			}
+			if (e->child)
+				live++;
+			beamfs_tc_drop(sbi, e);
+			break;
 		}
-		if (e->child)
-			live++;
-		hash_del(&e->node);
-		sbi->s_tc_entries--;
-		kfree(e);
 	}
 	spin_unlock(&sbi->s_tc_lock);
 

@@ -403,7 +403,7 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 	 * a data block uses. A corrupted pointer array is worse than a
 	 * corrupted data block: it loses everything below it.
 	 */
-	if (beamfs_ind_parity_verify(sb, ibh)) {
+	if (beamfs_ind_parity_verify_medium(sb, ibh)) {
 		pr_err_ratelimited("beamfs: sweep: indirect block %llu fails its parity\n",
 				   (unsigned long long)blk);
 		sbi->s_scrub_uncorrectable++;

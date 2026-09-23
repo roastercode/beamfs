@@ -3,6 +3,13 @@
 
 ---
 
+## 2026-09-23 tree checker index and parity verified bit (3.21, module 0.1.9)
+
+- [x] s_tc_child index; forget_parent and zeroed probe 512 keys
+- [x] BH_BeamfsVerified; scrub verifies the medium through _medium
+- [ ] measure: sweep generic/074 under cpuwho, then iowho, then the six
+- [ ] the zero image of a fresh allocation is written by the bdev flusher before the data (350 k bios of 4 KiB, a quarter of the bytes on 0.1.8)
+
 ## 2026-09-23 reservation windows after ext2 (3.20, module 0.1.8)
 
 - [x] per-inode goal and window, s_rsv_windows under s_lock, discarded at evict

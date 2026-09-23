@@ -576,6 +576,8 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
+	/* The parity now describes this copy. */
+	set_buffer_beamfs_verified(bh);
 
 	/*
 	 * The pointer count serves the tracepoint and nothing else.
@@ -664,6 +666,13 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return 0;
+	/*
+	 * Already checked, or written by us: the copy in memory is what
+	 * the parity describes. Only a buffer freshly read from the
+	 * medium, or one the scrub asks about, is decoded.
+	 */
+	if (buffer_beamfs_verified(bh))
+		return 0;
 
 	pbh = beamfs_bread(sb, region_blk, "indirect parity");
 	if (!pbh)
@@ -751,6 +760,12 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		if (!described) {
 			pr_warn_ratelimited("beamfs: indirect block %llu has no parity written yet; not checked\n",
 					    (unsigned long long)phys);
+			/*
+			 * Nothing to check it against until an update files
+			 * its slot, which marks it verified itself; until
+			 * then, asked once per copy, not once per lookup.
+			 */
+			set_buffer_beamfs_verified(bh);
 			beamfs_scratch_put(sb, rscratch);
 			brelse(pbh);
 			return 0;
@@ -843,5 +858,18 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 
 	beamfs_scratch_put(sb, rscratch);
 	brelse(pbh);
+	if (ret == 0)
+		set_buffer_beamfs_verified(bh);
 	return ret;
+}
+
+/*
+ * The scrub asks about the medium, not about the copy: check again
+ * whatever was checked before.
+ */
+int beamfs_ind_parity_verify_medium(struct super_block *sb,
+				    struct buffer_head *bh)
+{
+	clear_buffer_beamfs_verified(bh);
+	return beamfs_ind_parity_verify(sb, bh);
 }
