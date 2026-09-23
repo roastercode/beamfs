@@ -597,6 +597,32 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 					 phys,
 					 region_blk, offset / (u32)stride, nz);
 	}
+	/*
+	 * Bumped before the lock is dropped, not after.
+	 *
+	 * The bump used to follow unlock_buffer. Between the two, another
+	 * cpu updating a neighbour slot of the same region took the lock,
+	 * found its cached decode of this region still stamped with the
+	 * current generation, hit, scattered its own slot into a payload
+	 * that predates this update, and wrote the region: the slot
+	 * written here went to the device once and was overwritten by
+	 * the next writer's stale copy of the region.
+	 *
+	 * generic/476 on 2026-09-23, module 0.1.10, parity.bt attached:
+	 * 102 indirect blocks reported by fsck as holding pointers under
+	 * a zero parity slot. For every one of them the tracepoint had
+	 * recorded an update with exactly the pointer count fsck found,
+	 * and the region block had been written to the device after that
+	 * update -- never before, never not at all. The write carried
+	 * bytes from before the update. 98 of the 102 were never freed;
+	 * the region was simply written by someone else's update.
+	 *
+	 * With the bump inside the lock, any update that takes the lock
+	 * after this one reads a generation this decode does not carry,
+	 * misses, and decodes the buffer as it is. unlock_buffer orders
+	 * the increment before the next holder's reads.
+	 */
+	beamfs_ind_parity_touched(sbi);
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
 	/*
@@ -605,12 +631,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * -- a plain dirty is all there is, and sync_blockdev is what
 	 * eventually takes it.
 	 */
-	/*
-	 * Every cached decode of this region now describes what the block
-	 * held before this update.
-	 */
-	beamfs_ind_parity_touched(sbi);
-
 	if (inode) {
 		mmb_mark_buffer_dirty(pbh, &BEAMFS_I(inode)->i_metadata_bhs);
 		/*

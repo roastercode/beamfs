@@ -1598,3 +1598,37 @@ holds the filesystem to.
 fsck 0.1.6 frees the table there too, and both tools gain
 `make check-valgrind`: mkfs then fsck against a 1 GiB image under
 memcheck, every leak kind an error. mkfs.beamfs 0.1.3 was already clean.
+
+### 3.27 A parity slot written, then overwritten by a neighbour's stale region (fixed in 0.1.11)
+
+generic/476 on module 0.1.10 (7.3-rc4) passed, unmounted cleanly, and
+fsck found 102 indirect blocks holding pointers under a parity slot still
+zero. parity.bt (beamfs-xfstests 2.3.29) recorded, for every one of
+them, the last `beamfs_parity_slot` event with exactly the pointer count
+fsck read from the block, and a write of the region block to the device
+*after* that update. Not one region was left unwritten, not one update
+postdated its region's last write: the update ran, the region went down,
+and the bytes it carried were from before the update.
+
+The mechanism is the per-cpu decode cache of the region (indparity.c, `ind_rcache`):
+`beamfs_ind_parity_update` bumped `s_ind_parity_gen` *after*
+`unlock_buffer`. In the window between the two, an update of another
+slot in the same region on another cpu took the lock, found its cached
+decode still stamped with the current generation, hit, scattered its own
+slot into that pre-update payload, re-encoded and wrote the region. The
+first slot had reached the device once and was erased by the second
+writer. Fourteen slots share a region and fsstress writes many files at
+once; 102 of 14 501 indirect blocks lost their parity this way in one
+run, none of them visibly, since a zero slot reads as "not yet written"
+and the block is walked unchecked.
+
+0.1.11 bumps the generation before dropping the lock. The next holder of
+the lock reads the new generation, misses, and decodes the buffer it
+holds. ext4 has no such window because a metadata block's checksum lives
+in the block itself and is written with it; a parity kept apart from what
+it describes has to be kept coherent by hand, and this was the one hand
+that let go too early.
+
+Open, from the same run: fsck reports these blocks and does not count
+them as damage (exit 0). Under the ext4 model a metadata block without
+its checksum is corruption; fsck.beamfs should exit 4 on them.
