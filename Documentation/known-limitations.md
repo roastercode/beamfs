@@ -1582,3 +1582,19 @@ require this process and may be applied at any time.
 | `Documentation/system-architecture.md` | Positioning of beamfs in the Linux storage stack and reference deployment scenarios. |
 | `Documentation/design.md` | On-disk format specification. Limitations of the current format are reflected here. |
 | `Documentation/testing.md` | Current test procedures and results. Section 5 of the present document complements `testing.md` with the test coverage gaps. |
+
+### 3.26 fsck leaked its block-owner table on every clean check (fixed in fsck 0.1.6)
+
+Valgrind on 2026-09-23, fsck.beamfs 0.1.5 checking a fresh 1 GiB volume:
+1 949 608 bytes definitely lost in one block, allocated by
+pass4_bitmap_rebuild. That is 243 701 data blocks times eight: the
+owner_of table, freed on every error path and on the path that reports a
+damaged bitmap, and not on the path a consistent bitmap takes -- the one
+every healthy volume goes through. Harmless for a program that exits
+right after, and still a bug: e2fsck runs clean under Valgrind, and a
+checker that leaks on its own happy path is not held to the bar it
+holds the filesystem to.
+
+fsck 0.1.6 frees the table there too, and both tools gain
+`make check-valgrind`: mkfs then fsck against a 1 GiB image under
+memcheck, every leak kind an error. mkfs.beamfs 0.1.3 was already clean.

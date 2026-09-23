@@ -74,7 +74,7 @@
 #define FSCK_CANCELED     32  /* fsck canceled by user */
 #define FSCK_LIB         128  /* Shared library error */
 
-#define FSCK_BEAMFS_VERSION "0.1.5"
+#define FSCK_BEAMFS_VERSION "0.1.6"
 
 struct fsck_opts {
 	const char *device;
@@ -1313,7 +1313,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 				(unsigned long long)ino);
 			fsck_reader_close(&rd);
 			free(reference);
-	free(owner_of);
+			free(owner_of);
 			return FSCK_ERROR;
 		}
 		if (st == FSCK_READ_UNCORRECTABLE) {
@@ -1411,7 +1411,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 		if (!rs) {
 			fprintf(stderr, "fsck.beamfs: pass 4: rs_init failed\n");
 			free(reference);
-	free(owner_of);
+			free(owner_of);
 			return FSCK_ERROR;
 		}
 		bitmap_blocks_count = beamfs_bitmap_blocks_count_from_flags(sb.s_flags);
@@ -1428,7 +1428,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 					(unsigned long long)disk_blk, strerror(errno));
 				rs_free(rs);
 				free(reference);
-	free(owner_of);
+				free(owner_of);
 				return FSCK_ERROR;
 			}
 
@@ -1481,7 +1481,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 						(unsigned long long)disk_blk, strerror(errno));
 					rs_free(rs);
 					free(reference);
-	free(owner_of);
+					free(owner_of);
 					return FSCK_ERROR;
 				}
 			}
@@ -1497,6 +1497,13 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	if (referenced_but_free == 0 && used_but_unreferenced == 0) {
 		if (o->verbose)
 			printf("fsck.beamfs: pass 4: bitmap consistent with inode table\n");
+		/*
+		 * Freed on this path too. Valgrind on 2026-09-23: 1 949 608
+		 * bytes in one block, 243 701 data blocks times eight, lost
+		 * on every clean check -- the only path that did not free
+		 * it was the one every healthy volume takes.
+		 */
+		free(owner_of);
 		return FSCK_OK;
 	}
 

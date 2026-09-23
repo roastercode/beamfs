@@ -39,6 +39,31 @@ OBJS    := $(SRCS:.c=.o)
 
 .PHONY: all clean install test
 
+# Whatever comes first below, a bare make builds the tool: bitbake
+# calls oe_runmake without a target, and on 2026-09-23 it ran
+# check-valgrind on the cross target instead of compiling.
+.DEFAULT_GOAL := all
+
+# Under Valgrind, against a 1 GiB image in $(TMPDIR). Every byte lost
+# is an error: e2fsprogs has held that bar for twenty years, and the
+# one leak fsck.beamfs carried into 0.1.5 sat on the path every healthy
+# volume takes. Needs valgrind on the host; skipped with 77 without it.
+TMPDIR ?= /tmp
+.PHONY: check-valgrind
+check-valgrind: $(BIN)
+	@command -v valgrind >/dev/null 2>&1 || { echo "check-valgrind: no valgrind"; exit 77; }
+	@rm -f $(TMPDIR)/fsck-vg.img && truncate -s 1G $(TMPDIR)/fsck-vg.img
+	@$(MAKE) -s -C ../mkfs.beamfs all >/dev/null
+	@../mkfs.beamfs/mkfs.beamfs -N 16384 $(TMPDIR)/fsck-vg.img >/dev/null 2>&1
+	valgrind --error-exitcode=99 --leak-check=full --show-leak-kinds=all \
+	  --errors-for-leak-kinds=all --track-origins=yes -q \
+	  ./$(BIN) -n $(TMPDIR)/fsck-vg.img >/dev/null
+	valgrind --error-exitcode=99 --leak-check=full --show-leak-kinds=all \
+	  --errors-for-leak-kinds=all --track-origins=yes -q \
+	  ./$(BIN) -n -v $(TMPDIR)/fsck-vg.img >/dev/null
+	@rm -f $(TMPDIR)/fsck-vg.img
+	@echo "check-valgrind: fsck.beamfs clean"
+
 all: $(BIN)
 
 $(BIN): $(OBJS)
