@@ -74,7 +74,7 @@
 #define FSCK_CANCELED     32  /* fsck canceled by user */
 #define FSCK_LIB         128  /* Shared library error */
 
-#define FSCK_BEAMFS_VERSION "0.1.4"
+#define FSCK_BEAMFS_VERSION "0.1.5"
 
 struct fsck_opts {
 	const char *device;
@@ -83,6 +83,8 @@ struct fsck_opts {
 	bool        force;
 	bool        verbose;
 	int         fd;
+	/* Set by pass 1: MOUNTED or ERRORS was found in s_flags. */
+	bool        state_flagged;
 	/*
 	 * Set by pass1_superblock(). false means the superblock fields
 	 * used by later passes (s_bitmap_blk, s_data_start_blk, ...) are
@@ -157,6 +159,40 @@ static void version(void)
  * something that happened to the volume, and silently returning OK
  * would hide a real (if repairable) error from the operator.
  */
+/*
+ * Recompute the superblock's checksum and its RS parity over the
+ * bytes it now holds.
+ *
+ * Every byte a repair changes in a coded block has to be followed by a
+ * new parity, or the next reader "corrects" the change back to the
+ * old bytes -- up to eight symbols a codeword -- and past that calls
+ * the block uncorrectable. Pass 5 knew this (2026-08-25); pass 1 and
+ * pass 4 wrote their repairs raw until 0.1.5.
+ */
+static int sb_reencode(struct beamfs_super_block *sb)
+{
+	struct rs_codec *rs = rs_init();
+	uint8_t  staging[BEAMFS_SB_RS_STAGING_BYTES];
+	uint8_t *sb_parity = (uint8_t *)sb + BEAMFS_SB_RS_PARITY_OFFSET;
+	const size_t off_crc32 = offsetof(struct beamfs_super_block, s_crc32);
+	const size_t off_uuid  = offsetof(struct beamfs_super_block, s_uuid);
+	const size_t off_pad   = offsetof(struct beamfs_super_block, s_pad);
+	unsigned int si;
+
+	if (!rs)
+		return -1;
+	sb->s_crc32 = crc32_sb(sb);
+	memset(staging, 0, sizeof(staging));
+	memcpy(staging, sb, off_crc32);
+	memcpy(staging + off_crc32, (uint8_t *)sb + off_uuid, off_pad - off_uuid);
+	for (si = 0; si < BEAMFS_SB_RS_SUBBLOCKS; si++)
+		rs_encode_subblock(rs, staging + si * BEAMFS_SB_RS_DATA_LEN,
+				   BEAMFS_SB_RS_DATA_LEN,
+				   sb_parity + si * RS_NROOTS);
+	rs_free(rs);
+	return 0;
+}
+
 static int pass1_superblock(struct fsck_opts *o)
 {
 	struct beamfs_super_block sb;
@@ -298,6 +334,10 @@ static int pass1_superblock(struct fsck_opts *o)
 	}
 
 	if (o->repair && total_corrected > 0) {
+		if (sb_reencode(&sb) < 0) {
+			fprintf(stderr, "fsck.beamfs: pass 1: rs_init failed\n");
+			return FSCK_ERROR;
+		}
 		if (lseek(o->fd, 0, SEEK_SET) < 0 ||
 		    write(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb)) {
 			fprintf(stderr, "fsck.beamfs: pass 1: write-back failed: %s\n",
@@ -374,9 +414,50 @@ static int pass1_superblock(struct fsck_opts *o)
 		}
 	}
 
+	/*
+	 * The state the kernel left, as e2fsck reads s_state: said here,
+	 * cleared by --repair once the run is clean (see main).
+	 */
+	{
+		uint32_t fl = sb.s_flags;
+
+		if (fl & BEAMFS_SB_FLAG_MOUNTED)
+			fprintf(stderr, "fsck.beamfs: pass 1: the volume was not cleanly unmounted\n");
+		if (fl & BEAMFS_SB_FLAG_ERRORS)
+			fprintf(stderr, "fsck.beamfs: pass 1: the kernel recorded errors during a previous mount\n");
+		o->state_flagged = (fl & (BEAMFS_SB_FLAG_MOUNTED | BEAMFS_SB_FLAG_ERRORS)) != 0;
+		if (o->verbose && !o->state_flagged)
+			printf("fsck.beamfs: pass 1: state clean (unmounted cleanly, no errors recorded)\n");
+	}
+
 	if (o->verbose)
 		printf("fsck.beamfs: pass 1: superblock OK\n");
 	return FSCK_OK;
+}
+
+/*
+ * After a repair that left nothing uncorrected: the volume is clean,
+ * and the superblock says so, as e2fsck resets s_state to VALID.
+ */
+static int clear_state_flags(struct fsck_opts *o)
+{
+	struct beamfs_super_block sb;
+
+	if (lseek(o->fd, 0, SEEK_SET) < 0 ||
+	    read(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb))
+		return -1;
+	if (!(sb.s_flags & (BEAMFS_SB_FLAG_MOUNTED | BEAMFS_SB_FLAG_ERRORS)))
+		return 0;
+	sb.s_flags &= ~(BEAMFS_SB_FLAG_MOUNTED | BEAMFS_SB_FLAG_ERRORS);
+	if (sb_reencode(&sb) < 0)
+		return -1;
+	if (lseek(o->fd, 0, SEEK_SET) < 0 ||
+	    write(o->fd, &sb, sizeof(sb)) != (ssize_t)sizeof(sb) ||
+	    fsync(o->fd) < 0)
+		return -1;
+	if (o->verbose)
+		printf("fsck.beamfs: state flags cleared: the volume is marked clean\n");
+	return 1;
 }
 
 /*
@@ -1363,15 +1444,34 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 					continue; /* untrustworthy, already reported by pass 2 */
 				}
 
-				for (b = 0; b < (unsigned long)BEAMFS_SUBBLOCK_DATA * 8 &&
-					    bit_global < nblocks; b++, bit_global++)
-					block_dirty |= compare_one_bit(o, sub, b,
-							reference, bit_global,
-							data_start,
-							&referenced_but_free,
-							&used_but_unreferenced,
-							leaked, &n_leaked,
-							ARRAY_SIZE(leaked));
+				{
+					int sub_dirty = 0;
+
+					for (b = 0; b < (unsigned long)BEAMFS_SUBBLOCK_DATA * 8 &&
+						    bit_global < nblocks; b++, bit_global++)
+						sub_dirty |= compare_one_bit(o, sub, b,
+								reference, bit_global,
+								data_start,
+								&referenced_but_free,
+								&used_but_unreferenced,
+								leaked, &n_leaked,
+								ARRAY_SIZE(leaked));
+					/*
+					 * The codeword's parity over the bits it
+					 * now holds. Written raw, the kernel
+					 * corrected the regenerated bits back to
+					 * the old ones (eight symbols or fewer)
+					 * or declared the codeword uncorrectable
+					 * and took the raw bits (more): the
+					 * "bmap blk 0 sub 0 uncor" of
+					 * generic/650 on 2026-09-22 came right
+					 * after xfstests ran fsck.beamfs -y.
+					 */
+					if (sub_dirty && o->repair)
+						rs_encode_subblock(rs, sub, BEAMFS_SUBBLOCK_DATA,
+								   sub + BEAMFS_SUBBLOCK_DATA);
+					block_dirty |= sub_dirty;
+				}
 			}
 
 			if (block_dirty) {
@@ -1826,6 +1926,18 @@ int main(int argc, char **argv)
 	{
 		int rc = run_passes(&opts);
 
+		if (opts.repair && opts.state_flagged &&
+		    (rc == FSCK_OK || rc == FSCK_CORRECTED)) {
+			int cleared = clear_state_flags(&opts);
+
+			if (cleared < 0) {
+				fprintf(stderr, "fsck.beamfs: could not clear the state flags: %s\n",
+					strerror(errno));
+				rc = FSCK_ERROR;
+			} else if (cleared > 0) {
+				rc = FSCK_CORRECTED;
+			}
+		}
 		close(fd);
 		return rc;
 	}

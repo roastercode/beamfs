@@ -1867,7 +1867,8 @@ int main(int argc, char *argv[])
 	/*
 	 * s_flags encoding (CRC32 region A):
 	 *   bits 0..15 = bitmap_blocks_count (1 -> legacy single-block)
-	 *   bits 16..31 = reserved (must be zero)
+	 *   bit 16 = mounted, bit 17 = errors (BEAMFS_SB_FLAG_*, kernel and
+	 *   fsck); a fresh volume has both clear. bits 18..31 reserved.
 	 */
 	sb.s_flags = (uint32_t)(bitmap_blocks_count & 0xFFFFu);
 

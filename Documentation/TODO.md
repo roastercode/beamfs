@@ -3,6 +3,15 @@
 
 ---
 
+## 2026-09-23 state flags and repair parity (3.24, 3.25; module 0.1.10, fsck 0.1.5)
+
+- [x] BEAMFS_SB_FLAG_MOUNTED / ERRORS: kernel sets and clears, fsck reports and clears on repair
+- [x] fsck re-encodes the superblock and bitmap codewords its repairs change
+- [x] kernel 7.3-rc4 recipe
+- [ ] kernel: s_unclean policy for indirect parity mismatches; then parity once per flush
+- [ ] kernel: zero image of a fresh allocation (350 k writes of 4 KiB on 074)
+- [ ] BX: inspect <image> on the station (fsck a frozen image without the node)
+
 ## 2026-09-23 mkfs and fsck against e2fsprogs (3.22, 3.23; mkfs 0.1.3, fsck 0.1.4)
 
 - [x] mkfs O_EXCL + /proc/mounts, -F -F; fsck repair O_EXCL

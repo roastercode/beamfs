@@ -1313,6 +1313,39 @@ Kernel change (a bit in s_flags set at rw mount and cleared at clean
 unmount, another set by beamfs_fail and every EUCLEAN), with mkfs and
 fsck reading it; scheduled with the next kernel build.
 
+### 3.24 fsck --repair wrote repairs with the old parity (FIXED fsck 0.1.5, 2026-09-23)
+
+**Symptom.** generic/650 on module 0.1.5: "bmap blk 0 sub 0 uncor" at
+mount, four lost pointers, blocks claimed twice, right after xfstests
+had run fsck.beamfs -y on the test device (_repair_test_fs).
+
+**Cause.** Pass 4 regenerated bitmap bits in the payload and wrote the
+block with its old parity; pass 1 fixed s_crc32 the same way. Only
+pass 5 re-encoded, and said why in its comment (2026-08-25). On the
+next mount the kernel's decoder either corrected the regenerated bits
+back to the damage (eight symbols or fewer per codeword) or declared
+the codeword uncorrectable and alloc.c took the raw bits: a repair
+that manufactures the very corruption it was asked to remove. ext4's
+metadata_csum has no such state: the checksum is recomputed on every
+write of a modified block, without exception.
+
+**Fix.** sb_reencode() for the superblock, rs_encode_subblock for each
+bitmap codeword a repair changes. Hypothesis to confirm, not a proven
+chain: that the first 650's bitmap damage came from this repair.
+
+### 3.25 The superblock had no state (FIXED module 0.1.10, fsck 0.1.5, 2026-09-23)
+
+ext2's s_state, in the upper half of s_flags: MOUNTED set by a
+read-write mount and cleared by a clean unmount, ERRORS set when the
+RS journal records an uncorrectable event. A mount that finds either
+warns and remembers it (s_unclean); fsck reports both and --repair
+clears them after a clean run. Older kernels mask the low sixteen bits
+and ignore these. What s_unclean should change in the kernel's
+behaviour -- treating a parity mismatch on an indirect block as
+unverifiable rather than as damage after an unclean shutdown -- is the
+next design decision, and the prerequisite for computing indirect
+parity once per flush.
+
 ---
 
 ## 4. Filesystem feature limitations

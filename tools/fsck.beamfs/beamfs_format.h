@@ -145,6 +145,16 @@ typedef uint32_t u32;
  * matches the legacy single-block layout via the fallback below.
  */
 #define BEAMFS_SB_FLAGS_BITMAP_BLOCKS_MASK  0x0000FFFFu
+/*
+ * ext2's s_state, in the upper half of s_flags. MOUNTED is set by a
+ * read-write mount and cleared by a clean unmount: found set at mount,
+ * the volume was not unmounted cleanly. ERRORS is set by the kernel
+ * when it records an uncorrectable event, and cleared by fsck.beamfs
+ * --repair after a clean run. Older kernels mask the low sixteen bits
+ * and ignore these.
+ */
+#define BEAMFS_SB_FLAG_MOUNTED              0x00010000u
+#define BEAMFS_SB_FLAG_ERRORS               0x00020000u
 
 /*
  * On-disk data block layout under BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE.

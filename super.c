@@ -153,6 +153,13 @@ static void beamfs_put_super(struct super_block *sb)
 		 * superblock did not land is one the next mount reads as
 		 * it was before everything above.
 		 */
+		/* A clean unmount: the mounted flag comes off before the superblock goes. */
+		if (!sb_rdonly(sb) && !READ_ONCE(sbi->s_failed) && sbi->s_beamfs_sb) {
+			u32 fl = le32_to_cpu(sbi->s_beamfs_sb->s_flags);
+
+			sbi->s_beamfs_sb->s_flags = cpu_to_le32(fl & ~BEAMFS_SB_FLAG_MOUNTED);
+			beamfs_dirty_super_now(sbi);
+		}
 		if (sbi->s_sbh && buffer_dirty(sbi->s_sbh) &&
 		    sync_dirty_buffer(sbi->s_sbh))
 			pr_err("beamfs: umount: the superblock did not reach the medium\n");
@@ -1205,6 +1212,9 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 	}
 
 	sbi->s_beamfs_sb->s_rs_journal_head = (head + 1) % BEAMFS_RS_JOURNAL_SIZE;
+	/* What ext2 calls EXT2_ERROR_FS: the kernel saw damage it could not undo. */
+	if (flags & BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE)
+		sbi->s_beamfs_sb->s_flags |= cpu_to_le32(BEAMFS_SB_FLAG_ERRORS);
 
 	beamfs_dirty_super(sbi);
 
@@ -1714,6 +1724,35 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 */
 	beamfs_clock_anchor(sb);
 
+	/*
+	 * The state the last mount left, and ours.
+	 *
+	 * ext2 has done this since the beginning: a flag set while mounted
+	 * and cleared by a clean unmount tells the next mount, and fsck,
+	 * whether the volume was ever put down properly; a second flag
+	 * says the kernel saw damage. Until 0.1.10 beamfs recorded
+	 * neither, so nothing could tell a volume that needed checking
+	 * from one that did not.
+	 */
+	{
+		u32 fl = le32_to_cpu(sbi->s_beamfs_sb->s_flags);
+
+		if (fl & BEAMFS_SB_FLAG_MOUNTED)
+			pr_warn("beamfs: %s was not cleanly unmounted; running fsck.beamfs is recommended\n",
+				sb->s_id);
+		if (fl & BEAMFS_SB_FLAG_ERRORS)
+			pr_warn("beamfs: %s recorded errors during a previous mount; running fsck.beamfs is recommended\n",
+				sb->s_id);
+		sbi->s_unclean = !!(fl & (BEAMFS_SB_FLAG_MOUNTED | BEAMFS_SB_FLAG_ERRORS));
+		if (!sb_rdonly(sb)) {
+			sbi->s_beamfs_sb->s_flags = cpu_to_le32(fl | BEAMFS_SB_FLAG_MOUNTED);
+			beamfs_dirty_super_now(sbi);
+			if (sbi->s_sbh && sync_dirty_buffer(sbi->s_sbh))
+				pr_warn("beamfs: %s: the mounted flag did not reach the medium\n",
+					sb->s_id);
+		}
+	}
+
 	beamfs_tc_init(sbi);
 	ret = beamfs_scrub_init(sb);
 	if (ret) {
@@ -1880,6 +1919,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.9");
+MODULE_VERSION("0.1.10");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

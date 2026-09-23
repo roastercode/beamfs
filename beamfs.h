@@ -158,6 +158,8 @@ struct beamfs_sb_info {
 	 * goes read-only so the VFS stops sending more.
 	 */
 	bool                      s_failed;
+	/* Found MOUNTED or ERRORS set at mount: the last mount did not end well. */
+	bool                      s_unclean;
 	unsigned long             s_free_blocks;
 	unsigned long             s_free_inodes;
 

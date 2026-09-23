@@ -157,6 +157,14 @@ Attempt recovery on a volume whose superblock magic is wrong:
 .B fsck.beamfs \-\-repair \-\-force /dev/vdb
 .RE
 .SH NOTES
+Since 0.1.5 every repair re-encodes the Reed-Solomon parity of the
+codewords it changes (superblock in pass 1, bitmap in pass 4; pass 5
+already did). Before, a repaired block carried the old parity and the
+kernel corrected the repair back to the damage, or declared the block
+uncorrectable. Pass 1 also reports the state the kernel left in the
+superblock -- not cleanly unmounted, errors recorded -- and --repair
+clears both after a run that leaves nothing uncorrected.
+.PP
 Since 0.1.3 a repair opens the device exclusively, as e2fsck does, and
 refuses one the kernel still holds: mounted, or unmounted lazily with
 files still open. A check-only pass reads it as it is.
