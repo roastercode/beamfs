@@ -171,6 +171,13 @@ struct beamfs_sb_info {
 	 * ext2 has done this since 1993 and calls it the goal.
 	 */
 	unsigned long             s_alloc_goal;
+	/*
+	 * Reservation windows of the inodes being written, under s_lock:
+	 * ext2's rsv_window. Each writer allocates inside its own
+	 * interval and nobody else does, so three files written at once
+	 * come out as three contiguous runs instead of one interleaving.
+	 */
+	struct list_head          s_rsv_windows;
 	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
@@ -272,6 +279,18 @@ struct beamfs_inode_info {
 	__le64          i_tindirect;
 	__u32           i_flags;
 	struct mutex    i_alloc_mutex;  /* serialize lookup_or_alloc_phys */
+	/*
+	 * This inode's reservation window, [i_rsv_start, i_rsv_end), on
+	 * s_rsv_windows while it holds one; i_rsv_next is the first block
+	 * of it not yet handed out, i_rsv_size what the next window asks
+	 * for, i_last_alloc the goal. All under s_lock, none on the disk.
+	 */
+	struct list_head i_rsv_list;
+	unsigned long    i_rsv_start;
+	unsigned long    i_rsv_end;
+	unsigned long    i_rsv_next;
+	unsigned int     i_rsv_size;
+	unsigned long    i_last_alloc;
 	/*
 	 * Metadata buffer_heads owned by this inode (bitmap blocks dirtied
 	 * on its behalf). The kernel replaced the old i_data.i_private_list
@@ -576,6 +595,8 @@ int  beamfs_write_bitmap_block(struct super_block *sb,
 			       struct inode *owner);
 void beamfs_destroy_bitmap(struct super_block *sb);
 u64  beamfs_alloc_block(struct super_block *sb, struct inode *owner);
+void beamfs_rsv_init(struct beamfs_inode_info *fi);
+void beamfs_rsv_discard(struct inode *inode);
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner);
 bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
 /*

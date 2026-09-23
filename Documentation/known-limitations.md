@@ -1208,6 +1208,33 @@ the RS staging (out_free_sbi).
 larger than one block, several in flight, the boundary blocks written
 once, and the test inside its budget.
 
+### 3.20 One allocation cursor for every writer (FIXED 0.1.8, 2026-09-23)
+
+**Symptom.** After 3.19 (module 0.1.7), generic/074 under iowho: bytes
+written halved (8 915 -> 4 482 MiB), queue depth 1 -> 17, and still
+killed at the budget. 1 054 631 bios of 1 069 059 carried a single
+block: no two consecutive blocks of a file were adjacent on the medium,
+so the writeback could not gather them, and the device served 4 KiB
+writes at 570 a second, 44 % busy, 32 ms each in the queue.
+
+**Cause.** beamfs_alloc_block used one cursor for the volume
+(s_alloc_goal), advanced by whichever writer allocated last and pulled
+back to every freed block. Three children writing five files each laid
+their blocks down interleaved, and each truncate sent the cursor back
+into the holes.
+
+**Fix.** ext2's reservation windows (fs/ext2/balloc.c): a writer's goal
+is the block after the last one it received; each inode being written
+holds a window of blocks, in memory under s_lock, where no other inode
+allocates; 16 blocks to start, doubled each time a window is used up in
+order, 512 at most; discarded at evict; ignored when nothing free is
+left outside the windows. Allocations without an owner keep the volume
+cursor, outside the windows.
+
+**To verify.** sweep generic/074 under iowho: the bio size histogram
+should move from [4K, 8K) to [64K, 256K), and the test end inside its
+budget.
+
 ---
 
 ## 4. Filesystem feature limitations

@@ -564,6 +564,178 @@ void beamfs_destroy_bitmap(struct super_block *sb)
 /* ------------------------------------------------------------------ */
 
 /*
+ * Reservation windows, after ext2.
+ *
+ * One cursor for the whole volume, advanced by whoever allocates and
+ * pulled back by whoever frees, lays three files written at once down
+ * as one interleaving: block n to the first, n+1 to the second, n+2
+ * to the third. Measured under generic/074 on 2026-09-23, after the
+ * writeback learned to gather contiguous blocks into one bio:
+ * 1 054 631 bios of 1 069 059 still carried a single block, because no
+ * two consecutive blocks of any file were adjacent on the medium, and
+ * the device served those 4 KiB writes at 570 a second with the queue
+ * seventeen deep. ext2 ran the same test in 17 s on the same device.
+ *
+ * ext2's answer (fs/ext2/balloc.c, rsv_window): a writer's goal is the
+ * block after the last one it got, and each writer holds a window of
+ * blocks, in memory only, where nobody else allocates. The window
+ * starts small and doubles each time it is used up in order, so a
+ * sequential writer's window grows to match it. Nothing about it is
+ * on the disk; a window is discarded when the inode goes away, and
+ * ignored when nothing free is left outside the windows.
+ */
+#define BEAMFS_RSV_MIN 16
+#define BEAMFS_RSV_MAX 512
+
+void beamfs_rsv_init(struct beamfs_inode_info *fi)
+{
+	INIT_LIST_HEAD(&fi->i_rsv_list);
+	fi->i_rsv_start  = 0;
+	fi->i_rsv_end    = 0;
+	fi->i_rsv_next   = 0;
+	fi->i_rsv_size   = BEAMFS_RSV_MIN;
+	fi->i_last_alloc = 0;
+}
+
+static void beamfs_rsv_drop_locked(struct beamfs_inode_info *fi)
+{
+	if (!list_empty(&fi->i_rsv_list))
+		list_del_init(&fi->i_rsv_list);
+	fi->i_rsv_start = 0;
+	fi->i_rsv_end   = 0;
+	fi->i_rsv_next  = 0;
+}
+
+void beamfs_rsv_discard(struct inode *inode)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(inode->i_sb);
+
+	spin_lock(&sbi->s_lock);
+	beamfs_rsv_drop_locked(BEAMFS_I(inode));
+	spin_unlock(&sbi->s_lock);
+}
+
+/* The end of another inode's window that covers @bit, or 0. */
+static unsigned long beamfs_rsv_covering(struct beamfs_sb_info *sbi,
+					 const struct beamfs_inode_info *me,
+					 unsigned long bit)
+{
+	struct beamfs_inode_info *o;
+
+	list_for_each_entry(o, &sbi->s_rsv_windows, i_rsv_list) {
+		if (o == me)
+			continue;
+		if (bit >= o->i_rsv_start && bit < o->i_rsv_end)
+			return o->i_rsv_end;
+	}
+	return 0;
+}
+
+/* The start of the nearest other window at or after @bit, or nblocks. */
+static unsigned long beamfs_rsv_next_start(struct beamfs_sb_info *sbi,
+					   const struct beamfs_inode_info *me,
+					   unsigned long bit)
+{
+	struct beamfs_inode_info *o;
+	unsigned long lim = sbi->s_nblocks;
+
+	list_for_each_entry(o, &sbi->s_rsv_windows, i_rsv_list) {
+		if (o == me)
+			continue;
+		if (o->i_rsv_start >= bit && o->i_rsv_start < lim)
+			lim = o->i_rsv_start;
+	}
+	return lim;
+}
+
+/*
+ * The first free block from @goal, wrapping once, that lies in no
+ * other inode's window when @respect is set. s_nblocks when there is
+ * none.
+ */
+static unsigned long beamfs_rsv_find(struct beamfs_sb_info *sbi,
+				     const struct beamfs_inode_info *me,
+				     unsigned long goal, bool respect)
+{
+	unsigned long n = sbi->s_nblocks;
+	unsigned long bit = goal < n ? goal : 0;
+	bool wrapped = (bit == 0);
+
+	for (;;) {
+		unsigned long end;
+
+		bit = find_next_bit(sbi->s_block_bitmap, n, bit);
+		if (bit >= n) {
+			if (wrapped)
+				return n;
+			wrapped = true;
+			bit = 0;
+			continue;
+		}
+		end = respect ? beamfs_rsv_covering(sbi, me, bit) : 0;
+		if (!end)
+			return bit;
+		/* Inside somebody's window: continue past it. */
+		bit = end;
+		if (bit >= n) {
+			if (wrapped)
+				return n;
+			wrapped = true;
+			bit = 0;
+		}
+	}
+}
+
+/*
+ * A block for @fi: from its window while the window has one, else a
+ * new window from its goal. Under s_lock. s_nblocks when none is free.
+ */
+static unsigned long beamfs_rsv_alloc_locked(struct beamfs_sb_info *sbi,
+					     struct beamfs_inode_info *fi)
+{
+	unsigned long n = sbi->s_nblocks;
+	unsigned long bit = n;
+	unsigned long goal;
+	bool exhausted;
+
+	if (fi->i_rsv_end > fi->i_rsv_next) {
+		bit = find_next_bit(sbi->s_block_bitmap, fi->i_rsv_end,
+				    fi->i_rsv_next);
+		if (bit >= fi->i_rsv_end)
+			bit = n;
+	}
+	if (bit < n) {
+		fi->i_rsv_next   = bit + 1;
+		fi->i_last_alloc = bit;
+		return bit;
+	}
+
+	/*
+	 * A window used up in order earns a larger one; a window given
+	 * up before that keeps its size.
+	 */
+	exhausted = fi->i_rsv_end != 0 && fi->i_rsv_next >= fi->i_rsv_end;
+	beamfs_rsv_drop_locked(fi);
+
+	goal = fi->i_last_alloc ? fi->i_last_alloc + 1 : sbi->s_alloc_goal;
+	bit = beamfs_rsv_find(sbi, fi, goal, true);
+	if (bit >= n)
+		bit = beamfs_rsv_find(sbi, fi, goal, false);
+	if (bit >= n)
+		return n;
+
+	if (exhausted && fi->i_rsv_size < BEAMFS_RSV_MAX)
+		fi->i_rsv_size *= 2;
+	fi->i_rsv_start = bit;
+	fi->i_rsv_end   = min3(bit + fi->i_rsv_size,
+			       beamfs_rsv_next_start(sbi, fi, bit + 1), n);
+	fi->i_rsv_next   = bit + 1;
+	fi->i_last_alloc = bit;
+	list_add(&fi->i_rsv_list, &sbi->s_rsv_windows);
+	return bit;
+}
+
+/*
  * beamfs_alloc_block - allocate a free data block
  *
  * Returns absolute block number (>= s_data_start) on success,
@@ -603,10 +775,18 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 	 * holes earlier writers left behind. Together they are exhaustive,
 	 * so free_blocks > 0 still guarantees a hit.
 	 */
-	bit = find_next_bit(sbi->s_block_bitmap, sbi->s_nblocks,
-			    sbi->s_alloc_goal);
-	if (bit >= sbi->s_nblocks && sbi->s_alloc_goal != 0)
-		bit = find_first_bit(sbi->s_block_bitmap, sbi->s_nblocks);
+	/*
+	 * With an owner, from its reservation window (above). Without
+	 * one -- the mount path, metadata with no inode -- from the
+	 * volume's cursor, outside every window while that is possible.
+	 */
+	if (owner) {
+		bit = beamfs_rsv_alloc_locked(sbi, BEAMFS_I(owner));
+	} else {
+		bit = beamfs_rsv_find(sbi, NULL, sbi->s_alloc_goal, true);
+		if (bit >= sbi->s_nblocks)
+			bit = beamfs_rsv_find(sbi, NULL, sbi->s_alloc_goal, false);
+	}
 
 	if (bit >= sbi->s_nblocks) {
 		spin_unlock(&sbi->s_lock);

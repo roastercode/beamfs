@@ -44,6 +44,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 	fi->i_flags     = 0;
 	mmb_init(&fi->i_metadata_bhs, &fi->vfs_inode.i_data);
 	mutex_init(&fi->i_alloc_mutex);
+	beamfs_rsv_init(fi);
 
 	return &fi->vfs_inode;
 }
@@ -520,6 +521,8 @@ static void beamfs_free_data_blocks(struct inode *inode)
 
 static void beamfs_evict_inode(struct inode *inode)
 {
+	/* Its reservation window, before its blocks. */
+	beamfs_rsv_discard(inode);
 	truncate_inode_pages_final(&inode->i_data);
 	/*
 	 * If the file is truly deleted (nlink == 0), free all data blocks,
@@ -1542,6 +1545,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_free_blocks = le64_to_cpu(fsb->s_free_blocks);
 	sbi->s_free_inodes = le64_to_cpu(fsb->s_free_inodes);
 	spin_lock_init(&sbi->s_lock);
+	INIT_LIST_HEAD(&sbi->s_rsv_windows);
 
 	/*
 	 * The paths that can hold a scratch page at the same time:
@@ -1876,6 +1880,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.7");
+MODULE_VERSION("0.1.8");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

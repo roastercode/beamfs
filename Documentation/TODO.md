@@ -3,6 +3,11 @@
 
 ---
 
+## 2026-09-23 reservation windows after ext2 (3.20, module 0.1.8)
+
+- [x] per-inode goal and window, s_rsv_windows under s_lock, discarded at evict
+- [ ] measure: sweep generic/074 under iowho (bio sizes, budget), then the six
+
 ## 2026-09-23 writeback after ext2/ext4 (3.19, module 0.1.7)
 
 - [x] bounce pages, bios of 32, boundary block deferred, folio finished once
