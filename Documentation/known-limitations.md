@@ -1662,3 +1662,18 @@ inodes) across inode lists. And beamfs keeps a dirty buffer-cache alias
 of every data block it allocates (the zero image) beside the iomap page
 that carries the data, where ext4 calls clean_bdev_aliases() to have no
 alias at all.
+
+### 3.29 The parity update reads its slot back (0.1.13, diagnostic)
+
+0.1.12's beamfs_bh_diag answered at the point of detection: the region
+buffer verify finds without a slot is the cache's own folio (`same`),
+uptodate, clean, on no inode list -- not an orphan. parity.bt 2.3.33
+(complete capture, maps printed first) then read b_data at every
+mark_buffer_dirty of a region and at every write: for the undescribed
+blocks the slot is absent already at the dirtying that follows their
+own update; and for 30% of the healthy blocks too, uniformly over the 14
+slots, although fsck reads those slots on the medium. One of the two
+witnesses is wrong. 0.1.13 makes the module the arbiter: after
+ind_region_write the slot is gathered back from b_data and compared with
+what was scattered in; mismatches are said, and the running count is
+printed every 4096 updates.

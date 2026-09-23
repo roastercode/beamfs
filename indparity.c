@@ -579,6 +579,42 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
+
+	/*
+	 * Read it back from the buffer, not from scratch.
+	 *
+	 * parity.bt 2.3.33 on 2026-09-23, reading b_data at the
+	 * mark_buffer_dirty that follows this function: for 30% of
+	 * updates, uniformly over the 14 slots, the slot just written
+	 * was not there -- and fsck later found it on the medium all the
+	 * same. Either the probe reads beside the buffer, or this
+	 * function writes beside it and the medium gets the slot some
+	 * other way. The buffer is the arbiter: the slot is gathered
+	 * back from b_data, through the same interleave, and compared
+	 * with what was scattered in. Counted, and said every 4096
+	 * updates so the rate is known without a rate limit hiding it.
+	 */
+	{
+		static atomic_long_t n_ok, n_missing;
+		u8 back[BEAMFS_IND_PARITY_RS_BYTES];
+		long ok, missing;
+
+		ind_slot_gather((const u8 *)pbh->b_data, offset, stride, back);
+		if (memcmp(back, slotbuf, stride) == 0) {
+			ok = atomic_long_inc_return(&n_ok);
+			missing = atomic_long_read(&n_missing);
+		} else {
+			missing = atomic_long_inc_return(&n_missing);
+			ok = atomic_long_read(&n_ok);
+			pr_err_ratelimited("beamfs/diag: parity update: slot of indirect %llu not in region %llu after ind_region_write (offset %u, b_data %p, folio %p)\n",
+					   (unsigned long long)phys,
+					   (unsigned long long)region_blk,
+					   offset, pbh->b_data, pbh->b_folio);
+		}
+		if (((ok + missing) & 4095) == 0)
+			pr_info("beamfs/diag: parity self-check: %ld slots read back, %ld missing\n",
+				ok, missing);
+	}
 	/* The parity now describes this copy. */
 	set_buffer_beamfs_verified(bh);
 

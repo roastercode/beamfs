@@ -13,7 +13,7 @@
 set -e
 
 B="${BEAMFS_REPO:-$HOME/git/beamfs}"
-L="${BEAMFS_LAYER_SRC:-$HOME/git/yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.12}"
+L="${BEAMFS_LAYER_SRC:-$HOME/git/yocto-beamfs/recipes-kernel/beamfs/files/beamfs-0.1.13}"
 
 [ -d "$B" ] || { echo "no repository at $B" >&2; exit 1; }
 [ -d "$L" ] || { echo "no layer at $L" >&2; exit 1; }
