@@ -3,6 +3,15 @@
 
 ---
 
+## 2026-09-23 writeback after ext2/ext4 (3.19, module 0.1.7)
+
+- [x] bounce pages, bios of 32, boundary block deferred, folio finished once
+- [x] out_free_sbi leak of s_scratch_pool and s_sb_rs_staging
+- [ ] measure: sweep generic/074 under iowho, then the six against ext2's 3 minutes
+- [ ] BX: STALLED must read the disk counters it already has; a `full` ending on a header with allocations running is a buffered pass, not a stall
+- [ ] read path: read_folio_range still reads one block at a time, synchronously (bdev_rw_virt); same shape, same fix
+- [ ] 109: 6 blocks used but unreferenced in 6 s; 650: bitmap subblock uncorrectable taken as truth at mount (alloc.c:170-210)
+
 ## 2026-09-22 cross-analysis of d14ad29 (cppcheck + per-function scan)
 
 - [x] file_inline.c:174 uninitialised `phys` in the direct-pointer allocation check (3.17, module 0.1.6)

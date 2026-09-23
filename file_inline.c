@@ -22,6 +22,8 @@
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/buffer_head.h>
+#include <linux/bio.h>
+#include <linux/mempool.h>
 #include <linux/slab.h>
 #include <linux/uio.h>
 #include <linux/writeback.h>
@@ -3521,120 +3523,390 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
 
 
 /*
- * Writeback completion for the last block of a folio's range.
+ * Writeback: encode into bounce pages, gather the pages into bios.
  *
- * iomap_writeback_folio() ends the folio itself only when nothing was
- * submitted; past that it waits for the filesystem to report
- * completion. submit_bh is asynchronous, so the folio cannot be
- * finished when writeback_range returns -- the write is still in
- * flight. One block of the range carries this handler and finishes the
- * folio when its write lands; the rest get beamfs_inline_wb_end_block,
- * which drops the reference taken for the submission.
+ * How ext2 and ext4 write a file back, functionally: the flusher hands
+ * the filesystem one folio after another; the filesystem resolves
+ * where each block goes, appends the folio's pages to the bio it is
+ * building while the blocks stay contiguous, and submits that bio
+ * when they stop being contiguous, when it is full, or at the end of
+ * the pass. Nothing waits per block, dozens of writes are in flight at
+ * once, the device sees requests of 128 KiB rather than 4, and a
+ * folio's writeback ends from the completion of the bio that carried
+ * it. A block is a page, so no block is ever half a folio's and half
+ * another's, and nothing is read back to be rewritten.
+ *
+ * beamfs cannot hand the folio's own pages to the device: a block
+ * carries 3824 bytes of payload interleaved with 272 bytes of
+ * Reed-Solomon parity, so every block has to be encoded into a bounce
+ * page first. And because 3824 is not 4096, every folio ends inside a
+ * block that the next folio continues.
+ *
+ * What was here before did the encode through the block device's
+ * buffer cache, one buffer_head per block, one bio per buffer_head,
+ * and took the buffer lock for each: the block a folio ended in was
+ * read back, decoded, merged, re-encoded and written, and then the
+ * next folio did the same to the same block -- waiting first on the
+ * lock, which the write in flight still held. Measured on 2026-09-22
+ * under generic/074: 2 176 467 writes of one block, 1.12 ms each, one
+ * in flight at a time, 4.8 MB/s, every boundary block written twice
+ * and decoded once; ext2 on the same device ran the same test in 17
+ * seconds against a budget beamfs could not fit in.
+ *
+ * Now the boundary block is not written until the folio that
+ * continues it has arrived: its payload waits in wb->pend, the next
+ * folio fills the rest, and the block is encoded once and queued
+ * once. Encoded pages come from a pool, not the buffer cache, so no
+ * buffer lock is held across anything that can sleep -- the rule the
+ * batch of 2026-09 broke and generic/076 turned into a four-party
+ * deadlock. Blocks contiguous on the medium go into one bio of up to
+ * 32 pages, submitted when the run breaks, when it is full, or from
+ * writeback_submit at the end of the pass. Each folio carries a
+ * counter of the blocks that hold its bytes; the bio completion
+ * decrements it and finishes the folio at zero, so a folio whose two
+ * blocks travel in two bios is finished exactly once.
+ *
+ * The buffer cache still holds aliases of data blocks: the zero image
+ * a fresh allocation writes through sb_getblk, the copy a read-modify-
+ * write took through sb_bread, the copy read_folio_range consults
+ * first. Before an encoded page is queued, any alias is brought to the
+ * same bytes and made clean, under its lock, so a reader that finds it
+ * reads what the device will hold, and the block device's own flusher
+ * does not later write the stale zeros over the data.
  */
-struct beamfs_inline_wb_ctx {
-	struct inode  *inode;
-	struct folio  *folio;
-	size_t         len;
-	void          *orig_private;
+
+/* 32 blocks of 4 KiB: one bio of 128 KiB, the size ext4 builds. */
+#define BEAMFS_WB_MAX_BLOCKS 32
+
+/*
+ * One folio in flight. pending counts the blocks that carry bytes of
+ * this folio and have not completed; the folio is finished at zero.
+ * abandoned is set when writeback_range failed for this folio after
+ * queueing some of its blocks: iomap ends such a folio itself, and a
+ * second finish from here would end a writeback that is not ours.
+ */
+struct beamfs_wb_folio {
+	struct inode *inode;
+	struct folio *folio;
+	size_t        len;
+	atomic_t      pending;
+	bool          abandoned;
+};
+
+/* One encoded block in a bio, and the folio or folios it came from. */
+struct beamfs_wb_block {
+	struct page            *page;
+	struct beamfs_wb_folio *owner;
+	struct beamfs_wb_folio *owner2;
+};
+
+/* A bio being built: contiguous encoded blocks, submitted together. */
+struct beamfs_wb_ioend {
+	struct bio            *bio;
+	struct super_block    *sb;
+	unsigned int           n;
+	sector_t               next;
+	struct beamfs_wb_block blk[BEAMFS_WB_MAX_BLOCKS];
 };
 
 /*
- * Completion for a writeback block.
- *
- * Takes a bio rather than a buffer_head: b_end_io went away in 7.3 and
- * the completion is passed to bh_submit() instead of being stored on
- * the buffer. bio_endio_bh() hands back the buffer the bio was built
- * around, which is what still makes a filesystem's own completion
- * possible.
- *
- * The old version saved and restored b_end_io. With the field gone
- * there is nothing to put back, which is one fewer thing to get wrong.
+ * The state of one writeback pass, kept in wpc->wb_ctx from the first
+ * folio to writeback_submit.
  */
-static void beamfs_inline_wb_end_io(struct bio *bio)
+struct beamfs_wb {
+	struct super_block     *sb;
+	struct beamfs_wb_ioend *ioend;
+	/* The boundary block waiting for the folio that continues it. */
+	bool                    have_pend;
+	u64                     pend_phys;
+	u64                     pend_b;
+	u32                     pend_filled;
+	loff_t                  pend_next_pos;
+	struct inode           *pend_inode;
+	struct beamfs_wb_folio *pend_owner;
+	u8                     *pend_payload;
+	/* The first error a completion or a flush saw. */
+	int                     error;
+};
+
+static void beamfs_wb_folio_done(struct beamfs_wb_folio *o)
 {
-	struct buffer_head *bh;
-	bool uptodate = bio_endio_bh(bio, &bh);
-	struct beamfs_inline_wb_ctx *wb = bh->b_private;
-	struct inode *inode = wb->inode;
-	struct folio *folio = wb->folio;
-	size_t len = wb->len;
+	if (!o)
+		return;
+	if (atomic_dec_and_test(&o->pending)) {
+		if (!o->abandoned)
+			iomap_finish_folio_write(o->inode, o->folio, o->len);
+		kfree(o);
+	}
+}
 
-	bh->b_private = wb->orig_private;
-	kfree(wb);
+static void beamfs_wb_end_bio(struct bio *bio)
+{
+	struct beamfs_wb_ioend *io = bio->bi_private;
+	struct beamfs_sb_info *sbi = BEAMFS_SB(io->sb);
+	bool failed = bio->bi_status != BLK_STS_OK;
+	unsigned int i;
 
-	if (!uptodate)
-		mapping_set_error(inode->i_mapping, -EIO);
+	for (i = 0; i < io->n; i++) {
+		struct beamfs_wb_block *blk = &io->blk[i];
 
+		if (failed) {
+			if (blk->owner)
+				mapping_set_error(blk->owner->inode->i_mapping, -EIO);
+			if (blk->owner2)
+				mapping_set_error(blk->owner2->inode->i_mapping, -EIO);
+		}
+		mempool_free(blk->page, sbi->s_wb_pages);
+		beamfs_wb_folio_done(blk->owner);
+		beamfs_wb_folio_done(blk->owner2);
+	}
+	bio_put(bio);
+	kfree(io);
+}
+
+static void beamfs_wb_submit_ioend(struct beamfs_wb *wb)
+{
+	struct beamfs_wb_ioend *io = wb->ioend;
+
+	if (!io)
+		return;
+	wb->ioend = NULL;
+	submit_bio(io->bio);
+}
+
+/*
+ * A page for one encoded block.
+ *
+ * Without waiting first: the pool is shared by every flusher thread,
+ * and a thread that waits on it while holding an unsubmitted bio full
+ * of pool pages is waiting for pages that only its own submission can
+ * return. So: try without waiting, then submit what is held, then
+ * wait -- what is held is on its way back by then.
+ */
+static struct page *beamfs_wb_page(struct beamfs_wb *wb)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(wb->sb);
+	struct page *page;
+
+	page = mempool_alloc(sbi->s_wb_pages, GFP_NOWAIT | __GFP_NOWARN);
+	if (page)
+		return page;
+	beamfs_wb_submit_ioend(wb);
+	return mempool_alloc(sbi->s_wb_pages, GFP_NOFS);
+}
+
+/*
+ * Bring the buffer cache's alias of @phys, if there is one, to the
+ * bytes the device is about to receive, and make it clean.
+ *
+ * The lock waits for a write of the alias already in flight -- the
+ * zero image of a fresh block, most often -- so that write lands
+ * before ours, whatever the device does with two requests for the
+ * same sectors. Nothing else is held here.
+ */
+static void beamfs_wb_sync_alias(struct super_block *sb, u64 phys,
+				 const void *block)
+{
+	struct buffer_head *bh = sb_find_get_block(sb, phys);
+
+	if (!bh)
+		return;
+	lock_buffer(bh);
+	memcpy(bh->b_data, block, BEAMFS_BLOCK_SIZE);
+	set_buffer_uptodate(bh);
+	clear_buffer_dirty(bh);
+	unlock_buffer(bh);
+	brelse(bh);
+}
+
+/*
+ * Encode @payload into a fresh page and queue the page for @phys.
+ *
+ * Contiguous with the bio being built: appended. Otherwise, or when
+ * the bio is full, that bio goes and a new one starts here.
+ */
+static int beamfs_wb_queue(struct beamfs_wb *wb, struct inode *inode,
+			   u64 b, u64 phys, const u8 *payload,
+			   struct beamfs_wb_folio *owner,
+			   struct beamfs_wb_folio *owner2,
+			   struct writeback_control *wbc)
+{
+	struct super_block *sb = wb->sb;
+	sector_t sector = (sector_t)phys << (BEAMFS_BLOCK_SHIFT - SECTOR_SHIFT);
+	struct beamfs_wb_ioend *io;
+	struct page *page;
+	u8 *block;
+	int ret;
+
+	page = beamfs_wb_page(wb);
+	block = page_address(page);
+
+	beamfs_lay_data_payload(sb, block, payload);
+	ret = beamfs_seal_data_block(sb, block);
+	if (ret < 0) {
+		pr_err_ratelimited("beamfs/inline: writeback: rs_encode_region failed for block %llu: %d\n",
+				   (unsigned long long)phys, ret);
+		mempool_free(page, BEAMFS_SB(sb)->s_wb_pages);
+		return ret;
+	}
+	beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), block, payload,
+				     inode->i_ino, b);
+
+	beamfs_wb_sync_alias(sb, phys, block);
+
+	if (wb->ioend &&
+	    (wb->ioend->n == BEAMFS_WB_MAX_BLOCKS || wb->ioend->next != sector))
+		beamfs_wb_submit_ioend(wb);
+
+	if (!wb->ioend) {
+		io = kzalloc_obj(*io, GFP_NOFS);
+		if (!io) {
+			mempool_free(page, BEAMFS_SB(sb)->s_wb_pages);
+			return -ENOMEM;
+		}
+		io->sb = sb;
+		io->bio = bio_alloc(sb->s_bdev, BEAMFS_WB_MAX_BLOCKS,
+				    REQ_OP_WRITE |
+				    ((wbc && wbc->sync_mode == WB_SYNC_ALL) ?
+				     REQ_SYNC : 0),
+				    GFP_NOFS);
+		io->bio->bi_iter.bi_sector = sector;
+		io->bio->bi_private = io;
+		io->bio->bi_end_io = beamfs_wb_end_bio;
+		io->next = sector;
+		wb->ioend = io;
+	}
+	io = wb->ioend;
+	__bio_add_page(io->bio, page, BEAMFS_BLOCK_SIZE, 0);
+	io->blk[io->n].page   = page;
+	io->blk[io->n].owner  = owner;
+	io->blk[io->n].owner2 = owner2;
+	io->n++;
+	io->next += BEAMFS_BLOCK_SIZE >> SECTOR_SHIFT;
+	return 0;
+}
+
+/*
+ * The payload a block holds now, for the bytes a partial write does
+ * not touch. The buffer cache's alias first, the device otherwise --
+ * not sb_bread, which would create an alias to keep coherent for a
+ * block read once.
+ */
+static int beamfs_wb_read_old(struct super_block *sb, struct inode *inode,
+			      u64 b, u64 phys, u8 *payload)
+{
+	struct buffer_head *bh = sb_find_get_block(sb, phys);
+	u8 *raw = beamfs_scratch_get(sb);
+	int ret;
+
+	if (!raw) {
+		if (bh)
+			brelse(bh);
+		return -ENOMEM;
+	}
+	if (bh && buffer_uptodate(bh)) {
+		lock_buffer(bh);
+		memcpy(raw, bh->b_data, BEAMFS_BLOCK_SIZE);
+		unlock_buffer(bh);
+		brelse(bh);
+	} else {
+		if (bh)
+			brelse(bh);
+		ret = bdev_rw_virt(sb->s_bdev,
+				   (sector_t)phys << (BEAMFS_BLOCK_SHIFT - SECTOR_SHIFT),
+				   raw, BEAMFS_BLOCK_SIZE, REQ_OP_READ);
+		if (ret) {
+			pr_err_ratelimited("beamfs/inline: writeback: read of block %llu for a partial write failed: %d\n",
+					   (unsigned long long)phys, ret);
+			beamfs_scratch_put(sb, raw);
+			return -EIO;
+		}
+	}
+	ret = beamfs_inline_decode_block_into_buf(sb, raw, phys, inode, b,
+						  payload, 0,
+						  BEAMFS_DATA_INLINE_BYTES,
+						  true);
+	beamfs_scratch_put(sb, raw);
+	return ret < 0 ? ret : 0;
+}
+
+/*
+ * The boundary block's continuation did not come: finish it with what
+ * the block holds beyond the bytes written, and queue it.
+ */
+static int beamfs_wb_flush_pending(struct beamfs_wb *wb,
+				   struct writeback_control *wbc)
+{
+	struct beamfs_wb_folio *owner = wb->pend_owner;
+	u8 *old;
+	int ret;
+
+	if (!wb->have_pend)
+		return 0;
+	wb->have_pend = false;
+	wb->pend_owner = NULL;
+
+	old = beamfs_scratch_get(wb->sb);
+	if (!old) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	ret = beamfs_wb_read_old(wb->sb, wb->pend_inode, wb->pend_b,
+				 wb->pend_phys, old);
+	if (ret == 0) {
+		memcpy(old, wb->pend_payload, wb->pend_filled);
+		ret = beamfs_wb_queue(wb, wb->pend_inode, wb->pend_b,
+				      wb->pend_phys, old, owner, NULL, wbc);
+	}
+	beamfs_scratch_put(wb->sb, old);
+	if (ret == 0)
+		return 0;
+fail:
 	/*
-	 * What end_buffer_write_sync did: record the error on the
-	 * buffer, mark it uptodate or not, unlock it, and drop the
-	 * reference taken before submission.
+	 * The block is lost to this pass; the folio it belonged to is
+	 * told, and not finished twice.
 	 */
-	if (uptodate) {
-		set_buffer_uptodate(bh);
-	} else {
-		mark_buffer_write_io_error(bh);
-		clear_buffer_uptodate(bh);
+	if (owner) {
+		mapping_set_error(owner->inode->i_mapping, ret);
+		beamfs_wb_folio_done(owner);
 	}
-	unlock_buffer(bh);
-	put_bh(bh);
-
-	iomap_finish_folio_write(inode, folio, len);
+	if (!wb->error)
+		wb->error = ret;
+	return ret;
 }
 
-/*
- * Completion for every other block of the range.
- *
- * bh_submit takes no reference and bh_end_write drops none: the caller
- * is expected to hold the buffer across the I/O and let go afterwards.
- * The pair this code was written against did both, submit_bh taking
- * one and end_buffer_write_sync giving it back, and the get_bh before
- * submission was matched against that. With bh_end_write in its place
- * the reference had no taker: one per block written, a buffer_head
- * nobody released, its folio taken out of the block device's cache at
- * release and never freed.
- *
- * Measured on 2026-09-22 with beamfs-xfstests heldfolio, on a freshly
- * booted node: 50 752 and 52 235 folios left the device's cache with a
- * buffer still attached in two trials of generic/083, b_count from 1
- * to 7 according to how many times the block had been written, 196 MiB
- * a trial, pass or fail, until the guest ran out of memory at 6.5 GiB.
- *
- * What bh_end_write does, then the put_bh that matches the get_bh.
- */
-static void beamfs_inline_wb_end_block(struct bio *bio)
+static struct beamfs_wb *beamfs_wb_get(struct iomap_writepage_ctx *wpc)
 {
-	struct buffer_head *bh;
-	bool uptodate = bio_endio_bh(bio, &bh);
+	struct beamfs_wb *wb = wpc->wb_ctx;
 
-	if (uptodate) {
-		set_buffer_uptodate(bh);
-	} else {
-		mark_buffer_write_io_error(bh);
-		clear_buffer_uptodate(bh);
+	if (wb)
+		return wb;
+	wb = kzalloc_obj(*wb, GFP_NOFS);
+	if (!wb)
+		return NULL;
+	wb->sb = wpc->inode->i_sb;
+	wb->pend_payload = beamfs_scratch_get(wb->sb);
+	if (!wb->pend_payload) {
+		kfree(wb);
+		return NULL;
 	}
-	unlock_buffer(bh);
-	put_bh(bh);
+	wpc->wb_ctx = wb;
+	return wb;
 }
 
 /*
- * Write back one range of a folio.
+ * Map and encode one folio's range.
  *
- * For each INLINE block the range touches: decode what is on disk into
- * scratch, splice this folio's bytes over it, re-encode all 16 codewords,
- * stamp the descriptor, and hand the buffer to the block layer.
+ * Each slice of the range is one block. A slice that starts the block
+ * and fills it is encoded and queued at once. A slice that starts the
+ * block and stops short is the folio's last: its bytes wait in
+ * wb->pend for the folio that continues it. A slice that starts inside
+ * the block is that continuation when it matches what waits, and a
+ * partial write over an existing block otherwise, which reads the
+ * block first.
  *
- * The decode uses rmw_path=true so a flip found on disk here is journalled
- * as RMW_NEUTRALISED: the encode below overwrites the damage from the
- * in-RAM scratch before any reader can see it.
- *
- * The buffer_head lock is held across the whole decode-splice-encode
- * transit. bh->b_data is shared through the block device page cache, and
- * two writeback paths on the same physical block -- the bdi flusher and an
- * fsync, or two folios sharing an intermediate block in the tri-block case
- * -- would otherwise interleave their re-scatter and encode steps, leaving
- * a corrupt codeword on disk while both page cache copies still look
- * uptodate. That is the "hot sha == cold sha mismatch" signature.
+ * The folio counts one block per slice and is finished when the last
+ * of them completes.
  */
 static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 					     struct folio *folio, u64 pos,
@@ -3643,86 +3915,65 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	struct inode             *inode = wpc->inode;
 	struct super_block       *sb    = inode->i_sb;
 	struct beamfs_inode_info *fi    = BEAMFS_I(inode);
-	u64      p    = pos;
-	u64      end  = pos + len;
-	u8      *scratch;
-	u64      last_phys = 0;
-	ssize_t  done = 0;
-	int      ret  = 0;
+	u32      payload = beamfs_block_payload(sb);
+	u64      p       = pos;
+	u64      end     = pos + len;
+	struct beamfs_wb       *wb;
+	struct beamfs_wb_folio *owner;
+	u8      *scratch = NULL;
+	unsigned int nslices, queued = 0;
+	int      ret = 0;
 
 	/*
-	 * One batch per call. Carrying it in wpc->wb_ctx would group
-	 * across folios too, which is where the remaining factor of two
-	 * lives; this keeps the lifetime plain while the change is new,
-	 * because a bio that outlives its call is a bio nobody submits.
-	 */
-	struct beamfs_inline_wb_ctx *wb = NULL;
-	struct buffer_head *last_bh = NULL;
-	bool     folio_done = false;
-
-	/*
-	 * 3824 bytes will not fit on the aarch64 kernel stack given the
-	 * frame pressure this path already carries.
-	 */
-	/*
-	 * Tell iomap this range is mapped.
-	 *
 	 * iomap_writeback_range() adds the return value to
-	 * bytes_submitted only when wpc->iomap.type is not IOMAP_HOLE:
-	 *
-	 *   if (wpc->iomap.type != IOMAP_HOLE)
-	 *           *bytes_submitted += ret;
-	 *
-	 * Nothing here ever filled wpc->iomap in, so it stayed zeroed --
-	 * and IOMAP_HOLE is zero. Every folio therefore came out of
-	 * iomap_writeback_folio() with bytes_submitted == 0, whatever had
-	 * actually been written, and iomap took the "nothing was
-	 * submitted" branch and ended the writeback itself. The
-	 * completion armed below then ended it a second time: 74
-	 * folio_end_writeback for 60 folios, measured.
-	 *
-	 * The hang follows from the double end. Between iomap's end and
-	 * the late completion, another thread can redirty the folio and
-	 * start writeback again; the stale completion ends that one, and
-	 * the writeback it belonged to is left with nobody to close it.
-	 * rm then sits in folio_wait_writeback under evict_inode for as
-	 * long as the mount lasts.
-	 *
-	 * XFS fills this in through xfs_bmbt_to_iomap for the same
-	 * reason. Here the mapping is per-block and computed inside the
-	 * loop, so the type is all iomap needs: it uses it to decide
-	 * whether the range counted, not to find the blocks.
+	 * bytes_submitted only when wpc->iomap.type is not IOMAP_HOLE;
+	 * left zeroed, every folio read as "nothing submitted" and iomap
+	 * ended it itself, once too many.
 	 */
-	wpc->iomap.type = IOMAP_MAPPED;
+	wpc->iomap.type   = IOMAP_MAPPED;
 	wpc->iomap.offset = pos;
 	wpc->iomap.length = len;
-	wpc->iomap.bdev = sb->s_bdev;
+	wpc->iomap.bdev   = sb->s_bdev;
+
+	wb = beamfs_wb_get(wpc);
+	if (!wb)
+		return -ENOMEM;
+
+	/* One block per slice: the first block, then whole blocks. */
+	nslices = (u32)((end - 1) / payload - pos / payload) + 1;
+
+	owner = kzalloc_obj(*owner, GFP_NOFS);
+	if (!owner)
+		return -ENOMEM;
+	owner->inode = inode;
+	owner->folio = folio;
+	owner->len   = len;
+	atomic_set(&owner->pending, (int)nslices);
 
 	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
-		/*
-		 * Finish the folio before leaving. Returning straight out
-		 * left it in writeback with no completion coming, and the
-		 * next process to touch the file waited on it forever --
-		 * the same shape as the defects above, reached by a path
-		 * that only opens when memory is short.
-		 *
-		 * The allocator has already logged the failure, so there
-		 * is nothing to add to it here.
-		 */
-		iomap_finish_folio_write(inode, folio, len);
+		kfree(owner);
 		return -ENOMEM;
 	}
 
+	/*
+	 * A boundary block waiting for another folio, or another file,
+	 * is not continued by this one.
+	 */
+	if (wb->have_pend &&
+	    (wb->pend_inode != inode || wb->pend_next_pos != (loff_t)pos)) {
+		ret = beamfs_wb_flush_pending(wb, wpc->wbc);
+		if (ret < 0)
+			goto out;
+	}
+
 	while (p < end) {
-		u32    payload      = beamfs_block_payload(inode->i_sb);
 		u64    b            = p / payload;
 		u32    slice_offset = (u32)(p % payload);
 		u32    slice_length = (u32)min_t(u64, end - p,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
-		struct buffer_head *bh;
-		u64    phys = 0;
+		u64    phys         = 0;
 		u8    *src;
 
 		{
@@ -3735,430 +3986,170 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 			mutex_unlock(&fi->i_alloc_mutex);
 			if (ret < 0)
 				break;
-			/*
-			 * Sonde : un bloc deja mappe qui change d adresse
-			 * signifie que le precedent vient d etre perdu.
-			 */
 			if (before && phys && before != phys)
 				pr_err("beamfs/leak: ino=%llu iblock=%llu %llu -> %llu\n",
-				       (unsigned long long)inode->i_ino, (unsigned long long)b,
+				       (unsigned long long)inode->i_ino,
+				       (unsigned long long)b,
 				       (unsigned long long)before,
 				       (unsigned long long)phys);
 		}
-
-		/*
-		 * Never lock the same buffer twice in one pass.
-		 *
-		 * sb_bread returns the same buffer_head for the same block,
-		 * so a second visit to a physical block already handled in
-		 * this loop deadlocks the flusher against itself in
-		 * lock_buffer, with no timeout and no way out. umount then
-		 * waits behind it in wb_wait_for_completion and the
-		 * filesystem is unusable for the life of the mount.
-		 *
-		 * It should not be possible: distinct logical blocks map to
-		 * distinct physical ones. It happened under generic/027,
-		 * which fills the volume to ENOSPC and unlinks in a loop,
-		 * so the mapping is wrong somewhere upstream -- two logical
-		 * blocks resolving to one physical block is corruption
-		 * whatever produced it.
-		 *
-		 * Refusing to proceed turns a permanent hang into an EIO
-		 * the caller can see, and says so loudly enough to find the
-		 * real cause. Fixing the mapping is a separate matter; this
-		 * is about the flusher not being the thing that dies.
-		 */
-		if (phys == last_phys) {
-			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu maps to phys=%llu again in one writeback pass\n",
+		if (!phys) {
+			pr_err_ratelimited("beamfs/inline: writeback: no block for ino=%llu iblock=%llu\n",
 					   (unsigned long long)inode->i_ino,
-					   (unsigned long long)b,
-					   (unsigned long long)phys);
+					   (unsigned long long)b);
 			ret = -EIO;
 			break;
 		}
-		last_phys = phys;
 
-		/*
-		 * A block being written whole needs a buffer, not its
-		 * contents.
-		 *
-		 * sb_bread reads from the disk and waits for it. On the
-		 * sequential path that is one synchronous read per 3824
-		 * bytes written, and the flusher spends its time waiting
-		 * for data it is about to discard: draining 300 MiB of
-		 * dirty pages meant 80000 blocking reads, one after
-		 * another. Measured with PSI at 60% of wall time stalled on
-		 * I/O with 319 MiB dirty and never draining -- generic/074
-		 * and generic/015 both timed out that way, and neither was
-		 * stuck.
-		 *
-		 * sb_getblk returns the same buffer_head with no read at
-		 * all. The block is filled entirely below and marked
-		 * uptodate, which is what ext4 does on the same path.
-		 *
-		 * The partial case still reads: those bytes are kept.
-		 */
-		if (slice_offset == 0 &&
-		    slice_length == BEAMFS_DATA_INLINE_BYTES) {
-			bh = sb_getblk(sb, phys);
-			if (!bh) {
-				pr_err_ratelimited("beamfs/inline: writeback_range: sb_getblk phys=%llu failed\n",
-						   (unsigned long long)phys);
-				ret = -EIO;
-				break;
+		if (slice_offset != 0) {
+			/* The continuation of the block that waits. */
+			if (wb->have_pend && wb->pend_b == b &&
+			    wb->pend_phys == phys &&
+			    wb->pend_filled == slice_offset) {
+				struct beamfs_wb_folio *first = wb->pend_owner;
+
+				src = kmap_local_folio(folio, folio_off);
+				memcpy(wb->pend_payload + slice_offset, src,
+				       slice_length);
+				kunmap_local(src);
+				wb->pend_filled += slice_length;
+				wb->have_pend = false;
+				wb->pend_owner = NULL;
+				if (wb->pend_filled < payload) {
+					/*
+					 * Still short: a block spanning three
+					 * folios, which a 4096-byte folio
+					 * cannot produce. Finished from the
+					 * medium rather than deferred again,
+					 * because a block has two owners here
+					 * and no more.
+					 */
+					ret = beamfs_wb_read_old(sb, inode, b, phys,
+								 scratch);
+					if (ret < 0) {
+						beamfs_wb_folio_done(first);
+						break;
+					}
+					memcpy(scratch, wb->pend_payload,
+					       wb->pend_filled);
+					ret = beamfs_wb_queue(wb, inode, b, phys,
+							      scratch, first, owner,
+							      wpc->wbc);
+				} else {
+					ret = beamfs_wb_queue(wb, inode, b, phys,
+							      wb->pend_payload,
+							      first, owner,
+							      wpc->wbc);
+				}
+				if (ret < 0) {
+					beamfs_wb_folio_done(first);
+					break;
+				}
+				queued++;
+			} else {
+				/* A partial write over an existing block. */
+				if (wb->have_pend) {
+					ret = beamfs_wb_flush_pending(wb, wpc->wbc);
+					if (ret < 0)
+						break;
+				}
+				ret = beamfs_wb_read_old(sb, inode, b, phys, scratch);
+				if (ret < 0)
+					break;
+				src = kmap_local_folio(folio, folio_off);
+				memcpy(scratch + slice_offset, src, slice_length);
+				kunmap_local(src);
+				ret = beamfs_wb_queue(wb, inode, b, phys, scratch,
+						      owner, NULL, wpc->wbc);
+				if (ret < 0)
+					break;
+				queued++;
 			}
-		} else {
-			bh = sb_bread(sb, phys);
-			if (!bh) {
-				pr_err_ratelimited("beamfs/inline: writeback_range: sb_bread phys=%llu failed\n",
-						   (unsigned long long)phys);
-				ret = -EIO;
-				break;
+		} else if (slice_length == payload) {
+			/* A whole block: nothing to preserve, nothing to wait for. */
+			if (wb->have_pend) {
+				ret = beamfs_wb_flush_pending(wb, wpc->wbc);
+				if (ret < 0)
+					break;
 			}
-		}
-
-		/*
-		 * Send the batch before waiting on a buffer lock.
-		 *
-		 * Up to 32 buffers stay locked until the bio is submitted,
-		 * so a block that comes round again inside the same pass
-		 * finds its own lock held and waits for a completion that
-		 * cannot arrive until this loop submits -- which it never
-		 * will. The flusher sat in __lock_buffer for an hour with
-		 * zero writes and PSI at 80%, and every fsstress behind it
-		 * blocked in sync_inodes_sb.
-		 *
-		 * The old phys == last_phys guard only caught the same
-		 * block twice in a row, not one seen 30 positions earlier.
-		 *
-		 * trylock first: on the common path it succeeds and costs
-		 * nothing. On contention, submit what is held -- which
-		 * releases those buffers through the completion -- and
-		 * then wait properly.
-		 */
-		lock_buffer(bh);
-
-		/*
-		 * Read-modify-write, except when there is nothing to
-		 * preserve.
-		 *
-		 * The decode exists so a partial write keeps the bytes it
-		 * does not touch. A slice covering the whole block leaves
-		 * none of them: every byte of scratch is overwritten two
-		 * statements later, so decoding first is 16 RS passes over
-		 * data that is discarded.
-		 *
-		 * That is the common case -- a sequential writer fills
-		 * block after block end to end -- and decode_rs8 was 5% of
-		 * a write-only profile because of it.
-		 *
-		 * A block being written whole also does not need its
-		 * previous contents to be correctable: an uncorrectable
-		 * block that is about to be entirely replaced is not an
-		 * error, and reporting it as one would be wrong.
-		 */
-		if (slice_offset == 0 &&
-		    slice_length == BEAMFS_DATA_INLINE_BYTES) {
 			src = kmap_local_folio(folio, folio_off);
 			memcpy(scratch, src, slice_length);
 			kunmap_local(src);
-		} else {
-			ret = beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys,
-								  inode, b,
-								  scratch, 0,
-								  BEAMFS_DATA_INLINE_BYTES,
-								  true);
-			if (ret < 0) {
-				unlock_buffer(bh);
-				brelse(bh);
+			ret = beamfs_wb_queue(wb, inode, b, phys, scratch,
+					      owner, NULL, wpc->wbc);
+			if (ret < 0)
 				break;
-			}
-
-			src = kmap_local_folio(folio, folio_off);
-			memcpy(scratch + slice_offset, src, slice_length);
-			kunmap_local(src);
-		}
-
-		beamfs_lay_data_payload(sb, (u8 *)bh->b_data, scratch);
-
-		ret = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
-		if (ret < 0) {
-			pr_err_ratelimited("beamfs/inline: writeback_range: rs_encode_region failed: %d\n",
-					   ret);
-			unlock_buffer(bh);
-			brelse(bh);
-			break;
-		}
-
-		beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), (u8 *)bh->b_data,
-					     scratch, inode->i_ino, b);
-		/*
-		 * Every byte of the block has just been written, so the
-		 * buffer is current whether or not it was ever read.
-		 * sb_getblk hands back a buffer that is not uptodate.
-		 */
-		set_buffer_uptodate(bh);
-		mark_buffer_dirty(bh);
-
-
-		/*
-		 * The folio is finished from the completion of the last block
-		 * of the range, not here: the write is still in flight when
-		 * this returns.
-		 */
-		/*
-		 * The folio is finished by the caller once the batch is
-		 * handed over, not from a per-block completion.
-		 *
-		 * iomap_finish_folio_write does not claim the data are on
-		 * the platter -- it says the filesystem is done touching
-		 * the folio. XFS decrements it as it accumulates into an
-		 * ioend, without waiting for the bio, and the bio holds
-		 * block-device folios pinned by get_bh rather than the
-		 * file's own, so nothing it points at can go away.
-		 */
-
-		/*
-		 * The lock is held from before the decode through to the
-		 * hand-over, without the release-and-retake the old
-		 * completion path needed.
-		 *
-		 * Dropping it between the encode and the submit opened a
-		 * window where another writeback on the same physical
-		 * block could re-scatter and re-encode over finished
-		 * codewords -- the "hot sha == cold sha mismatch"
-		 * signature. Holding it throughout closes that, and the
-		 * batch completion is what finally releases it.
-		 */
-
-		/*
-		 * Queue rather than wait. Waiting per 4 KiB block measured at
-		 * roughly 55 blocks/s on the qemu-arm64 VirtIO rig, which made
-		 * any large writer appear hung in balance_dirty_pages behind a
-		 * flusher that was effectively single-block-synchronous. What
-		 * the block layer eventually writes is already a valid RS
-		 * codeword, so resilience does not depend on the wait.
-		 */
-		/*
-		 * Submit in both sync modes. Under iomap the folio's
-		 * writeback ends from the buffer's completion, so leaving
-		 * the buffer merely dirty for the flusher to pick up later
-		 * means the completion never fires and sync() waits on a
-		 * folio that stays in writeback forever. WB_SYNC_ALL only
-		 * changes the priority hint here; the wait itself is done
-		 * once for the whole range by the writepages caller.
-		 */
-		/*
-		 * submit_bh, not write_dirty_buffer.
-		 *
-		 * write_dirty_buffer overwrites b_end_io with
-		 * end_buffer_write_sync -- erasing the completion armed a
-		 * few lines above -- and returns without submitting
-		 * anything at all if the buffer is already clean. Either
-		 * way beamfs_inline_wb_end_io never runs, so
-		 * iomap_finish_folio_write never runs, and the folio stays
-		 * in writeback for the life of the mount.
-		 *
-		 * xfstests generic/285 caught it: two rm processes sat in
-		 * folio_wait_writeback under beamfs_evict_inode for nine
-		 * hours, with no disk I/O and no hung-task report, holding
-		 * the whole run behind them.
-		 *
-		 * Clearing the dirty bit by hand is what write_dirty_buffer
-		 * did for us; submitting by hand is what keeps the
-		 * completion we installed.
-		 */
-		if (test_clear_buffer_dirty(bh)) {
-			/*
-			 * submit_bh_wbc asserts b_end_io is set. Only the
-			 * last block of the range carries the folio
-			 * completion; the rest get the plain one, which is
-			 * what write_dirty_buffer installed unconditionally
-			 * and what its removal took away -- a BUG at
-			 * fs/buffer.c:2701 on the first flush after mount,
-			 * before the rootfs finished coming up.
-			 */
-			/*
-			 * Set it, never inherit it.
-			 *
-			 * The buffer comes from the block device's cache and
-			 * can carry a b_end_io from an earlier life. Only
-			 * filling it in when NULL therefore submitted with
-			 * whatever was left there: end_buffer_async_write in
-			 * the case that killed the machine, whose first act
-			 * is BUG_ON(!buffer_async_write(bh)). The flag was
-			 * not set, the BUG fired inside the completion
-			 * interrupt, and a BUG in interrupt context is a
-			 * panic -- generic/027 took the node down every time,
-			 * with no ssh and no dmesg, which is why this took so
-			 * long to see.
-			 *
-			 * Only the block carrying the folio completion keeps
-			 * its own handler; everything else gets the plain one.
-			 */
-			/*
-			 * One request per block, and the buffer's own
-			 * completion.
-			 *
-			 * A batched version of this lived here for a day and
-			 * is gone. It grouped contiguous blocks into a
-			 * single bio, which the device model says is worth
-			 * a great deal: 413 us of fixed cost per request
-			 * measured over nine sizes, so one request per 3824
-			 * bytes caps the filesystem at 9 MB/s whatever else
-			 * the code does.
-			 *
-			 * It could not work in this position. iomap calls
-			 * writeback_range once per folio, and a 4096-byte
-			 * folio holds two beamfs blocks -- so the batch
-			 * never grew past two, and the ceiling stayed where
-			 * it was. What it did add was a deadlock.
-			 *
-			 * Holding buffers locked across the rest of the loop
-			 * means holding them across lookup_or_alloc_phys,
-			 * which calls sb_bread and can sleep on a folio lock
-			 * in the block device cache -- the same cache those
-			 * buffers live in. generic/076 closes the cycle on
-			 * purpose: it runs cat on the raw scratch device
-			 * while fsstress writes through the filesystem, so
-			 * the reader holds folio F, sync_bdevs holds F and
-			 * waits for its buffers, we hold those buffers, and
-			 * we ask for F. Four parties, no way out. The
-			 * flusher sat there for forty minutes with io_ms
-			 * unchanged across samples and PSI at 94%.
-			 *
-			 * The rule the batch broke is the ordinary one: a
-			 * filesystem may not hold a buffer lock while
-			 * sleeping on the cache that buffer belongs to.
-			 * Grouping is still worth having, but it has to
-			 * happen where the locks are not held -- across
-			 * folios via wpc->wb_ctx, with the mapping resolved
-			 * before anything is locked. That is a different
-			 * piece of work and it starts from this constraint
-			 * rather than discovering it.
-			 */
-
-			/*
-			 * Set b_end_io, never inherit it.
-			 *
-			 * The buffer comes from the block device cache and
-			 * can carry a handler from an earlier life. Filling
-			 * it in only when NULL submitted with whatever was
-			 * left there: end_buffer_async_write in the case
-			 * that killed the machine, whose first act is
-			 * BUG_ON(!buffer_async_write(bh)). The flag was not
-			 * set, the BUG fired inside the completion
-			 * interrupt, and a BUG in interrupt context is a
-			 * panic -- generic/027 took the node down every
-			 * time, with no ssh and no dmesg to show why.
-			 */
-			if (p + slice_length >= end) {
-				wb = kmalloc_obj(*wb, GFP_NOFS);
-				if (!wb) {
-					unlock_buffer(bh);
-					brelse(bh);
-					ret = -ENOMEM;
-					break;
-				}
-				wb->inode        = inode;
-				wb->folio        = folio;
-				wb->len          = len;
-				wb->orig_private = bh->b_private;
-				bh->b_private = wb;
-				last_bh = bh;
-			}
-			get_bh(bh);
-			/*
-			 * The completion is an argument now, and it has to
-			 * drop the reference taken just above: bh_submit
-			 * takes none and bh_end_write drops none, unlike the
-			 * submit_bh and end_buffer_write_sync pair this was
-			 * first written against. The last buffer of the range
-			 * gets the completion that also finishes the folio.
-			 */
-			bh_submit(bh,
-				  REQ_OP_WRITE |
-				  ((wpc->wbc &&
-				    wpc->wbc->sync_mode == WB_SYNC_ALL) ?
-				   REQ_SYNC : 0),
-				  (bh == last_bh) ? beamfs_inline_wb_end_io
-						  : beamfs_inline_wb_end_block);
+			queued++;
 		} else {
-			/*
-			 * Already clean, so no completion is coming. If this
-			 * was the block carrying the folio's completion, run
-			 * it here rather than leaving the folio waiting.
-			 */
-			unlock_buffer(bh);
-			if (bh == last_bh) {
-				struct beamfs_inline_wb_ctx *ctx = bh->b_private;
-
-				/* b_end_io went away; only b_private is ours to restore. */
-				bh->b_private = ctx->orig_private;
-				kfree(ctx);
-				iomap_finish_folio_write(inode, folio, len);
-				last_bh = NULL;
-				folio_done = true;
+			/* The folio ends inside this block: wait for the next. */
+			if (wb->have_pend) {
+				ret = beamfs_wb_flush_pending(wb, wpc->wbc);
+				if (ret < 0)
+					break;
 			}
+			src = kmap_local_folio(folio, folio_off);
+			memcpy(wb->pend_payload, src, slice_length);
+			kunmap_local(src);
+			wb->have_pend      = true;
+			wb->pend_phys      = phys;
+			wb->pend_b         = b;
+			wb->pend_filled    = slice_length;
+			wb->pend_next_pos  = (loff_t)(p + slice_length);
+			wb->pend_inode     = inode;
+			wb->pend_owner     = owner;
+			queued++;
 		}
-		brelse(bh);
 
-		p    += slice_length;
-		done += slice_length;
+		p += slice_length;
 	}
 
+out:
 	beamfs_scratch_put(sb, scratch);
 
-	/*
-	 * On success the whole range counts as handled:
-	 * iomap_writeback_range() loops while rlen remains, and a short
-	 * count would bring it back for a folio already handed to the
-	 * completion path. If no completion was armed, finish the folio
-	 * here, because nothing else will.
-	 *
-	 * On error, do not. iomap_writeback_range() returns immediately
-	 * without adding anything to bytes_submitted, so
-	 * iomap_writeback_folio() ends the folio itself for its full size
-	 * -- and a finish here as well is one too many. With one block per
-	 * folio there is no counter to absorb it: iomap_finish_folio_write
-	 * ends the writeback on the first call and the second acts on a
-	 * folio that is no longer in it.
-	 *
-	 * The visible form was ENOSPC on the indirect path leaving 128
-	 * fsstress processes in folio_wait_writeback under evict_inode,
-	 * each holding a lock the next test waited on.
-	 */
-	/*
-	 * The folio is done once the batch is away.
-	 *
-	 * On success the whole range counts as handled:
-	 * iomap_writeback_range() loops while rlen remains, and a short
-	 * count would bring it back for a folio already accounted for.
-	 *
-	 * On error, do not: iomap_writeback_range() returns without
-	 * adding anything to bytes_submitted, so iomap_writeback_folio()
-	 * ends the folio itself for its full size, and a second finish
-	 * here would be one too many. With one block per folio there is
-	 * no counter to absorb it.
-	 */
-	if (ret >= 0 && !last_bh && !folio_done)
-		iomap_finish_folio_write(inode, folio, len);
+	if (ret < 0) {
+		/*
+		 * iomap ends this folio itself when the range fails.
+		 * Whatever was queued for it still writes, and must not
+		 * finish the folio a second time: the slices never
+		 * queued are taken off the count, and the owner is
+		 * marked so the last completion frees it and does no
+		 * more.
+		 */
+		owner->abandoned = true;
+		if (nslices > queued &&
+		    atomic_sub_and_test((int)(nslices - queued), &owner->pending))
+			kfree(owner);
+		if (!wb->error)
+			wb->error = ret;
+		return ret;
+	}
 
-	(void)done;
 	(void)end_pos;
-	return ret < 0 ? ret : (ssize_t)len;
+	return (ssize_t)len;
 }
 
+/*
+ * The end of the pass: the boundary block nobody continued is finished
+ * from what the medium holds, and the bio being built goes.
+ */
 static int beamfs_inline_writeback_submit(struct iomap_writepage_ctx *wpc,
 					  int error)
 {
-	/*
-	 * Nothing is batched: writeback_range hands each buffer to the block
-	 * layer as it goes, so there is no context to submit here.
-	 */
-	(void)wpc;
+	struct beamfs_wb *wb = wpc->wb_ctx;
+	int ret;
+
+	if (!wb)
+		return error;
+	ret = beamfs_wb_flush_pending(wb, wpc->wbc);
+	beamfs_wb_submit_ioend(wb);
+	if (!error)
+		error = ret < 0 ? ret : wb->error;
+	beamfs_scratch_put(wb->sb, wb->pend_payload);
+	kfree(wb);
+	wpc->wb_ctx = NULL;
 	return error;
 }
+
 
 static const struct iomap_writeback_ops beamfs_inline_writeback_ops = {
 	.writeback_range  = beamfs_inline_writeback_range,

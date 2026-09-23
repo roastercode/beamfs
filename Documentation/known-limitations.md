@@ -1171,6 +1171,43 @@ the reason. file.c stays compiled and unreachable; retiring it is a
 separate change. No xfstests run ever used this scheme (all UNIVERSAL_INLINE).
 
 
+### 3.19 Writeback one block at a time, every boundary block twice (FIXED 0.1.7, 2026-09-23)
+
+**Symptom.** generic/074 killed at the 1870 s budget, three runs out of
+three; 102 and 476 the same. Measured with iowho and churn (BX 2.3.25,
+2.3.26): 2 176 467 writes of exactly one block in 1870 s, 1.12 ms each,
+one in flight at a time (2 106 572 ms of write-wait over 1870 s), 4.8
+MB/s, 100 % from the flusher, 99.8 % in the data zone; 756 596
+allocations all from pwrite, 90 truncates -- the test was in its fifth
+pass (3 children, 5 files, 10 loops), progressing at 3 loops a minute
+where the budget allowed 31 minutes of a 52-minute run. No task blocked,
+no pointer lost. ext2 on the same node, same devices: 074 in 17 s, the
+six tests in 3 minutes.
+
+**Cause.** A block carries 3824 bytes of payload, a folio 4096, so
+every folio ends inside a block the next folio continues. Writeback
+encoded through the block device's buffer cache, one buffer_head and
+one bio per block, and took the buffer lock: the boundary block was
+read back, decoded, merged, re-encoded and written by the first folio,
+then again by the second, which first waited on the lock the write in
+flight still held. Every folio waited for the previous folio's bio.
+
+**Fix.** file_inline.c writeback rewritten after the shape of ext2/ext4
+(mpage, ext4_io_submit): encoded blocks go into pool pages, contiguous
+pages into one bio of up to 32, submitted when the run breaks, when
+full, or at the end of the pass; the boundary block waits in the pass
+context for the folio that continues it and is encoded and written
+once; a folio is finished from the completion of the last block that
+carries its bytes, exactly once. No buffer lock is held across anything
+that sleeps (the rule generic/076 enforced). Aliases of data blocks in
+the buffer cache are brought to the written bytes and made clean before
+submission. Also: a failed mount no longer leaks the scratch pool and
+the RS staging (out_free_sbi).
+
+**To verify.** The same sweep of generic/074 under iowho: requests
+larger than one block, several in flight, the boundary blocks written
+once, and the test inside its budget.
+
 ---
 
 ## 4. Filesystem feature limitations

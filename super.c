@@ -157,6 +157,8 @@ static void beamfs_put_super(struct super_block *sb)
 			pr_err("beamfs: umount: the superblock did not reach the medium\n");
 
 		beamfs_destroy_bitmap(sb);
+		mempool_destroy(sbi->s_wb_pages);
+		sbi->s_wb_pages = NULL;
 		mempool_destroy(sbi->s_scratch_pool);
 		sbi->s_scratch_pool = NULL;
 		kvfree(sbi->s_sb_rs_staging);
@@ -1585,6 +1587,13 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		kfree(sbi);
 		return -ENOMEM;
 	}
+	sbi->s_wb_pages = mempool_create_page_pool(64, 0);
+	if (!sbi->s_wb_pages) {
+		kvfree(sbi->s_sb_rs_staging);
+		mempool_destroy(sbi->s_scratch_pool);
+		kfree(sbi);
+		return -ENOMEM;
+	}
 
 	sb->s_fs_info  = sbi;
 	sb->s_magic    = BEAMFS_MAGIC;
@@ -1716,6 +1725,14 @@ out_put_root:
 out_free_fsb:
 	kfree(sbi->s_beamfs_sb);
 out_free_sbi:
+	/*
+	 * Everything fill_super allocated before it could fail here.
+	 * Until 0.1.7 the scratch pool and the RS staging were left
+	 * behind by every mount that failed past them.
+	 */
+	mempool_destroy(sbi->s_wb_pages);
+	mempool_destroy(sbi->s_scratch_pool);
+	kvfree(sbi->s_sb_rs_staging);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 out_brelse:
@@ -1859,6 +1876,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.6");
+MODULE_VERSION("0.1.7");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

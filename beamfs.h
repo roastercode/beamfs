@@ -68,6 +68,14 @@ struct beamfs_sb_info {
 	 */
 	mempool_t        *s_scratch_pool;
 	/*
+	 * Pages for encoded data blocks on their way to the device, so
+	 * writeback never encodes through the block device cache and
+	 * never holds a buffer lock. Sixty-four is two full bios; a
+	 * flusher that finds the pool empty submits what it holds and
+	 * waits for its own pages to come back.
+	 */
+	mempool_t        *s_wb_pages;
+	/*
 	 * Staging for the superblock's RS encode, allocated at mount.
 	 *
 	 * beamfs_dirty_super_now used to kvmalloc it on every call, and
