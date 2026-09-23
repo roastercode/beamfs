@@ -157,6 +157,18 @@ Attempt recovery on a volume whose superblock magic is wrong:
 .B fsck.beamfs \-\-repair \-\-force /dev/vdb
 .RE
 .SH NOTES
+Since 0.1.3 a repair opens the device exclusively, as e2fsck does, and
+refuses one the kernel still holds: mounted, or unmounted lazily with
+files still open. A check-only pass reads it as it is.
+.PP
+Since 0.1.4 the options fsck(8) and systemd-fsck pass along (-a, -C fd,
+-T, -t, -r) are accepted: -a repairs like -p, the others have no effect.
+Every repair fsck.beamfs makes rebuilds a structure from the tree, so -p
+and -y are the same thing here; there is no interactive mode. Pass 1
+compares the superblock's block count with the size of the device, as
+e2fsck does, and refuses a superblock that names more blocks than the
+device holds unless --force.
+.PP
 The Reed\-Solomon decoder is a userland port of
 .B lib/reed_solomon/
 from the Linux kernel tree, so its correction behaviour matches the

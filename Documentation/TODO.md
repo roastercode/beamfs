@@ -3,6 +3,16 @@
 
 ---
 
+## 2026-09-23 mkfs and fsck against e2fsprogs (3.22, 3.23; mkfs 0.1.3, fsck 0.1.4)
+
+- [x] mkfs O_EXCL + /proc/mounts, -F -F; fsck repair O_EXCL
+- [x] UUID/label, fsync, -V -q -L -U, usage, duplicate condition; fsck -a -C -T -t -r, device size check, %u, leak
+- [ ] BX 2.3.28: no umount -l, restart the domain after a kill
+- [ ] kernel: superblock state flags (mounted, errors) + mkfs/fsck reading them (with the rc4 build)
+- [ ] kernel: parity of an indirect block once per flush, not per pointer; unwritten blocks instead of a zero image
+- [ ] kernel 7.3-rc4 in yocto-beamfs
+- [ ] fsck pass 3: tell a fast symlink's target bytes from out-of-range pointers (476 image: 444 "out of range")
+
 ## 2026-09-23 tree checker index and parity verified bit (3.21, module 0.1.9)
 
 - [x] s_tc_child index; forget_parent and zeroed probe 512 keys

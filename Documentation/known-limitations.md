@@ -1264,6 +1264,55 @@ returns at once while the bit is set, and the scrub uses
 beamfs_ind_parity_verify_medium, which clears it first. "has no parity
 written yet" is said once per copy, not once per lookup.
 
+### 3.22 mkfs.beamfs formatted a device the kernel still held (FIXED mkfs 0.1.2, fsck 0.1.3, 2026-09-23)
+
+**Symptom.** generic/650 after a generic/476 killed at the budget: fsck
+of the scratch volume after a clean unmount found 24 130 used-but-
+unreferenced blocks, directories naming free inodes, 40 indirect blocks
+with pointers and no parity. 14 ms into the test, on a volume with
+243 701 free blocks, the kernel said "volume full" from two CPUs.
+
+**Cause.** 476's fsstress processes were still alive in sync; the
+harness detached the scratch mount lazily and formatted the device;
+mkfs.beamfs opened it O_RDWR with no exclusion and formatted it under a
+superblock still alive; 650's mount got that superblock back (sget
+matches on the device), and when the old writers died the old
+superblock flushed its bitmap, inode table and directories over the
+new filesystem. mke2fs opens with O_EXCL and refuses a held device
+(EBUSY) unless forced twice; in the same harness ext2 fails at mkfs,
+xfstests reports "failed to mkfs", and nothing is corrupted.
+
+**Fix.** mkfs.beamfs opens O_EXCL, checks /proc/mounts, refuses a held
+device unless -F -F (one -F still means nothing, for scripts that pass
+it). fsck.beamfs repairs through O_EXCL and refuses a held device;
+check-only reads it as it is. The harness keeps its share: beamfs-
+xfstests must not detach a mount lazily and must restart the domain
+after a kill (2.3.28).
+
+### 3.23 mkfs and fsck against mke2fs and e2fsck (FIXED mkfs 0.1.3, fsck 0.1.4, 2026-09-23)
+
+Reviewed side by side. Fixed: mkfs left s_uuid and s_label zero (every
+volume had the null UUID; now a random v4 UUID, -U and -L as mke2fs);
+mkfs never fsync'ed (a power cut after it returned could leave the
+superblock, written last, as the one block that never landed); mkfs
+had no -V, -q; one usage text still offered the refused scheme; a
+duplicated condition. fsck rejected the options fsck(8) and
+systemd-fsck pass (-a, -C, -T, -t, -r) with a usage error, so a
+boot-time check failed before reading a block; fsck did not compare
+the superblock's block count with the device, so a truncated image
+passed pass 1 and every later pass read past the end; three %u fed
+ints; owner_of leaked on one OOM path.
+
+Still open, and the largest difference: the superblock carries no
+state. ext2 records VALID/ERROR, a mount count and a last-check time;
+the kernel sets ERROR at the first inconsistency and fsck at boot
+knows whether a volume was cleanly unmounted. beamfs has neither a
+"mounted" nor an "errors" flag, so nothing tells fsck that a check is
+due, and nothing tells the next mount that the last one saw damage.
+Kernel change (a bit in s_flags set at rw mount and cleared at clean
+unmount, another set by beamfs_fail and every EUCLEAN), with mkfs and
+fsck reading it; scheduled with the next kernel build.
+
 ---
 
 ## 4. Filesystem feature limitations

@@ -22,6 +22,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <linux/fs.h>
 #include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -71,7 +74,7 @@
 #define FSCK_CANCELED     32  /* fsck canceled by user */
 #define FSCK_LIB         128  /* Shared library error */
 
-#define FSCK_BEAMFS_VERSION "0.1.2"
+#define FSCK_BEAMFS_VERSION "0.1.4"
 
 struct fsck_opts {
 	const char *device;
@@ -101,9 +104,10 @@ static void print_usage(FILE *stream, const char *prog)
 		"\n"
 		"Options:\n"
 		"  -n, --check-only   Read-only check, no modification (default)\n"
-		"  -p, --repair       Repair correctable errors\n"
-		"  -y, --yes          Same as --repair (fsck(8) convention)\n"
-		"  -f, --force        Bypass early-abort sanity checks\n"
+		"  -p, --repair       Repair correctable errors (every repair here rebuilds from the tree)\n"
+		"  -a, -y             Same as --repair (fsck(8) conventions)\n"
+		"  -f, --force        Also check a volume whose superblock or size is refused\n"
+		"  -C fd, -T, -t, -r  Accepted for fsck(8); no effect\n"
 		"  -v, --verbose      Print progress to stdout\n"
 		"  -V, --version      Print version and exit\n"
 		"  -h, --help         Print this help and exit\n"
@@ -213,7 +217,7 @@ static int pass1_superblock(struct fsck_opts *o)
 
 	if (uncorrectable > 0) {
 		fprintf(stderr, "fsck.beamfs: pass 1: superblock RS-uncorrectable (%u/%u subblocks)\n",
-			uncorrectable, BEAMFS_SB_RS_SUBBLOCKS);
+			uncorrectable, (unsigned int)BEAMFS_SB_RS_SUBBLOCKS);
 		o->sb_trustworthy = false;
 		return FSCK_UNCORRECTED;
 	}
@@ -236,6 +240,38 @@ static int pass1_superblock(struct fsck_opts *o)
 		}
 		fprintf(stderr, "fsck.beamfs: pass 1: bad magic 0x%08x, continuing (--force)\n",
 			sb.s_magic);
+	}
+
+	/*
+	 * The superblock against the device, as e2fsck does before
+	 * anything else: a block count past the end of the device is a
+	 * truncated image or a superblock from another volume, and every
+	 * later pass would read past the end and call it damage.
+	 */
+	{
+		struct stat st;
+		uint64_t dev_bytes = 0;
+
+		if (fstat(o->fd, &st) == 0) {
+			if (S_ISBLK(st.st_mode)) {
+				if (ioctl(o->fd, BLKGETSIZE64, &dev_bytes) < 0)
+					dev_bytes = 0;
+			} else if (S_ISREG(st.st_mode)) {
+				dev_bytes = (uint64_t)st.st_size;
+			}
+		}
+		if (dev_bytes &&
+		    (uint64_t)sb.s_block_count * BEAMFS_BLOCK_SIZE > dev_bytes) {
+			fprintf(stderr,
+				"fsck.beamfs: pass 1: the filesystem size according to the superblock is %llu blocks; the physical size of the device is %llu blocks -- either the superblock or the device is wrong%s\n",
+				(unsigned long long)sb.s_block_count,
+				(unsigned long long)(dev_bytes / BEAMFS_BLOCK_SIZE),
+				o->force ? "; continuing (--force)" : "; use --force to proceed");
+			if (!o->force) {
+				o->sb_trustworthy = false;
+				return FSCK_UNCORRECTED;
+			}
+		}
 	}
 
 	computed_crc = crc32_sb(&sb);
@@ -435,7 +471,7 @@ static int pass2_bitmap(const struct fsck_opts *o)
 			uncorrectable_blocks++;
 			uncorrectable_subblocks += block_uncorrectable;
 			fprintf(stderr, "fsck.beamfs: pass 2: bitmap blk %u: %u/%u subblocks uncorrectable\n",
-				k, block_uncorrectable, BEAMFS_BITMAP_SUBBLOCKS);
+				k, block_uncorrectable, (unsigned int)BEAMFS_BITMAP_SUBBLOCKS);
 			continue;
 		}
 
@@ -1168,6 +1204,7 @@ static int pass4_bitmap_rebuild(const struct fsck_opts *o)
 	if (!reference) {
 		fprintf(stderr, "fsck.beamfs: pass 4: OOM allocating %llu-byte reference bitmap\n",
 			(unsigned long long)reference_bytes);
+		free(owner_of);
 		return FSCK_ERROR;
 	}
 
@@ -1564,7 +1601,7 @@ static int pass5_rs_journal(const struct fsck_opts *o)
 			    oor_first % BEAMFS_DATA_INLINE_SUBBLOCKS == 0 &&
 			    oor_first / BEAMFS_DATA_INLINE_SUBBLOCKS < nb)
 				fprintf(stderr, "fsck.beamfs: pass 5:   divided by %u that is block %llu, so these entries predate format v6\n",
-					BEAMFS_DATA_INLINE_SUBBLOCKS,
+					(unsigned int)BEAMFS_DATA_INLINE_SUBBLOCKS,
 					(unsigned long long)(oor_first
 						/ BEAMFS_DATA_INLINE_SUBBLOCKS));
 		}
@@ -1684,6 +1721,7 @@ int main(int argc, char **argv)
 
 	static const struct option long_opts[] = {
 		{ "check-only", no_argument, NULL, 'n' },
+		{ "auto",       no_argument, NULL, 'a' },
 		{ "repair",     no_argument, NULL, 'p' },
 		{ "yes",        no_argument, NULL, 'y' },
 		{ "force",      no_argument, NULL, 'f' },
@@ -1695,12 +1733,13 @@ int main(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "npyfvVh", long_opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "npyafvVhC:Tt:r", long_opts, NULL)) != -1) {
 		switch (c) {
 		case 'n':
 			opts.check_only = true;
 			opts.repair     = false;
 			break;
+		case 'a':
 		case 'p':
 		case 'y':
 			/*
@@ -1720,6 +1759,18 @@ int main(int argc, char **argv)
 			 */
 			opts.repair     = true;
 			opts.check_only = false;
+			break;
+		case 'C':
+		case 'T':
+		case 't':
+		case 'r':
+			/*
+			 * What fsck(8) and systemd-fsck pass along: a progress
+			 * descriptor, "no title", a type, "interactive". e2fsck
+			 * accepts them all; until 0.1.4 each one was a usage
+			 * error, so a boot-time fsck -a -T failed before reading
+			 * a block.
+			 */
 			break;
 		case 'f':
 			opts.force = true;
@@ -1746,7 +1797,20 @@ int main(int argc, char **argv)
 	}
 	opts.device = argv[optind];
 
-	fd = open(opts.device, opts.repair ? O_RDWR : O_RDONLY);
+	/*
+	 * A repair takes the device exclusively, as e2fsck does: a
+	 * volume the kernel still holds -- mounted, or unmounted lazily
+	 * with files open -- answers EBUSY, and repairing it would race
+	 * the kernel's own writes. A check-only pass reads whatever is
+	 * there; the caller decides what a moving target is worth.
+	 */
+	fd = open(opts.device, opts.repair ? (O_RDWR | O_EXCL) : O_RDONLY);
+	if (fd < 0 && opts.repair && errno == EBUSY) {
+		fprintf(stderr,
+			"fsck.beamfs: %s is in use by the kernel (mounted, or unmounted lazily with files still open); a repair on it would damage it -- refused\n",
+			opts.device);
+		return FSCK_ERROR;
+	}
 	if (fd < 0) {
 		fprintf(stderr, "fsck.beamfs: cannot open %s: %s\n",
 			opts.device, strerror(errno));

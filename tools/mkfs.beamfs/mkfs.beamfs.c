@@ -25,6 +25,10 @@
 #include <stddef.h>
 #include <assert.h>
 #include <getopt.h>
+#include <sys/sysmacros.h>
+#include <sys/random.h>
+
+#define MKFS_BEAMFS_VERSION "0.1.3"
 #include <dirent.h>
 
 /*
@@ -886,6 +890,78 @@ static void write_ind_parity(int fd, uint64_t blk, const void *buf,
 	}
 }
 
+/*
+ * Open the target the way mke2fs does: exclusively.
+ *
+ * A block device held by a mounted filesystem -- or by one that was
+ * unmounted lazily and still has files open -- answers EBUSY to
+ * O_EXCL, whatever /proc/mounts says. Formatting it anyway lays a new
+ * filesystem under a superblock that is still alive, and that
+ * superblock's last flush then writes its bitmap, inode table and
+ * directories over the new one. /proc/mounts is checked as well, for
+ * the message: a mount that is still listed is named as such.
+ *
+ * O_EXCL on a regular file has no meaning on Linux and is ignored, so
+ * an image file is formatted as before. -F -F formats a held device
+ * anyway, as mke2fs -F -F does; one -F changes nothing here.
+ */
+static int mounted_where(const char *path, char *where, size_t wlen)
+{
+	struct stat st;
+	FILE *f;
+	char line[1024];
+
+	if (stat(path, &st) < 0 || !S_ISBLK(st.st_mode))
+		return 0;
+	f = fopen("/proc/self/mounts", "r");
+	if (!f)
+		return 0;
+	while (fgets(line, sizeof(line), f)) {
+		char dev[512], mnt[512];
+		struct stat ds;
+
+		if (sscanf(line, "%511s %511s", dev, mnt) != 2)
+			continue;
+		if (stat(dev, &ds) == 0 && S_ISBLK(ds.st_mode) &&
+		    ds.st_rdev == st.st_rdev) {
+			snprintf(where, wlen, "%s", mnt);
+			fclose(f);
+			return 1;
+		}
+	}
+	fclose(f);
+	return 0;
+}
+
+static int open_target(const char *path, int force)
+{
+	char where[512];
+	int fd;
+
+	if (mounted_where(path, where, sizeof(where)) && force < 2) {
+		fprintf(stderr,
+			"mkfs.beamfs: %s is mounted on %s; will not make a filesystem here (-F -F to force)\n",
+			path, where);
+		return -1;
+	}
+	fd = open(path, O_RDWR | O_EXCL);
+	if (fd >= 0)
+		return fd;
+	if (errno == EBUSY) {
+		if (force < 2) {
+			fprintf(stderr,
+				"mkfs.beamfs: %s is in use by the kernel -- mounted, or unmounted lazily with files still open; will not make a filesystem here (-F -F to force)\n",
+				path);
+			return -1;
+		}
+		fd = open(path, O_RDWR);
+		if (fd >= 0)
+			return fd;
+	}
+	fprintf(stderr, "mkfs.beamfs: cannot open %s: %s\n", path, strerror(errno));
+	return -1;
+}
+
 int main(int argc, char *argv[])
 {
 	uint64_t inode_table_len = 16; /* default: 16 blocks = 256 inodes */
@@ -943,6 +1019,11 @@ int main(int argc, char *argv[])
 	 */
 	int ind_parity_mode = BEAMFS_IND_PARITY_RS;
 	int error_budget = 0;
+	int force = 0;
+	int quiet = 0;
+	uint8_t uuid[16];
+	int uuid_given = 0;
+	char label[sizeof(((struct beamfs_super_block *)0)->s_label)] = {0};
 
 	const char *from_dir = NULL;
 
@@ -954,6 +1035,10 @@ int main(int argc, char *argv[])
 		{"indirect-parity", required_argument, NULL, 'I'},
 		{"error-budget", no_argument, NULL, 'B'},
 		{"force", no_argument, NULL, 'F'},
+		{"label", required_argument, NULL, 'L'},
+		{"uuid", required_argument, NULL, 'U'},
+		{"quiet", no_argument, NULL, 'q'},
+		{"version", no_argument, NULL, 'V'},
 		/*
 		 * Long-only: there is no short letter left worth spending
 		 * on something a campaign asks for and nobody else does.
@@ -988,7 +1073,7 @@ int main(int argc, char *argv[])
 	 */
 	int interleave = 1;
 
-	while ((opt = getopt_long(argc, argv, "N:s:O:d:CI:FBb:", long_opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "N:s:O:d:CI:FBb:L:U:qV", long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 1000:
 			poison = 1;
@@ -1114,13 +1199,57 @@ int main(int argc, char *argv[])
 			break;
 		case 'F':
 			/*
-			 * Accepted and ignored. mkfs.beamfs never refuses a
-			 * device that already holds a filesystem, so there
-			 * is nothing to force; the flag exists because
-			 * xfstests passes it unconditionally, as do most
-			 * scripts written against mke2fs.
+			 * Once: as mke2fs, accepted for scripts that pass it
+			 * unconditionally (xfstests does). Twice: format a
+			 * device the kernel still holds. Until 0.1.2 the flag
+			 * was ignored and nothing was ever refused, and on
+			 * 2026-09-23 generic/650 formatted a device whose
+			 * previous filesystem was still alive behind a lazy
+			 * unmount; when that one died it flushed its
+			 * metadata over the new one: 24 130 orphan blocks
+			 * and directories naming free inodes.
 			 */
+			force++;
 			break;
+		case 'L':
+			/* As mke2fs -L: the volume label, up to the field's width. */
+			if (strlen(optarg) >= sizeof(label)) {
+				fprintf(stderr, "mkfs.beamfs: label longer than %zu bytes\n",
+					sizeof(label) - 1);
+				return 1;
+			}
+			strncpy(label, optarg, sizeof(label) - 1);
+			break;
+		case 'U': {
+			/* As mke2fs -U: 8-4-4-4-12 hexadecimal. */
+			const char *p = optarg;
+			unsigned int i;
+
+			for (i = 0; i < 16; i++) {
+				unsigned int v;
+
+				if (*p == '-')
+					p++;
+				if (sscanf(p, "%2x", &v) != 1) {
+					fprintf(stderr, "mkfs.beamfs: bad UUID '%s'\n", optarg);
+					return 1;
+				}
+				uuid[i] = (uint8_t)v;
+				p += 2;
+			}
+			if (*p != '\0') {
+				fprintf(stderr, "mkfs.beamfs: bad UUID '%s'\n", optarg);
+				return 1;
+			}
+			uuid_given = 1;
+			break;
+		}
+		case 'q':
+			quiet = 1;
+			break;
+		case 'V':
+			printf("mkfs.beamfs %s\n", MKFS_BEAMFS_VERSION);
+			return 0;
 		case 'I':
 			if (!strcmp(optarg, "none"))
 				ind_parity_mode = BEAMFS_IND_PARITY_NONE;
@@ -1157,6 +1286,8 @@ int main(int argc, char *argv[])
 			fprintf(stderr,
 				"Usage: %s [-N inodes] [-s scheme] [--profile=embedded] [-O feat,..] [--from-dir=path] <device_or_image>\n"
 				"  -b size         block size; only 4096 is supported\n"
+				"  -L label        volume label (up to 31 bytes); -U uuid sets the UUID\n"
+				"  -q              no summary; -V prints the version; -F -F formats a held device\n"
 				"  -s scheme       inline (default: inline; inode-universal is refused)\n"
 				"  --profile=name  embedded (writes v5.0 minimal format)\n"
 				"  -O / --features list of INCOMPAT bits (per_inode_rs)\n"
@@ -1181,13 +1312,14 @@ int main(int argc, char *argv[])
 	if (optind >= argc) {
 		fprintf(stderr,
 			"Usage: %s [-N inodes] [-s scheme] <device_or_image>\n"
-			"  -s scheme   inline | inode-universal (default: inline)\n",
+			"  -s scheme   inline (default: inline; inode-universal is refused)\n",
 			argv[0]);
 		return 1;
 	}
 
-	int fd = open(argv[optind], O_RDWR);
-	if (fd < 0) { perror("open"); return 1; }
+	int fd = open_target(argv[optind], force);
+	if (fd < 0)
+		return 1;
 
 	struct stat st;
 	if (fstat(fd, &st) < 0) { perror("fstat"); return 1; }
@@ -1707,10 +1839,25 @@ int main(int argc, char *argv[])
 	 * protect and nothing to be incompatible about.
 	 */
 	if (ind_parity_mode != BEAMFS_IND_PARITY_NONE)
-		feat_incompat |= MKFS_FEATURE_INCOMPAT_IND_PARITY_FEC;
-	if (ind_parity_mode != BEAMFS_IND_PARITY_NONE)
-		feat_incompat |= BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY;
+		feat_incompat |= MKFS_FEATURE_INCOMPAT_IND_PARITY_FEC |
+				 BEAMFS_FEATURE_INCOMPAT_INDIRECT_PARITY;
 	sb.s_feat_compat    = 0;
+	/*
+	 * Identity, as mke2fs gives every volume one: a random UUID
+	 * (version 4) unless -U named it, and the label -L gave. Until
+	 * 0.1.3 both fields were left zero, so every beamfs volume had
+	 * the same, null, UUID.
+	 */
+	if (!uuid_given) {
+		if (getrandom(uuid, sizeof(uuid), 0) != (ssize_t)sizeof(uuid)) {
+			perror("getrandom");
+			return 1;
+		}
+		uuid[6] = (uint8_t)((uuid[6] & 0x0f) | 0x40);
+		uuid[8] = (uint8_t)((uuid[8] & 0x3f) | 0x80);
+	}
+	memcpy(sb.s_uuid, uuid, sizeof(sb.s_uuid));
+	memcpy(sb.s_label, label, sizeof(sb.s_label));
 	if (interleave)
 		feat_incompat |= BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE;
 
@@ -2788,9 +2935,26 @@ int main(int argc, char *argv[])
 
 	write_block(fd, 0, &sb);
 	free(bitmap_buf);
+	/*
+	 * To the medium before returning, as mke2fs does. Everything
+	 * above went through the page cache; without this a power cut
+	 * right after mkfs returns leaves a volume whose superblock --
+	 * written last on purpose -- may be the one block that never
+	 * landed.
+	 */
+	if (fsync(fd) < 0) {
+		perror("fsync");
+		return 1;
+	}
 	close(fd);
 
+	if (quiet)
+		return 0;
 	printf("mkfs.beamfs: formatted %s\n", argv[optind]);
+	printf("  uuid:    %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x%s%s\n",
+	       uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+	       uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15],
+	       label[0] ? "  label: " : "", label[0] ? label : "");
 	printf("  format:  v%u%s%s%s (scheme=%u %s, feat_incompat=0x%016llx%s%s%s, journal entry %zu bytes)\n",
 	       (unsigned)sb.s_version,
 	       profile_name ? " [" : "",
