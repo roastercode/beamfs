@@ -987,6 +987,37 @@ bool beamfs_bh_attached(struct super_block *sb, struct buffer_head *bh,
 			const char *who)
 {
 	struct folio *folio = bh->b_folio;
+	static atomic_long_t n_same, n_apart;
+
+	/*
+	 * The bytes the device receives are folio_address(b_folio) +
+	 * bh_offset(bh): that is what __bh_submit hands the bio. The
+	 * bytes the module writes are at b_data. 0.1.13 and 0.1.14 showed
+	 * the slot in b_data from the write to the dirtying, 802 816
+	 * times out of 802 816, and the medium holds zeros for the same
+	 * region written afterwards. If the two addresses ever differ,
+	 * the device is reading beside what was written.
+	 */
+	if (folio) {
+		u8 *dma = (u8 *)folio_address(folio) + bh_offset(bh);
+		long same, apart;
+
+		if (dma == (u8 *)bh->b_data) {
+			same = atomic_long_inc_return(&n_same);
+			apart = atomic_long_read(&n_apart);
+		} else {
+			apart = atomic_long_inc_return(&n_apart);
+			same = atomic_long_read(&n_same);
+			pr_err_ratelimited("beamfs/diag: %s: block %llu: b_data %p but folio %p order %u + bh_offset %lu = %p; state=%#lx count=%d\n",
+					   who, (unsigned long long)bh->b_blocknr,
+					   bh->b_data, folio, folio_order(folio),
+					   bh_offset(bh), dma, bh->b_state,
+					   atomic_read(&bh->b_count));
+		}
+		if (((same + apart) & 4095) == 0)
+			pr_info("beamfs/diag: b_data vs folio: %ld same, %ld apart\n",
+				same, apart);
+	}
 
 	if (folio && folio->mapping == sb->s_bdev->bd_mapping)
 		return true;
@@ -1993,6 +2024,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.14");
+MODULE_VERSION("0.1.15");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

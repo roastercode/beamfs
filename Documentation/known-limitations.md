@@ -1688,3 +1688,16 @@ from inside the module. Present every time: the probe is wrong. Absent
 sometimes: the bytes change in the window between unlock_buffer and
 mmb_mark_buffer_dirty, and whoever takes the lock there is the writer
 to find.
+
+### 3.31 b_data against folio + bh_offset (0.1.15, diagnostic)
+
+0.1.14: 401 408 updates, 0 slots gone from b_data after unlock_buffer.
+parity.bt's 30% of absent slots were the probe's, not the module's; the
+probe is withdrawn as a witness. What stands, from the module and the
+image: the slot is in b_data at the dirtying, the region is written to
+the device afterwards, the medium holds zeros, and at the next verify
+the buffer is clean, on the mapping's own folio, without the slot. So
+the write carried bytes other than b_data's. The device reads
+folio_address(b_folio) + bh_offset(bh); the module writes b_data. 0.1.15
+compares the two on every parity update, for the region and the
+indirect block, and says the folio order when they differ.
