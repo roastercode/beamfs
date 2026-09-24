@@ -664,6 +664,40 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	beamfs_ind_parity_touched(sbi);
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
+
+	/*
+	 * And once more, from here: after the lock is dropped and just
+	 * before the buffer is marked dirty -- the instant parity.bt reads
+	 * b_data, and where it found the slot absent for 30% of updates
+	 * while the read-back under the lock (0.1.13) found it 401 408
+	 * times out of 401 408. If it is absent here too, the bytes change
+	 * in this window and the probe is right; if never, the probe is
+	 * wrong. On an absence, what the buffer looks like now.
+	 */
+	{
+		static atomic_long_t n_ok2, n_missing2;
+		u8 back[BEAMFS_IND_PARITY_RS_BYTES];
+		long ok, missing;
+
+		ind_slot_gather((const u8 *)pbh->b_data, offset, stride, back);
+		if (memcmp(back, slotbuf, stride) == 0) {
+			ok = atomic_long_inc_return(&n_ok2);
+			missing = atomic_long_read(&n_missing2);
+		} else {
+			missing = atomic_long_inc_return(&n_missing2);
+			ok = atomic_long_read(&n_ok2);
+			pr_err_ratelimited("beamfs/diag: parity update: slot of indirect %llu gone from region %llu between unlock and dirty (locked=%d dirty=%d uptodate=%d count=%d, cpu %d)\n",
+					   (unsigned long long)phys,
+					   (unsigned long long)region_blk,
+					   buffer_locked(pbh), buffer_dirty(pbh),
+					   buffer_uptodate(pbh),
+					   atomic_read(&pbh->b_count),
+					   raw_smp_processor_id());
+		}
+		if (((ok + missing) & 4095) == 0)
+			pr_info("beamfs/diag: parity self-check after unlock: %ld present, %ld gone\n",
+				ok, missing);
+	}
 	/*
 	 * On the inode's list when there is one, so writeback carries it
 	 * with the block it describes. Without an inode -- the scrubber

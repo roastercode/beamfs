@@ -1677,3 +1677,14 @@ witnesses is wrong. 0.1.13 makes the module the arbiter: after
 ind_region_write the slot is gathered back from b_data and compared with
 what was scattered in; mismatches are said, and the running count is
 printed every 4096 updates.
+
+### 3.30 The slot read back after unlock_buffer (0.1.14, diagnostic)
+
+0.1.13: 401 408 updates, 0 slots missing from b_data right after
+ind_region_write, under the buffer lock. parity.bt reads b_data at the
+mark_buffer_dirty that follows, after unlock_buffer, and finds the slot
+absent for 30% of updates. 0.1.14 reads it back at that same instant
+from inside the module. Present every time: the probe is wrong. Absent
+sometimes: the bytes change in the window between unlock_buffer and
+mmb_mark_buffer_dirty, and whoever takes the lock there is the writer
+to find.
