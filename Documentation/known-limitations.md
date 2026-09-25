@@ -1719,3 +1719,16 @@ are mounted during a run and the cache outlives them. 0.1.16 serves no
 hit: it decodes every time and compares the decode with the entry,
 counting hits, hits from another volume, and stale entries, and says
 which devices were involved on each stale one.
+
+### 3.33 The device read back after every region write (0.1.17, diagnostic)
+
+0.1.16 served no cache hit and generic/476 still left 97 undescribed
+indirect blocks: the region written is a fresh decode of b_data plus
+the slot, and the medium holds zeros. With the slot in b_data, b_data
+the bio's address, one write and no other bio, no other lookup, the one
+thing never observed is the medium right after that write. 0.1.17
+writes the region synchronously after each update, reads the block
+back from the device past the page cache, and compares byte for byte;
+buffers re-dirtied by another cpu in between are counted as skipped.
+Identical every time: the zeros arrive later, with no write the block
+layer sees. Different at once: the write path or the device.

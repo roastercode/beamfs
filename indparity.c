@@ -31,6 +31,7 @@
 #include <linux/buffer_head.h>
 #include <linux/crc32.h>
 #include <linux/slab.h>
+#include <linux/bio.h>
 #include "beamfs.h"
 #include "beamfs_trace.h"
 
@@ -479,6 +480,36 @@ static void ind_region_selfcheck(struct super_block *sb,
 }
 #endif
 
+/*
+ * Read @blk from the device into @buf, past the page cache.
+ *
+ * The buffer cache answers with what memory holds; this asks the
+ * device what it holds. A private page and a private bio, so nothing
+ * in the cache is touched and nothing in the cache is trusted.
+ */
+static int ind_region_raw_read(struct super_block *sb, u64 blk, u8 *buf)
+{
+	struct page *page = alloc_page(GFP_NOFS);
+	struct bio *bio;
+	int ret;
+
+	if (!page)
+		return -ENOMEM;
+	bio = bio_alloc(sb->s_bdev, 1, REQ_OP_READ, GFP_NOFS);
+	bio->bi_iter.bi_sector = blk << (sb->s_blocksize_bits - 9);
+	if (bio_add_page(bio, page, BEAMFS_BLOCK_SIZE, 0) != BEAMFS_BLOCK_SIZE) {
+		bio_put(bio);
+		__free_page(page);
+		return -EIO;
+	}
+	ret = submit_bio_wait(bio);
+	bio_put(bio);
+	if (!ret)
+		memcpy(buf, page_address(page), BEAMFS_BLOCK_SIZE);
+	__free_page(page);
+	return ret;
+}
+
 static void ind_region_write(struct super_block *sb,
 			     struct buffer_head *pbh, const u8 *scratch)
 {
@@ -797,6 +828,81 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		mark_inode_dirty(inode);
 	} else {
 		mark_buffer_dirty(pbh);
+	}
+
+	/*
+	 * 0.1.17: does the device hold what was just written?
+	 *
+	 * Everything before this point is established: the slot is in
+	 * b_data (0.1.13, 0.1.14), b_data is the address the bio carries
+	 * (0.1.15), the cache never served a stale decode (0.1.16), every
+	 * bio touching the zone is one of these writes and nothing else
+	 * looks the buffer up (beamfs-xfstests 2.3.35, 2.3.36) -- and the
+	 * medium holds zeros for a hundred regions after their one write.
+	 * What has not been seen is the medium right after that write.
+	 *
+	 * So the region is written now, synchronously, and read back from
+	 * the device past the page cache, and the two are compared byte
+	 * for byte. A buffer another cpu re-dirtied in between is not
+	 * compared -- the difference would be legitimate -- and counted
+	 * as skipped. Every 4096 updates the counts are said.
+	 */
+	{
+		static atomic_long_t n_same, n_diff, n_zero, n_skip, n_err;
+		u8 *raw = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+		long same, diff, zero, skip, err;
+		int e;
+
+		e = sync_dirty_buffer(pbh);
+		if (e) {
+			err = atomic_long_inc_return(&n_err);
+			pr_err_ratelimited("beamfs/diag: region %llu: sync write failed: %d\n",
+					   (unsigned long long)region_blk, e);
+		}
+		if (raw && !e) {
+			e = ind_region_raw_read(sb, region_blk, raw);
+			if (e) {
+				err = atomic_long_inc_return(&n_err);
+				pr_err_ratelimited("beamfs/diag: region %llu: raw read failed: %d\n",
+						   (unsigned long long)region_blk, e);
+			} else {
+				lock_buffer(pbh);
+				if (buffer_dirty(pbh)) {
+					skip = atomic_long_inc_return(&n_skip);
+				} else if (memcmp(raw, pbh->b_data, BEAMFS_BLOCK_SIZE) == 0) {
+					same = atomic_long_inc_return(&n_same);
+				} else {
+					unsigned int k;
+					bool allzero = true;
+
+					for (k = 0; k < BEAMFS_BLOCK_SIZE; k++) {
+						if (raw[k]) {
+							allzero = false;
+							break;
+						}
+					}
+					diff = atomic_long_inc_return(&n_diff);
+					if (allzero)
+						zero = atomic_long_inc_return(&n_zero);
+					pr_err_ratelimited("beamfs/diag: region %llu (indirect %llu): device holds %s right after the write; b_data state=%#lx\n",
+							   (unsigned long long)region_blk,
+							   (unsigned long long)phys,
+							   allzero ? "ZEROS" : "OTHER BYTES",
+							   pbh->b_state);
+				}
+				unlock_buffer(pbh);
+			}
+		}
+		kfree(raw);
+
+		same = atomic_long_read(&n_same);
+		diff = atomic_long_read(&n_diff);
+		zero = atomic_long_read(&n_zero);
+		skip = atomic_long_read(&n_skip);
+		err = atomic_long_read(&n_err);
+		if (((same + diff + skip + err) & 4095) == 0)
+			pr_info("beamfs/diag: device read-back: %ld same, %ld different (%ld all zero), %ld skipped (re-dirtied), %ld errors\n",
+				same, diff, zero, skip, err);
 	}
 	brelse(pbh);
 }
