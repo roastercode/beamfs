@@ -196,6 +196,12 @@ struct beamfs_sb_info {
 	u64                       s_ind_parity_blk;
 	u32                       s_ind_parity_len;
 	u32                       s_ind_parity_mode;
+	/*
+	 * Diagnostic (0.1.19): one bit per slot of every region, set when
+	 * this mount has written that slot. Allocated on first use,
+	 * freed in put_super.
+	 */
+	unsigned long            *s_ind_slot_seen;
 
 	/* Error budget region, cached from the superblock. */
 	u64                       s_budget_blk;

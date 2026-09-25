@@ -170,6 +170,8 @@ static void beamfs_put_super(struct super_block *sb)
 		sbi->s_wb_pages = NULL;
 		mempool_destroy(sbi->s_scratch_pool);
 		sbi->s_scratch_pool = NULL;
+		kfree(sbi->s_ind_slot_seen);
+		sbi->s_ind_slot_seen = NULL;
 		kvfree(sbi->s_sb_rs_staging);
 		sbi->s_sb_rs_staging = NULL;
 		brelse(sbi->s_sbh);
@@ -2024,6 +2026,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.18");
+MODULE_VERSION("0.1.19");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

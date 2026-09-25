@@ -544,6 +544,129 @@ static void ind_region_write(struct super_block *sb,
 }
 
 /*
+ * 0.1.19: has a slot this mount wrote gone back to zero?
+ *
+ * The image of generic/476 on 2026-09-25, read at the exact place the
+ * kernel uses: for 61 undescribed blocks the region holds other slots,
+ * written after theirs by neighbours, and not theirs; for 48 the
+ * region is all zero. Every one of those writes was read back from the
+ * device identical (0.1.18). So between a slot's verified write and
+ * the next update of its region -- with no bio, no read, no lookup in
+ * between (beamfs-xfstests 2.3.35, 2.3.36, 2.3.38) -- the buffer's
+ * bytes lost the slot, and the neighbour's fresh decode carried the
+ * loss to the medium.
+ *
+ * This catches it at that next update: every slot of the region this
+ * mount has already written is checked in the fresh decode, and one
+ * found all zero is said at once, with the buffer's state and whether
+ * the device, read directly, still holds it (memory alone regressed)
+ * or not (a write nobody counted).
+ */
+static bool ind_slot_all_zero(const u8 *buf, u32 off, size_t stride)
+{
+	u8 s[BEAMFS_IND_PARITY_RS_BYTES];
+	size_t k;
+
+	ind_slot_gather(buf, off, stride, s);
+	for (k = 0; k < stride; k++)
+		if (s[k])
+			return false;
+	return true;
+}
+
+static unsigned long *ind_slot_map(struct beamfs_sb_info *sbi)
+{
+	unsigned long *map = READ_ONCE(sbi->s_ind_slot_seen);
+	size_t bits;
+
+	if (map)
+		return map;
+	bits = (size_t)sbi->s_ind_parity_len * BEAMFS_IND_PARITY_RS_SLOTS;
+	map = kzalloc(BITS_TO_LONGS(bits) * sizeof(long), GFP_NOFS);
+	if (!map)
+		return NULL;
+	if (cmpxchg(&sbi->s_ind_slot_seen, NULL, map) != NULL) {
+		kfree(map);
+		map = READ_ONCE(sbi->s_ind_slot_seen);
+	}
+	return map;
+}
+
+static void ind_slot_audit(struct super_block *sb, struct buffer_head *pbh,
+			   const u8 *scratch, u64 region_blk, unsigned int slot,
+			   u64 phys, size_t stride)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	unsigned long *map = ind_slot_map(sbi);
+	static atomic_long_t n_checked, n_lost, n_dev_lost, n_dev_kept;
+	size_t base;
+	unsigned int j;
+
+	if (!map || region_blk < sbi->s_ind_parity_blk)
+		return;
+	base = (size_t)(region_blk - sbi->s_ind_parity_blk) *
+	       BEAMFS_IND_PARITY_RS_SLOTS;
+	for (j = 0; j < BEAMFS_IND_PARITY_RS_SLOTS; j++) {
+		u32 off = j * (u32)stride;
+		long lost, checked;
+
+		if (j == slot || !test_bit(base + j, map))
+			continue;
+		if (off + stride > BEAMFS_DATA_INLINE_BYTES)
+			break;
+		checked = atomic_long_inc_return(&n_checked);
+		if (!ind_slot_all_zero(scratch, off, stride))
+			continue;
+
+		lost = atomic_long_inc_return(&n_lost);
+		{
+			u8 *raw = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+			const char *dev = "device not read";
+			bool devzero = false, devall = false;
+			unsigned int k;
+
+			if (raw && !ind_region_raw_read(sb, region_blk, raw)) {
+				devzero = ind_slot_all_zero(raw, off, stride);
+				devall = true;
+				for (k = 0; k < BEAMFS_BLOCK_SIZE; k++)
+					if (raw[k]) {
+						devall = false;
+						break;
+					}
+				if (devzero)
+					atomic_long_inc(&n_dev_lost);
+				else
+					atomic_long_inc(&n_dev_kept);
+				dev = devzero ? (devall ? "device: slot ZERO, whole region zero" :
+						 "device: slot ZERO too") :
+					"device STILL HOLDS the slot";
+			}
+			kfree(raw);
+			pr_err("beamfs/diag: region %llu slot %u, written earlier this mount, is ZERO in the fresh decode at the update of indirect %llu (slot %u); %s; buffer state=%#lx count=%d mmb=%p folio=%p; %ld lost of %ld checked\n",
+			       (unsigned long long)region_blk, j,
+			       (unsigned long long)phys, slot, dev,
+			       pbh->b_state, atomic_read(&pbh->b_count),
+			       pbh->b_mmb, pbh->b_folio, lost, checked);
+		}
+	}
+	if ((atomic_long_read(&n_checked) & 65535) == 0)
+		pr_info("beamfs/diag: slot audit: %ld checked, %ld lost in memory (%ld lost on the device too, %ld kept by the device)\n",
+			atomic_long_read(&n_checked), atomic_long_read(&n_lost),
+			atomic_long_read(&n_dev_lost), atomic_long_read(&n_dev_kept));
+}
+
+static void ind_slot_mark(struct super_block *sb, u64 region_blk,
+			  unsigned int slot)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	unsigned long *map = ind_slot_map(sbi);
+
+	if (map && region_blk >= sbi->s_ind_parity_blk)
+		set_bit((size_t)(region_blk - sbi->s_ind_parity_blk) *
+			BEAMFS_IND_PARITY_RS_SLOTS + slot, map);
+}
+
+/*
  * beamfs_ind_parity_update -- recompute parity for an indirect block.
  *
  * Takes the buffer_head rather than a block number: b_blocknr already
@@ -651,6 +774,9 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		return;
 	}
 
+	ind_slot_audit(sb, pbh, scratch, region_blk, offset / (u32)stride,
+		       phys, stride);
+
 	ind_slot_gather(scratch, offset, stride, slotbuf);
 
 	if (sbi->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
@@ -686,6 +812,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
+	ind_slot_mark(sb, region_blk, offset / (u32)stride);
 
 	/*
 	 * Read it back from the buffer, not from scratch.

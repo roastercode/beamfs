@@ -1744,3 +1744,17 @@ of the lock, reads the device back, and compares with the copy; a
 difference is classified as the image from before this update (the
 write did not land), all zeros, or other bytes, with the count of
 differing bytes and the first offset.
+
+### 3.35 A slot written this mount, checked at every later update (0.1.19, diagnostic)
+
+The frozen image of generic/476 on 2026-09-25, read at the place the
+kernel uses: 61 undescribed blocks sit in regions that hold slots
+written later by neighbours and not theirs; 48 in regions entirely
+zero. Every write was read back identical (0.1.18); no bio, read or
+lookup touched the region between a slot's write and the neighbour's
+update (2.3.35, 2.3.36, 2.3.38). The buffer's bytes lost the slot in
+memory and the neighbour's fresh decode carried the loss down. 0.1.19
+keeps, per region, the map of slots this mount wrote, checks every one
+of them in the fresh decode at each update, says a loss at once with
+the buffer's state, and reads the device directly to say whether it
+still holds the slot.
