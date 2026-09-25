@@ -1758,3 +1758,11 @@ keeps, per region, the map of slots this mount wrote, checks every one
 of them in the fresh decode at each update, says a loss at once with
 the buffer's state, and reads the device directly to say whether it
 still holds the slot.
+
+### 3.36 The slot audit remembers only slots written non-zero (0.1.20)
+
+0.1.19 reported 51 500 "lost" slots in one generic/476, most of them
+the same slot at every later update of its region: a freed indirect
+block has its parity recomputed over an empty block, and the parity
+of zeros is zeros. A slot written all zero now clears its bit. What
+remains reported is a slot written non-zero and found zero later.

@@ -62,3 +62,4 @@ tools/raf-decode/target/
 tools/mkfs.beamfs/mkfs.beamfs
 tools/fsck.beamfs/fsck.beamfs
 tools/raf-decode/raf-decode
+.checkpatch-camelcase.*

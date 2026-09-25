@@ -655,15 +655,36 @@ static void ind_slot_audit(struct super_block *sb, struct buffer_head *pbh,
 			atomic_long_read(&n_dev_lost), atomic_long_read(&n_dev_kept));
 }
 
+/*
+ * 0.1.20: only a slot written non-zero is remembered.
+ *
+ * A freed indirect block has its parity recomputed over an empty
+ * block, and the parity of zeros is zeros: a slot legitimately at
+ * zero. 0.1.19 kept the bit and reported it at every later update of
+ * the region, 51 500 times in one generic/476. A slot written all
+ * zero clears the bit instead.
+ */
 static void ind_slot_mark(struct super_block *sb, u64 region_blk,
-			  unsigned int slot)
+			  unsigned int slot, const u8 *slotbuf, size_t stride)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 	unsigned long *map = ind_slot_map(sbi);
+	size_t k;
+	bool nonzero = false;
 
-	if (map && region_blk >= sbi->s_ind_parity_blk)
+	if (!map || region_blk < sbi->s_ind_parity_blk)
+		return;
+	for (k = 0; k < stride; k++)
+		if (slotbuf[k]) {
+			nonzero = true;
+			break;
+		}
+	if (nonzero)
 		set_bit((size_t)(region_blk - sbi->s_ind_parity_blk) *
 			BEAMFS_IND_PARITY_RS_SLOTS + slot, map);
+	else
+		clear_bit((size_t)(region_blk - sbi->s_ind_parity_blk) *
+			  BEAMFS_IND_PARITY_RS_SLOTS + slot, map);
 }
 
 /*
@@ -812,7 +833,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
-	ind_slot_mark(sb, region_blk, offset / (u32)stride);
+	ind_slot_mark(sb, region_blk, offset / (u32)stride, slotbuf, stride);
 
 	/*
 	 * Read it back from the buffer, not from scratch.
