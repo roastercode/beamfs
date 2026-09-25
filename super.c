@@ -2024,6 +2024,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.15");
+MODULE_VERSION("0.1.16");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

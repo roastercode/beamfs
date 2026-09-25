@@ -1701,3 +1701,21 @@ the write carried bytes other than b_data's. The device reads
 folio_address(b_folio) + bh_offset(bh); the module writes b_data. 0.1.15
 compares the two on every parity update, for the region and the
 indirect block, and says the folio order when they differ.
+
+### 3.32 The region decode cache, checked on every hit (0.1.16, diagnostic)
+
+beamfs-xfstests 2.3.35 and 2.3.36 on 0.1.15, generic/476: every bio
+that touches the region zone is the module's own one-block write; the
+105 regions of the undescribed blocks are each written once, right
+after their last update, never read again while mounted, never written
+again, and hold zeros; and every lookup of a region block by number,
+516 772 of them, comes from indparity.c. Nothing else finds these
+buffers, so nothing else writes them. The one code that writes a
+region's 4096 bytes is ind_region_write, from a scratch that is a fresh
+decode of b_data or the per-cpu decode cache. The fresh decode cannot
+regress the region; the cache can, and its key -- block number and
+generation -- names no volume and no mount, while two beamfs volumes
+are mounted during a run and the cache outlives them. 0.1.16 serves no
+hit: it decodes every time and compares the decode with the entry,
+counting hits, hits from another volume, and stale entries, and says
+which devices were involved on each stale one.

@@ -135,6 +135,15 @@ struct ind_region_cache {
 	u64	gen;
 	int	ret;
 	u8	*data;
+	/*
+	 * Which filesystem the decode belongs to. The key above is the
+	 * block number and the generation, and neither names a volume:
+	 * two mounted beamfs volumes have the same region block numbers,
+	 * each with its own generation counting from zero, and the cache
+	 * outlives a mount. Recorded so that a hit across volumes can be
+	 * counted before it can be argued about.
+	 */
+	struct super_block *sb;
 };
 
 static DEFINE_PER_CPU(struct ind_region_cache, ind_rcache);
@@ -180,6 +189,9 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	unsigned int i;
 	int ret = 0;
 	u64 gen_at_read;
+	bool hit_pending;
+	struct super_block *hit_sb;
+	int hit_ret;
 
 	/*
 	 * The same region, decoded a moment ago on this cpu?
@@ -193,19 +205,33 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * the read and the copy can only give a miss, never a wrong hit,
 	 * because the key is checked again after the copy.
 	 */
+	/*
+	 * 0.1.16: a hit is never served. The region is always decoded
+	 * from b_data, and the decode is then compared with what the
+	 * cache would have served.
+	 *
+	 * 2.3.36 on 2026-09-25: every lookup of a region block by number,
+	 * over a whole generic/476, comes from this file -- update, verify,
+	 * the diagnostics -- and every bio touching the zone is the
+	 * module's own one-block write. Nothing else finds these buffers,
+	 * so nothing else writes them. The only code that writes a
+	 * region's 4096 bytes is ind_region_write, from a scratch that is
+	 * either a fresh decode of b_data or this cache. A decode of
+	 * b_data cannot take the region back to an older state. The cache
+	 * can, if it ever answers with a decode that is not of this
+	 * buffer's bytes. Counted here, with the volume the entry came
+	 * from, on every hit.
+	 */
 	{
 		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 		u64 gen = atomic64_read(&sbi->s_ind_parity_gen);
 		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
-		bool hit = c->data && c->blocknr == pbh->b_blocknr &&
-			   c->gen == gen;
-		int cached = c->ret;
 
-		if (hit)
-			memcpy(scratch, c->data, BEAMFS_BLOCK_SIZE);
+		hit_pending = c->data && c->blocknr == pbh->b_blocknr &&
+			      c->gen == gen;
+		hit_sb = c->sb;
+		hit_ret = c->ret;
 		put_cpu_ptr(&ind_rcache);
-		if (hit)
-			return cached;
 	}
 
 	/*
@@ -254,6 +280,50 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * GFP_ATOMIC and a failure that costs nothing: no cache is a
 	 * slower filesystem, not a wrong one.
 	 */
+	if (hit_pending) {
+		static atomic_long_t n_hit, n_cross, n_stale, n_moved;
+		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
+		bool same_key = c->data && c->blocknr == pbh->b_blocknr &&
+				c->gen == gen_at_read;
+		int cmp = same_key ?
+			memcmp(c->data, scratch, BEAMFS_BLOCK_SIZE) : 0;
+		bool zero = false;
+		long hits, cross, stale, moved;
+
+		if (same_key && cmp) {
+			unsigned int k;
+
+			zero = true;
+			for (k = 0; k < BEAMFS_BLOCK_SIZE; k++) {
+				if (c->data[k]) {
+					zero = false;
+					break;
+				}
+			}
+		}
+		put_cpu_ptr(&ind_rcache);
+
+		hits = atomic_long_inc_return(&n_hit);
+		cross = hit_sb != sb ? atomic_long_inc_return(&n_cross) :
+				       atomic_long_read(&n_cross);
+		moved = !same_key ? atomic_long_inc_return(&n_moved) :
+				    atomic_long_read(&n_moved);
+		stale = (same_key && cmp) ? atomic_long_inc_return(&n_stale) :
+					    atomic_long_read(&n_stale);
+		if (same_key && cmp)
+			pr_err_ratelimited("beamfs/diag: region cache: STALE hit on block %llu gen %llu: entry from dev %u:%u (ret %d%s), buffer on dev %u:%u (ret %d), cpu %d\n",
+					   (unsigned long long)pbh->b_blocknr,
+					   (unsigned long long)gen_at_read,
+					   hit_sb ? MAJOR(hit_sb->s_dev) : 0,
+					   hit_sb ? MINOR(hit_sb->s_dev) : 0,
+					   hit_ret, zero ? ", all zero" : "",
+					   MAJOR(sb->s_dev), MINOR(sb->s_dev),
+					   ret, raw_smp_processor_id());
+		if ((hits & 4095) == 0)
+			pr_info("beamfs/diag: region cache: %ld hits, %ld from another volume, %ld stale, %ld replaced under us\n",
+				hits, cross, stale, moved);
+	}
+
 	{
 		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
 
@@ -264,6 +334,7 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 			c->blocknr = pbh->b_blocknr;
 			c->gen = gen_at_read;
 			c->ret = ret;
+			c->sb = sb;
 		}
 		put_cpu_ptr(&ind_rcache);
 	}
