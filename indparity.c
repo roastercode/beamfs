@@ -584,6 +584,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * scratch page instead of two.
 	 */
 	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
+	u8 *pre = NULL;
 
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return;
@@ -678,6 +679,10 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 				BEAMFS_RS_PARITY,
 				BEAMFS_SUBBLOCK_DATA, 1);
 	}
+
+	pre = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	if (pre)
+		memcpy(pre, pbh->b_data, BEAMFS_BLOCK_SIZE);
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
@@ -847,63 +852,109 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * compared -- the difference would be legitimate -- and counted
 	 * as skipped. Every 4096 updates the counts are said.
 	 */
+	/*
+	 * 0.1.18: the same witness, with no window in it.
+	 *
+	 * 0.1.17 found the device disagreeing with b_data 2416 times in
+	 * 389 000 right after a synchronous write, 50 of them all zero,
+	 * no I/O error. But sync_dirty_buffer drops the lock before the
+	 * read-back, and a neighbour slot's update can take it, write and
+	 * clean the region in between: b_data then differs from what was
+	 * read for a good reason. Here the bytes are copied and the write
+	 * submitted under one hold of the lock, and the device is compared
+	 * with that copy -- what this cpu wrote, whatever happened after.
+	 *
+	 * A difference is classified: the image from before this update
+	 * (the write did not land), all zeros, or something else, with the
+	 * number of bytes that differ and the first offset.
+	 */
 	{
-		static atomic_long_t n_same, n_diff, n_zero, n_skip, n_err;
+		static atomic_long_t n_same, n_diff, n_prev, n_zero, n_err;
 		u8 *raw = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-		long same, diff, zero, skip, err;
-		int e;
+		u8 *mem = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+		long same, diff, prev, zero, err;
+		int e = 0;
 
-		e = sync_dirty_buffer(pbh);
-		if (e) {
-			err = atomic_long_inc_return(&n_err);
-			pr_err_ratelimited("beamfs/diag: region %llu: sync write failed: %d\n",
-					   (unsigned long long)region_blk, e);
-		}
-		if (raw && !e) {
-			e = ind_region_raw_read(sb, region_blk, raw);
+		if (raw && mem) {
+			/*
+			 * 7.3 keeps submit_bh and b_end_io to itself: the
+			 * write is a private bio on the buffer's own folio,
+			 * the same bytes the buffer cache would hand the
+			 * device, submitted and waited for under the lock.
+			 * Whatever writeback finds afterwards is clean.
+			 */
+			lock_buffer(pbh);
+			memcpy(mem, pbh->b_data, BEAMFS_BLOCK_SIZE);
+			if (test_clear_buffer_dirty(pbh)) {
+				struct bio *wb = bio_alloc(sb->s_bdev, 1,
+							   REQ_OP_WRITE | REQ_SYNC,
+							   GFP_NOFS);
+
+				wb->bi_iter.bi_sector =
+					region_blk << (sb->s_blocksize_bits - 9);
+				if (bio_add_folio(wb, pbh->b_folio,
+						  BEAMFS_BLOCK_SIZE,
+						  bh_offset(pbh)))
+					e = submit_bio_wait(wb);
+				else
+					e = -EIO;
+				bio_put(wb);
+			}
+			unlock_buffer(pbh);
 			if (e) {
-				err = atomic_long_inc_return(&n_err);
-				pr_err_ratelimited("beamfs/diag: region %llu: raw read failed: %d\n",
-						   (unsigned long long)region_blk, e);
+				atomic_long_inc(&n_err);
+				pr_err_ratelimited("beamfs/diag: region %llu: sync write failed\n",
+						   (unsigned long long)region_blk);
 			} else {
-				lock_buffer(pbh);
-				if (buffer_dirty(pbh)) {
-					skip = atomic_long_inc_return(&n_skip);
-				} else if (memcmp(raw, pbh->b_data, BEAMFS_BLOCK_SIZE) == 0) {
-					same = atomic_long_inc_return(&n_same);
+				e = ind_region_raw_read(sb, region_blk, raw);
+				if (e) {
+					atomic_long_inc(&n_err);
+					pr_err_ratelimited("beamfs/diag: region %llu: raw read failed: %d\n",
+							   (unsigned long long)region_blk, e);
+				} else if (memcmp(raw, mem, BEAMFS_BLOCK_SIZE) == 0) {
+					atomic_long_inc(&n_same);
 				} else {
-					unsigned int k;
+					unsigned int k, nd = 0, first = BEAMFS_BLOCK_SIZE;
 					bool allzero = true;
+					bool isprev = pre &&
+						memcmp(raw, pre, BEAMFS_BLOCK_SIZE) == 0;
 
 					for (k = 0; k < BEAMFS_BLOCK_SIZE; k++) {
-						if (raw[k]) {
+						if (raw[k])
 							allzero = false;
-							break;
+						if (raw[k] != mem[k]) {
+							nd++;
+							if (first == BEAMFS_BLOCK_SIZE)
+								first = k;
 						}
 					}
-					diff = atomic_long_inc_return(&n_diff);
+					atomic_long_inc(&n_diff);
+					if (isprev)
+						atomic_long_inc(&n_prev);
 					if (allzero)
-						zero = atomic_long_inc_return(&n_zero);
-					pr_err_ratelimited("beamfs/diag: region %llu (indirect %llu): device holds %s right after the write; b_data state=%#lx\n",
+						atomic_long_inc(&n_zero);
+					pr_err_ratelimited("beamfs/diag: region %llu (indirect %llu, slot at %u): device holds %s after the write: %u bytes differ from offset %u\n",
 							   (unsigned long long)region_blk,
-							   (unsigned long long)phys,
+							   (unsigned long long)phys, offset,
+							   isprev ? "the PREVIOUS image" :
 							   allzero ? "ZEROS" : "OTHER BYTES",
-							   pbh->b_state);
+							   nd, first);
 				}
-				unlock_buffer(pbh);
 			}
 		}
 		kfree(raw);
+		kfree(mem);
 
 		same = atomic_long_read(&n_same);
 		diff = atomic_long_read(&n_diff);
+		prev = atomic_long_read(&n_prev);
 		zero = atomic_long_read(&n_zero);
-		skip = atomic_long_read(&n_skip);
 		err = atomic_long_read(&n_err);
-		if (((same + diff + skip + err) & 4095) == 0)
-			pr_info("beamfs/diag: device read-back: %ld same, %ld different (%ld all zero), %ld skipped (re-dirtied), %ld errors\n",
-				same, diff, zero, skip, err);
+		if (((same + diff + err) & 4095) == 0)
+			pr_info("beamfs/diag: device read-back: %ld same, %ld different (%ld previous image, %ld all zero), %ld errors\n",
+				same, diff, prev, zero, err);
 	}
+	kfree(pre);
 	brelse(pbh);
 }
 

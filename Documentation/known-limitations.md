@@ -1732,3 +1732,15 @@ back from the device past the page cache, and compares byte for byte;
 buffers re-dirtied by another cpu in between are counted as skipped.
 Identical every time: the zeros arrive later, with no write the block
 layer sees. Different at once: the write path or the device.
+
+### 3.34 The device read back under one hold of the lock (0.1.18, diagnostic)
+
+0.1.17 on generic/476: 389 000 region writes followed by a raw read of
+the device, 2416 of them coming back different, 50 all zero, no I/O
+error. sync_dirty_buffer drops the lock before the read-back, so a
+neighbour's update between the two makes b_data differ for a good
+reason. 0.1.18 copies the bytes and submits the write under one hold
+of the lock, reads the device back, and compares with the copy; a
+difference is classified as the image from before this update (the
+write did not land), all zeros, or other bytes, with the count of
+differing bytes and the first offset.
