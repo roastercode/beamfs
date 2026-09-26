@@ -28,7 +28,7 @@
 #include <sys/sysmacros.h>
 #include <sys/random.h>
 
-#define MKFS_BEAMFS_VERSION "0.1.3"
+#define MKFS_BEAMFS_VERSION "0.1.4"
 #include <dirent.h>
 
 /*
@@ -1086,7 +1086,24 @@ int main(int argc, char *argv[])
 			break;
 		case 'N':
 			{
-				uint64_t n = (uint64_t)atoll(optarg);
+				/*
+				 * atoll turned "-N abc" into -N 0 and "-N 12x"
+				 * into -N 12 without a word, and the volume
+				 * came out with one inode block. A count is a
+				 * number, whole, and not zero.
+				 */
+				char *endp = NULL;
+				unsigned long long parsed;
+
+				errno = 0;
+				parsed = strtoull(optarg, &endp, 10);
+				if (errno != 0 || endp == optarg || *endp != '\0' ||
+				    parsed == 0) {
+					fprintf(stderr, "mkfs.beamfs: -N: '%s' is not an inode count\n",
+						optarg);
+					return 1;
+				}
+				uint64_t n = (uint64_t)parsed;
 				uint64_t inodes_per_blk = BEAMFS_BLOCK_SIZE
 					/ sizeof(struct beamfs_inode);
 				inode_table_len = (n + inodes_per_blk - 1)
@@ -1322,12 +1339,13 @@ int main(int argc, char *argv[])
 		return 1;
 
 	struct stat st;
-	if (fstat(fd, &st) < 0) { perror("fstat"); return 1; }
+	if (fstat(fd, &st) < 0) { perror("fstat"); close(fd); return 1; }
 
 	uint64_t total_bytes;
 	if (S_ISBLK(st.st_mode)) {
 		if (ioctl(fd, BLKGETSIZE64, &total_bytes) < 0) {
 			perror("ioctl BLKGETSIZE64");
+			close(fd);
 			return 1;
 		}
 	} else {
@@ -1350,11 +1368,13 @@ int main(int argc, char *argv[])
 		if (!endp || *endp != '\0' || want == 0) {
 			fprintf(stderr, "beamfs: bad block count '%s'\n",
 				argv[optind + 1]);
+			close(fd);
 			return 1;
 		}
 		if (want * BEAMFS_BLOCK_SIZE > total_bytes) {
 			fprintf(stderr,
 				"beamfs: %llu blocks exceeds the device\n", want);
+			close(fd);
 			return 1;
 		}
 		total_bytes = want * (uint64_t)BEAMFS_BLOCK_SIZE;
@@ -1363,6 +1383,7 @@ int main(int argc, char *argv[])
 	uint64_t total_blocks = total_bytes / BEAMFS_BLOCK_SIZE;
 	if (total_blocks < 16) {
 		fprintf(stderr, "beamfs: image too small (need >= 16 blocks)\n");
+		close(fd);
 		return 1;
 	}
 
