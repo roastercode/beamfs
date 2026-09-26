@@ -196,12 +196,6 @@ struct beamfs_sb_info {
 	u64                       s_ind_parity_blk;
 	u32                       s_ind_parity_len;
 	u32                       s_ind_parity_mode;
-	/*
-	 * Diagnostic (0.1.19): one bit per slot of every region, set when
-	 * this mount has written that slot. Allocated on first use,
-	 * freed in put_super.
-	 */
-	unsigned long            *s_ind_slot_seen;
 
 	/* Error budget region, cached from the superblock. */
 	u64                       s_budget_blk;
@@ -682,11 +676,6 @@ void  beamfs_scratch_put(struct super_block *sb, void *p);
  * logs, the rest are ignored.
  */
 void beamfs_fail(struct super_block *sb, const char *where, int err);
-
-/* Diagnostics at the point of detection: is the buffer still the cache's? */
-void beamfs_bh_diag(struct super_block *sb, u64 blk, const char *why);
-bool beamfs_bh_attached(struct super_block *sb, struct buffer_head *bh,
-			const char *who);
 
 
 /*

@@ -146,9 +146,6 @@ void beamfs_tc_store(struct super_block *sb, unsigned long ino, u64 parent,
 		       found->who ? found->who : "?",
 		       (unsigned long long)child, ino, who);
 		WARN_ONCE(1, "beamfs: indirect slot lost its pointer\n");
-		beamfs_bh_diag(sb, parent, "lost pointer: parent");
-		if (found->child)
-			beamfs_bh_diag(sb, found->child, "lost pointer: child");
 		spin_lock(&sbi->s_tc_lock);
 		beamfs_tc_unindex_child(found);
 		found->child = child;

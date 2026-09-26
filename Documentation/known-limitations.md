@@ -1766,3 +1766,24 @@ the same slot at every later update of its region: a freed indirect
 block has its parity recomputed over an empty block, and the parity
 of zeros is zeros. A slot written all zero now clears its bit. What
 remains reported is a slot written non-zero and found zero later.
+
+### 3.37 Diagnostics withdrawn, 3.28 left open with its file (0.1.21)
+
+0.1.12 to 0.1.20 were measurement builds. What they established, each
+by a measurement and not by reasoning: the slot is in b_data at the
+update (0.1.13, 0.1.14); b_data is the address the bio carries
+(0.1.15); the decode cache never serves a stale region (0.1.16); the
+device returns exactly what was written, read back past the page cache
+under the lock (0.1.18, 405 465 of 405 504, the rest a neighbour's
+update in the window); no slot written non-zero is ever missing from a
+later fresh decode of its region (0.1.20, 196 608 checks); every bio
+touching the region zone is a one-block write and nothing else looks
+those buffers up (beamfs-xfstests 2.3.35, 2.3.36); the bare device
+keeps 16 million random writes (2.3.41); fsck reads the same zeros
+through the page cache, after flushbufs, past the page cache, and in
+the host's backing file (2.3.43, 2.3.44). About a hundred indirect
+blocks per generic/476 still end with an empty parity slot on the
+medium, and no witness has yet seen the bytes change. The code goes
+back to 0.1.11, which keeps the one real fix (the generation bumped
+under the lock). fsck.beamfs 0.1.7 counts those blocks as damage, so
+generic/476 fails the checker until this is closed.

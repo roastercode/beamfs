@@ -11,7 +11,6 @@
 #include <linux/fs_context.h>
 #include <linux/slab.h>
 #include <linux/buffer_head.h>
-#include <linux/pagemap.h>
 #include <linux/ktime.h>
 #include <linux/statfs.h>
 #include "beamfs.h"
@@ -170,8 +169,6 @@ static void beamfs_put_super(struct super_block *sb)
 		sbi->s_wb_pages = NULL;
 		mempool_destroy(sbi->s_scratch_pool);
 		sbi->s_scratch_pool = NULL;
-		kfree(sbi->s_ind_slot_seen);
-		sbi->s_ind_slot_seen = NULL;
 		kvfree(sbi->s_sb_rs_staging);
 		sbi->s_sb_rs_staging = NULL;
 		brelse(sbi->s_sbh);
@@ -927,110 +924,6 @@ void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
  * unmounted and checked; pretending otherwise is how a bad device
  * becomes a corrupt filesystem.
  */
-/*
- * beamfs_bh_diag -- what the buffer cache holds for @blk, said at the
- * moment a check finds memory and medium disagreeing.
- *
- * generic/476 on 2026-09-23: parity slots updated in a region buffer,
- * the region written to the device afterwards, and the medium holding
- * the zeros mkfs left -- 43 of 97 regions entirely zero; and treecheck
- * catching an indirect block whose installed pointer read back as 0.
- * Both are a buffer whose bytes went back to what the device held. The
- * one mechanism the kernel offers for that is a folio removed from the
- * block device's mapping while a buffer_head on it is still held: the
- * holder writes into an orphan, the next reader gets a fresh folio from
- * the device, and whichever of the two is written last wins.
- *
- * So, at the point of detection: the buffer the cache hands out for
- * the block, its state and reference count, its folio, and whether
- * that folio is the one the block device's mapping holds at the
- * block's index. "DIFFERENT" or "none" is the orphan.
- */
-void beamfs_bh_diag(struct super_block *sb, u64 blk, const char *why)
-{
-	struct address_space *bdmap = sb->s_bdev->bd_mapping;
-	struct buffer_head *bh = sb_find_get_block(sb, blk);
-	struct folio *folio, *cached;
-	pgoff_t index;
-	const char *verdict;
-
-	if (!bh) {
-		pr_err("beamfs/diag: %s: block %llu: no buffer in the cache\n",
-		       why, (unsigned long long)blk);
-		return;
-	}
-	folio = bh->b_folio;
-	index = (pgoff_t)(blk >> (PAGE_SHIFT - sb->s_blocksize_bits));
-	cached = filemap_get_folio(bdmap, index);
-	if (IS_ERR(cached))
-		verdict = "none";
-	else if (cached == folio)
-		verdict = "same";
-	else
-		verdict = "DIFFERENT";
-	pr_err("beamfs/diag: %s: block %llu: bh=%p state=%#lx count=%d mmb=%p folio=%p mapping=%p bdev-mapping=%p index=%lu uptodate=%d dirty=%d locked=%d | mapping[%lu]=%p (%s)\n",
-	       why, (unsigned long long)blk, bh, bh->b_state,
-	       atomic_read(&bh->b_count), bh->b_mmb, folio,
-	       folio ? folio->mapping : NULL, bdmap,
-	       (unsigned long)(folio ? folio->index : 0),
-	       buffer_uptodate(bh), buffer_dirty(bh), buffer_locked(bh),
-	       (unsigned long)index, IS_ERR(cached) ? NULL : cached, verdict);
-	if (!IS_ERR(cached))
-		folio_put(cached);
-	brelse(bh);
-}
-
-/*
- * Cheap enough to run on every parity update: the buffer about to be
- * written into must sit on a folio the block device's mapping still
- * owns. An orphan here is the defect caught before it costs anything.
- */
-bool beamfs_bh_attached(struct super_block *sb, struct buffer_head *bh,
-			const char *who)
-{
-	struct folio *folio = bh->b_folio;
-	static atomic_long_t n_same, n_apart;
-
-	/*
-	 * The bytes the device receives are folio_address(b_folio) +
-	 * bh_offset(bh): that is what __bh_submit hands the bio. The
-	 * bytes the module writes are at b_data. 0.1.13 and 0.1.14 showed
-	 * the slot in b_data from the write to the dirtying, 802 816
-	 * times out of 802 816, and the medium holds zeros for the same
-	 * region written afterwards. If the two addresses ever differ,
-	 * the device is reading beside what was written.
-	 */
-	if (folio) {
-		u8 *dma = (u8 *)folio_address(folio) + bh_offset(bh);
-		long same, apart;
-
-		if (dma == (u8 *)bh->b_data) {
-			same = atomic_long_inc_return(&n_same);
-			apart = atomic_long_read(&n_apart);
-		} else {
-			apart = atomic_long_inc_return(&n_apart);
-			same = atomic_long_read(&n_same);
-			pr_err_ratelimited("beamfs/diag: %s: block %llu: b_data %p but folio %p order %u + bh_offset %lu = %p; state=%#lx count=%d\n",
-					   who, (unsigned long long)bh->b_blocknr,
-					   bh->b_data, folio, folio_order(folio),
-					   bh_offset(bh), dma, bh->b_state,
-					   atomic_read(&bh->b_count));
-		}
-		if (((same + apart) & 4095) == 0)
-			pr_info("beamfs/diag: b_data vs folio: %ld same, %ld apart\n",
-				same, apart);
-	}
-
-	if (folio && folio->mapping == sb->s_bdev->bd_mapping)
-		return true;
-	pr_err_ratelimited("beamfs/diag: %s: block %llu: buffer ORPHANED (folio=%p mapping=%p, bdev mapping %p) state=%#lx count=%d\n",
-			   who, (unsigned long long)bh->b_blocknr, folio,
-			   folio ? folio->mapping : NULL,
-			   sb->s_bdev->bd_mapping, bh->b_state,
-			   atomic_read(&bh->b_count));
-	return false;
-}
-
 void beamfs_fail(struct super_block *sb, const char *where, int err)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
@@ -2026,6 +1919,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.20");
+MODULE_VERSION("0.1.21");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

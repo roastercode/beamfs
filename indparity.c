@@ -31,7 +31,6 @@
 #include <linux/buffer_head.h>
 #include <linux/crc32.h>
 #include <linux/slab.h>
-#include <linux/bio.h>
 #include "beamfs.h"
 #include "beamfs_trace.h"
 
@@ -136,15 +135,6 @@ struct ind_region_cache {
 	u64	gen;
 	int	ret;
 	u8	*data;
-	/*
-	 * Which filesystem the decode belongs to. The key above is the
-	 * block number and the generation, and neither names a volume:
-	 * two mounted beamfs volumes have the same region block numbers,
-	 * each with its own generation counting from zero, and the cache
-	 * outlives a mount. Recorded so that a hit across volumes can be
-	 * counted before it can be argued about.
-	 */
-	struct super_block *sb;
 };
 
 static DEFINE_PER_CPU(struct ind_region_cache, ind_rcache);
@@ -190,9 +180,6 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	unsigned int i;
 	int ret = 0;
 	u64 gen_at_read;
-	bool hit_pending;
-	struct super_block *hit_sb;
-	int hit_ret;
 
 	/*
 	 * The same region, decoded a moment ago on this cpu?
@@ -206,33 +193,19 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * the read and the copy can only give a miss, never a wrong hit,
 	 * because the key is checked again after the copy.
 	 */
-	/*
-	 * 0.1.16: a hit is never served. The region is always decoded
-	 * from b_data, and the decode is then compared with what the
-	 * cache would have served.
-	 *
-	 * 2.3.36 on 2026-09-25: every lookup of a region block by number,
-	 * over a whole generic/476, comes from this file -- update, verify,
-	 * the diagnostics -- and every bio touching the zone is the
-	 * module's own one-block write. Nothing else finds these buffers,
-	 * so nothing else writes them. The only code that writes a
-	 * region's 4096 bytes is ind_region_write, from a scratch that is
-	 * either a fresh decode of b_data or this cache. A decode of
-	 * b_data cannot take the region back to an older state. The cache
-	 * can, if it ever answers with a decode that is not of this
-	 * buffer's bytes. Counted here, with the volume the entry came
-	 * from, on every hit.
-	 */
 	{
 		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 		u64 gen = atomic64_read(&sbi->s_ind_parity_gen);
 		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
+		bool hit = c->data && c->blocknr == pbh->b_blocknr &&
+			   c->gen == gen;
+		int cached = c->ret;
 
-		hit_pending = c->data && c->blocknr == pbh->b_blocknr &&
-			      c->gen == gen;
-		hit_sb = c->sb;
-		hit_ret = c->ret;
+		if (hit)
+			memcpy(scratch, c->data, BEAMFS_BLOCK_SIZE);
 		put_cpu_ptr(&ind_rcache);
+		if (hit)
+			return cached;
 	}
 
 	/*
@@ -281,50 +254,6 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * GFP_ATOMIC and a failure that costs nothing: no cache is a
 	 * slower filesystem, not a wrong one.
 	 */
-	if (hit_pending) {
-		static atomic_long_t n_hit, n_cross, n_stale, n_moved;
-		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
-		bool same_key = c->data && c->blocknr == pbh->b_blocknr &&
-				c->gen == gen_at_read;
-		int cmp = same_key ?
-			memcmp(c->data, scratch, BEAMFS_BLOCK_SIZE) : 0;
-		bool zero = false;
-		long hits, cross, stale, moved;
-
-		if (same_key && cmp) {
-			unsigned int k;
-
-			zero = true;
-			for (k = 0; k < BEAMFS_BLOCK_SIZE; k++) {
-				if (c->data[k]) {
-					zero = false;
-					break;
-				}
-			}
-		}
-		put_cpu_ptr(&ind_rcache);
-
-		hits = atomic_long_inc_return(&n_hit);
-		cross = hit_sb != sb ? atomic_long_inc_return(&n_cross) :
-				       atomic_long_read(&n_cross);
-		moved = !same_key ? atomic_long_inc_return(&n_moved) :
-				    atomic_long_read(&n_moved);
-		stale = (same_key && cmp) ? atomic_long_inc_return(&n_stale) :
-					    atomic_long_read(&n_stale);
-		if (same_key && cmp)
-			pr_err_ratelimited("beamfs/diag: region cache: STALE hit on block %llu gen %llu: entry from dev %u:%u (ret %d%s), buffer on dev %u:%u (ret %d), cpu %d\n",
-					   (unsigned long long)pbh->b_blocknr,
-					   (unsigned long long)gen_at_read,
-					   hit_sb ? MAJOR(hit_sb->s_dev) : 0,
-					   hit_sb ? MINOR(hit_sb->s_dev) : 0,
-					   hit_ret, zero ? ", all zero" : "",
-					   MAJOR(sb->s_dev), MINOR(sb->s_dev),
-					   ret, raw_smp_processor_id());
-		if ((hits & 4095) == 0)
-			pr_info("beamfs/diag: region cache: %ld hits, %ld from another volume, %ld stale, %ld replaced under us\n",
-				hits, cross, stale, moved);
-	}
-
 	{
 		struct ind_region_cache *c = get_cpu_ptr(&ind_rcache);
 
@@ -335,7 +264,6 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 			c->blocknr = pbh->b_blocknr;
 			c->gen = gen_at_read;
 			c->ret = ret;
-			c->sb = sb;
 		}
 		put_cpu_ptr(&ind_rcache);
 	}
@@ -480,36 +408,6 @@ static void ind_region_selfcheck(struct super_block *sb,
 }
 #endif
 
-/*
- * Read @blk from the device into @buf, past the page cache.
- *
- * The buffer cache answers with what memory holds; this asks the
- * device what it holds. A private page and a private bio, so nothing
- * in the cache is touched and nothing in the cache is trusted.
- */
-static int ind_region_raw_read(struct super_block *sb, u64 blk, u8 *buf)
-{
-	struct page *page = alloc_page(GFP_NOFS);
-	struct bio *bio;
-	int ret;
-
-	if (!page)
-		return -ENOMEM;
-	bio = bio_alloc(sb->s_bdev, 1, REQ_OP_READ, GFP_NOFS);
-	bio->bi_iter.bi_sector = blk << (sb->s_blocksize_bits - 9);
-	if (bio_add_page(bio, page, BEAMFS_BLOCK_SIZE, 0) != BEAMFS_BLOCK_SIZE) {
-		bio_put(bio);
-		__free_page(page);
-		return -EIO;
-	}
-	ret = submit_bio_wait(bio);
-	bio_put(bio);
-	if (!ret)
-		memcpy(buf, page_address(page), BEAMFS_BLOCK_SIZE);
-	__free_page(page);
-	return ret;
-}
-
 static void ind_region_write(struct super_block *sb,
 			     struct buffer_head *pbh, const u8 *scratch)
 {
@@ -541,150 +439,6 @@ static void ind_region_write(struct super_block *sb,
 #else
 	(void)sb;
 #endif
-}
-
-/*
- * 0.1.19: has a slot this mount wrote gone back to zero?
- *
- * The image of generic/476 on 2026-09-25, read at the exact place the
- * kernel uses: for 61 undescribed blocks the region holds other slots,
- * written after theirs by neighbours, and not theirs; for 48 the
- * region is all zero. Every one of those writes was read back from the
- * device identical (0.1.18). So between a slot's verified write and
- * the next update of its region -- with no bio, no read, no lookup in
- * between (beamfs-xfstests 2.3.35, 2.3.36, 2.3.38) -- the buffer's
- * bytes lost the slot, and the neighbour's fresh decode carried the
- * loss to the medium.
- *
- * This catches it at that next update: every slot of the region this
- * mount has already written is checked in the fresh decode, and one
- * found all zero is said at once, with the buffer's state and whether
- * the device, read directly, still holds it (memory alone regressed)
- * or not (a write nobody counted).
- */
-static bool ind_slot_all_zero(const u8 *buf, u32 off, size_t stride)
-{
-	u8 s[BEAMFS_IND_PARITY_RS_BYTES];
-	size_t k;
-
-	ind_slot_gather(buf, off, stride, s);
-	for (k = 0; k < stride; k++)
-		if (s[k])
-			return false;
-	return true;
-}
-
-static unsigned long *ind_slot_map(struct beamfs_sb_info *sbi)
-{
-	unsigned long *map = READ_ONCE(sbi->s_ind_slot_seen);
-	size_t bits;
-
-	if (map)
-		return map;
-	bits = (size_t)sbi->s_ind_parity_len * BEAMFS_IND_PARITY_RS_SLOTS;
-	map = kzalloc(BITS_TO_LONGS(bits) * sizeof(long), GFP_NOFS);
-	if (!map)
-		return NULL;
-	if (cmpxchg(&sbi->s_ind_slot_seen, NULL, map) != NULL) {
-		kfree(map);
-		map = READ_ONCE(sbi->s_ind_slot_seen);
-	}
-	return map;
-}
-
-static void ind_slot_audit(struct super_block *sb, struct buffer_head *pbh,
-			   const u8 *scratch, u64 region_blk, unsigned int slot,
-			   u64 phys, size_t stride)
-{
-	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-	unsigned long *map = ind_slot_map(sbi);
-	static atomic_long_t n_checked, n_lost, n_dev_lost, n_dev_kept;
-	size_t base;
-	unsigned int j;
-
-	if (!map || region_blk < sbi->s_ind_parity_blk)
-		return;
-	base = (size_t)(region_blk - sbi->s_ind_parity_blk) *
-	       BEAMFS_IND_PARITY_RS_SLOTS;
-	for (j = 0; j < BEAMFS_IND_PARITY_RS_SLOTS; j++) {
-		u32 off = j * (u32)stride;
-		long lost, checked;
-
-		if (j == slot || !test_bit(base + j, map))
-			continue;
-		if (off + stride > BEAMFS_DATA_INLINE_BYTES)
-			break;
-		checked = atomic_long_inc_return(&n_checked);
-		if (!ind_slot_all_zero(scratch, off, stride))
-			continue;
-
-		lost = atomic_long_inc_return(&n_lost);
-		{
-			u8 *raw = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-			const char *dev = "device not read";
-			bool devzero = false, devall = false;
-			unsigned int k;
-
-			if (raw && !ind_region_raw_read(sb, region_blk, raw)) {
-				devzero = ind_slot_all_zero(raw, off, stride);
-				devall = true;
-				for (k = 0; k < BEAMFS_BLOCK_SIZE; k++)
-					if (raw[k]) {
-						devall = false;
-						break;
-					}
-				if (devzero)
-					atomic_long_inc(&n_dev_lost);
-				else
-					atomic_long_inc(&n_dev_kept);
-				dev = devzero ? (devall ? "device: slot ZERO, whole region zero" :
-						 "device: slot ZERO too") :
-					"device STILL HOLDS the slot";
-			}
-			kfree(raw);
-			pr_err("beamfs/diag: region %llu slot %u, written earlier this mount, is ZERO in the fresh decode at the update of indirect %llu (slot %u); %s; buffer state=%#lx count=%d mmb=%p folio=%p; %ld lost of %ld checked\n",
-			       (unsigned long long)region_blk, j,
-			       (unsigned long long)phys, slot, dev,
-			       pbh->b_state, atomic_read(&pbh->b_count),
-			       pbh->b_mmb, pbh->b_folio, lost, checked);
-		}
-	}
-	if ((atomic_long_read(&n_checked) & 65535) == 0)
-		pr_info("beamfs/diag: slot audit: %ld checked, %ld lost in memory (%ld lost on the device too, %ld kept by the device)\n",
-			atomic_long_read(&n_checked), atomic_long_read(&n_lost),
-			atomic_long_read(&n_dev_lost), atomic_long_read(&n_dev_kept));
-}
-
-/*
- * 0.1.20: only a slot written non-zero is remembered.
- *
- * A freed indirect block has its parity recomputed over an empty
- * block, and the parity of zeros is zeros: a slot legitimately at
- * zero. 0.1.19 kept the bit and reported it at every later update of
- * the region, 51 500 times in one generic/476. A slot written all
- * zero clears the bit instead.
- */
-static void ind_slot_mark(struct super_block *sb, u64 region_blk,
-			  unsigned int slot, const u8 *slotbuf, size_t stride)
-{
-	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
-	unsigned long *map = ind_slot_map(sbi);
-	size_t k;
-	bool nonzero = false;
-
-	if (!map || region_blk < sbi->s_ind_parity_blk)
-		return;
-	for (k = 0; k < stride; k++)
-		if (slotbuf[k]) {
-			nonzero = true;
-			break;
-		}
-	if (nonzero)
-		set_bit((size_t)(region_blk - sbi->s_ind_parity_blk) *
-			BEAMFS_IND_PARITY_RS_SLOTS + slot, map);
-	else
-		clear_bit((size_t)(region_blk - sbi->s_ind_parity_blk) *
-			  BEAMFS_IND_PARITY_RS_SLOTS + slot, map);
 }
 
 /*
@@ -728,7 +482,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * scratch page instead of two.
 	 */
 	u8 slotbuf[BEAMFS_IND_PARITY_RS_BYTES];
-	u8 *pre = NULL;
 
 	if (!ind_parity_slot(sb, phys, &region_blk, &offset, &stride))
 		return;
@@ -742,9 +495,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 				   (unsigned long long)phys);
 		return;
 	}
-
-	(void)beamfs_bh_attached(sb, pbh, "parity update: region");
-	(void)beamfs_bh_attached(sb, bh, "parity update: indirect");
 
 	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
@@ -795,9 +545,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		return;
 	}
 
-	ind_slot_audit(sb, pbh, scratch, region_blk, offset / (u32)stride,
-		       phys, stride);
-
 	ind_slot_gather(scratch, offset, stride, slotbuf);
 
 	if (sbi->s_ind_parity_mode == BEAMFS_IND_PARITY_CRC) {
@@ -827,49 +574,8 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 				BEAMFS_SUBBLOCK_DATA, 1);
 	}
 
-	pre = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-	if (pre)
-		memcpy(pre, pbh->b_data, BEAMFS_BLOCK_SIZE);
-
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
 	ind_region_write(sb, pbh, scratch);
-	ind_slot_mark(sb, region_blk, offset / (u32)stride, slotbuf, stride);
-
-	/*
-	 * Read it back from the buffer, not from scratch.
-	 *
-	 * parity.bt 2.3.33 on 2026-09-23, reading b_data at the
-	 * mark_buffer_dirty that follows this function: for 30% of
-	 * updates, uniformly over the 14 slots, the slot just written
-	 * was not there -- and fsck later found it on the medium all the
-	 * same. Either the probe reads beside the buffer, or this
-	 * function writes beside it and the medium gets the slot some
-	 * other way. The buffer is the arbiter: the slot is gathered
-	 * back from b_data, through the same interleave, and compared
-	 * with what was scattered in. Counted, and said every 4096
-	 * updates so the rate is known without a rate limit hiding it.
-	 */
-	{
-		static atomic_long_t n_ok, n_missing;
-		u8 back[BEAMFS_IND_PARITY_RS_BYTES];
-		long ok, missing;
-
-		ind_slot_gather((const u8 *)pbh->b_data, offset, stride, back);
-		if (memcmp(back, slotbuf, stride) == 0) {
-			ok = atomic_long_inc_return(&n_ok);
-			missing = atomic_long_read(&n_missing);
-		} else {
-			missing = atomic_long_inc_return(&n_missing);
-			ok = atomic_long_read(&n_ok);
-			pr_err_ratelimited("beamfs/diag: parity update: slot of indirect %llu not in region %llu after ind_region_write (offset %u, b_data %p, folio %p)\n",
-					   (unsigned long long)phys,
-					   (unsigned long long)region_blk,
-					   offset, pbh->b_data, pbh->b_folio);
-		}
-		if (((ok + missing) & 4095) == 0)
-			pr_info("beamfs/diag: parity self-check: %ld slots read back, %ld missing\n",
-				ok, missing);
-	}
 	/* The parity now describes this copy. */
 	set_buffer_beamfs_verified(bh);
 
@@ -919,40 +625,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	beamfs_ind_parity_touched(sbi);
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
-
-	/*
-	 * And once more, from here: after the lock is dropped and just
-	 * before the buffer is marked dirty -- the instant parity.bt reads
-	 * b_data, and where it found the slot absent for 30% of updates
-	 * while the read-back under the lock (0.1.13) found it 401 408
-	 * times out of 401 408. If it is absent here too, the bytes change
-	 * in this window and the probe is right; if never, the probe is
-	 * wrong. On an absence, what the buffer looks like now.
-	 */
-	{
-		static atomic_long_t n_ok2, n_missing2;
-		u8 back[BEAMFS_IND_PARITY_RS_BYTES];
-		long ok, missing;
-
-		ind_slot_gather((const u8 *)pbh->b_data, offset, stride, back);
-		if (memcmp(back, slotbuf, stride) == 0) {
-			ok = atomic_long_inc_return(&n_ok2);
-			missing = atomic_long_read(&n_missing2);
-		} else {
-			missing = atomic_long_inc_return(&n_missing2);
-			ok = atomic_long_read(&n_ok2);
-			pr_err_ratelimited("beamfs/diag: parity update: slot of indirect %llu gone from region %llu between unlock and dirty (locked=%d dirty=%d uptodate=%d count=%d, cpu %d)\n",
-					   (unsigned long long)phys,
-					   (unsigned long long)region_blk,
-					   buffer_locked(pbh), buffer_dirty(pbh),
-					   buffer_uptodate(pbh),
-					   atomic_read(&pbh->b_count),
-					   raw_smp_processor_id());
-		}
-		if (((ok + missing) & 4095) == 0)
-			pr_info("beamfs/diag: parity self-check after unlock: %ld present, %ld gone\n",
-				ok, missing);
-	}
 	/*
 	 * On the inode's list when there is one, so writeback carries it
 	 * with the block it describes. Without an inode -- the scrubber
@@ -982,127 +654,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	} else {
 		mark_buffer_dirty(pbh);
 	}
-
-	/*
-	 * 0.1.17: does the device hold what was just written?
-	 *
-	 * Everything before this point is established: the slot is in
-	 * b_data (0.1.13, 0.1.14), b_data is the address the bio carries
-	 * (0.1.15), the cache never served a stale decode (0.1.16), every
-	 * bio touching the zone is one of these writes and nothing else
-	 * looks the buffer up (beamfs-xfstests 2.3.35, 2.3.36) -- and the
-	 * medium holds zeros for a hundred regions after their one write.
-	 * What has not been seen is the medium right after that write.
-	 *
-	 * So the region is written now, synchronously, and read back from
-	 * the device past the page cache, and the two are compared byte
-	 * for byte. A buffer another cpu re-dirtied in between is not
-	 * compared -- the difference would be legitimate -- and counted
-	 * as skipped. Every 4096 updates the counts are said.
-	 */
-	/*
-	 * 0.1.18: the same witness, with no window in it.
-	 *
-	 * 0.1.17 found the device disagreeing with b_data 2416 times in
-	 * 389 000 right after a synchronous write, 50 of them all zero,
-	 * no I/O error. But sync_dirty_buffer drops the lock before the
-	 * read-back, and a neighbour slot's update can take it, write and
-	 * clean the region in between: b_data then differs from what was
-	 * read for a good reason. Here the bytes are copied and the write
-	 * submitted under one hold of the lock, and the device is compared
-	 * with that copy -- what this cpu wrote, whatever happened after.
-	 *
-	 * A difference is classified: the image from before this update
-	 * (the write did not land), all zeros, or something else, with the
-	 * number of bytes that differ and the first offset.
-	 */
-	{
-		static atomic_long_t n_same, n_diff, n_prev, n_zero, n_err;
-		u8 *raw = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-		u8 *mem = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
-		long same, diff, prev, zero, err;
-		int e = 0;
-
-		if (raw && mem) {
-			/*
-			 * 7.3 keeps submit_bh and b_end_io to itself: the
-			 * write is a private bio on the buffer's own folio,
-			 * the same bytes the buffer cache would hand the
-			 * device, submitted and waited for under the lock.
-			 * Whatever writeback finds afterwards is clean.
-			 */
-			lock_buffer(pbh);
-			memcpy(mem, pbh->b_data, BEAMFS_BLOCK_SIZE);
-			if (test_clear_buffer_dirty(pbh)) {
-				struct bio *wb = bio_alloc(sb->s_bdev, 1,
-							   REQ_OP_WRITE | REQ_SYNC,
-							   GFP_NOFS);
-
-				wb->bi_iter.bi_sector =
-					region_blk << (sb->s_blocksize_bits - 9);
-				if (bio_add_folio(wb, pbh->b_folio,
-						  BEAMFS_BLOCK_SIZE,
-						  bh_offset(pbh)))
-					e = submit_bio_wait(wb);
-				else
-					e = -EIO;
-				bio_put(wb);
-			}
-			unlock_buffer(pbh);
-			if (e) {
-				atomic_long_inc(&n_err);
-				pr_err_ratelimited("beamfs/diag: region %llu: sync write failed\n",
-						   (unsigned long long)region_blk);
-			} else {
-				e = ind_region_raw_read(sb, region_blk, raw);
-				if (e) {
-					atomic_long_inc(&n_err);
-					pr_err_ratelimited("beamfs/diag: region %llu: raw read failed: %d\n",
-							   (unsigned long long)region_blk, e);
-				} else if (memcmp(raw, mem, BEAMFS_BLOCK_SIZE) == 0) {
-					atomic_long_inc(&n_same);
-				} else {
-					unsigned int k, nd = 0, first = BEAMFS_BLOCK_SIZE;
-					bool allzero = true;
-					bool isprev = pre &&
-						memcmp(raw, pre, BEAMFS_BLOCK_SIZE) == 0;
-
-					for (k = 0; k < BEAMFS_BLOCK_SIZE; k++) {
-						if (raw[k])
-							allzero = false;
-						if (raw[k] != mem[k]) {
-							nd++;
-							if (first == BEAMFS_BLOCK_SIZE)
-								first = k;
-						}
-					}
-					atomic_long_inc(&n_diff);
-					if (isprev)
-						atomic_long_inc(&n_prev);
-					if (allzero)
-						atomic_long_inc(&n_zero);
-					pr_err_ratelimited("beamfs/diag: region %llu (indirect %llu, slot at %u): device holds %s after the write: %u bytes differ from offset %u\n",
-							   (unsigned long long)region_blk,
-							   (unsigned long long)phys, offset,
-							   isprev ? "the PREVIOUS image" :
-							   allzero ? "ZEROS" : "OTHER BYTES",
-							   nd, first);
-				}
-			}
-		}
-		kfree(raw);
-		kfree(mem);
-
-		same = atomic_long_read(&n_same);
-		diff = atomic_long_read(&n_diff);
-		prev = atomic_long_read(&n_prev);
-		zero = atomic_long_read(&n_zero);
-		err = atomic_long_read(&n_err);
-		if (((same + diff + err) & 4095) == 0)
-			pr_info("beamfs/diag: device read-back: %ld same, %ld different (%ld previous image, %ld all zero), %ld errors\n",
-				same, diff, prev, zero, err);
-	}
-	kfree(pre);
 	brelse(pbh);
 }
 
@@ -1229,8 +780,6 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		if (!described) {
 			pr_warn_ratelimited("beamfs: indirect block %llu has no parity written yet; not checked\n",
 					    (unsigned long long)phys);
-			beamfs_bh_diag(sb, region_blk, "undescribed: region");
-			beamfs_bh_diag(sb, phys, "undescribed: indirect");
 			/*
 			 * Nothing to check it against until an update files
 			 * its slot, which marks it verified itself; until
