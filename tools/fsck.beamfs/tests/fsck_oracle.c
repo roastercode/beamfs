@@ -554,9 +554,9 @@ static void case_indirect_without_parity(void)
 	rs_free(rs);
 
 	v = check();
-	report("an indirect block with no parity keeps its children",
-	       v.lost == 0 && v.dangling == 0,
-	       "expected lost=0 dangling=0, got lost=%ld dangling=%ld rc=%d",
+	report("an indirect block with no parity keeps its children and is damage",
+	       v.lost == 0 && v.dangling == 0 && v.rc == 4,
+	       "expected lost=0 dangling=0 rc=4, got lost=%ld dangling=%ld rc=%d",
 	       v.lost, v.dangling, v.rc);
 }
 

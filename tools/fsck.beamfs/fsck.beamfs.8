@@ -125,7 +125,9 @@ Errors were found and corrected. Only possible under
 Errors were found and left uncorrected. Either
 .B \-\-check\-only
 was in effect, or the damage exceeded what RS and the bitmap rebuild
-can recover.
+can recover. Since 0.1.7 an indirect block that holds pointers under
+an empty parity slot counts here: the block reached the medium and
+nothing protects its pointers.
 .TP
 .B 8
 Operational error: the device could not be opened or read.

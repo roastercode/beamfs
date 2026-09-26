@@ -222,7 +222,7 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 				return n;
 			}
 			p->r.undescribed_indirect++;
-			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s) and no parity describes it -- the block reached the medium, its parity slot did not; walked anyway\n",
+			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s) and no parity describes it -- the block reached the medium, its parity slot did not; walked, counted as damage\n",
 			     (unsigned long long)blk, (unsigned long long)ino, nz);
 		}
 	}
@@ -600,6 +600,19 @@ int fsck_pass6(struct fsck_reader *rd, const struct fsck_pass6_opts *o,
 	else if (p.r.bad_dirents || p.r.dangling_entries || p.r.duplicate_names ||
 		 p.r.link_count_wrong || p.r.orphaned_inodes)
 		rc = FSCK_PASS6_UNCORRECTED;
+	/*
+	 * An indirect block that holds pointers under an empty parity
+	 * slot is damage, and the checker says so with its exit code.
+	 *
+	 * It was reported and walked, and the volume still passed: a
+	 * hundred such blocks on every generic/476 of 2026-09-25 went
+	 * through beamfs-xfstests as a pass, and only the verbose report
+	 * knew. A pointer array nothing protects is the failure mode this
+	 * filesystem exists to close; a checker that shrugs at it is not
+	 * checking.
+	 */
+	else if (p.r.undescribed_indirect)
+		rc = FSCK_PASS6_UNCORRECTED;
 	return rc;
 }
 
@@ -641,7 +654,7 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 	 * one finding that names the write path.
 	 */
 	if (r->undescribed_indirect)
-		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers and no parity describes them -- written, named by an inode, parity never filed; walked anyway\n",
+		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers and no parity describes them -- written, named by an inode, parity never filed; walked, counted as damage\n",
 			r->undescribed_indirect);
 	if (r->undescribed_empty)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u empty indirect block(s) under a zero parity slot -- the parity of an all-zero block is zero; not damage\n",
@@ -652,7 +665,7 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 
 	if (!r->shared_blocks && !r->root_bad && !r->bad_dirents &&
 	    !r->dangling_entries && !r->duplicate_names && !r->link_count_wrong &&
-	    !r->orphaned_inodes)
+	    !r->orphaned_inodes && !r->undescribed_indirect)
 		printf("fsck.beamfs: pass 6: directories, links and block ownership OK (%u inode(s))\n",
 		       r->allocated_inodes);
 }
