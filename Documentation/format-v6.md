@@ -354,9 +354,10 @@ the same spirit as `data-protection-design.md` section 7:
 Not resolved by this document; left for explicit arbitration
 before code lands:
 
-- **7.1 mkfs.beamfs flag name.** `--data-csum` names the
-  mechanism; alternative `--detect-miscorrection` names the
-  guarantee. TBD.
+- **7.1 mkfs.beamfs flag name.** Decided: `--data-csum`, the name
+  of the mechanism, is what mkfs.beamfs implements and what the
+  documentation refers to; the alternative `--detect-miscorrection`
+  is not offered.
 - **7.2 Whether the RO-compat bit is set by default in the
   embedded profile at v6 closure, or opt-in for one release** to
   gather field data before making it the default. Anti-NAK

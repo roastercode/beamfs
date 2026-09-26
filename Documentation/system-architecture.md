@@ -5,7 +5,7 @@
 beamfs is not a general-purpose filesystem and does not attempt to replace
 ext4 or btrfs. It addresses a specific gap in the Linux storage stack:
 **in-place correction of silent data corruption on read-write partitions
-operating in radiation-intensive environments.**
+exposed to electromagnetic single-event effects.**
 
 Understanding where beamfs fits requires understanding what the other
 components of a hardened embedded Linux system already provide - and
