@@ -28,7 +28,7 @@
 #include <sys/sysmacros.h>
 #include <sys/random.h>
 
-#define MKFS_BEAMFS_VERSION "0.1.4"
+#define MKFS_BEAMFS_VERSION "0.1.5"
 #include <dirent.h>
 
 /*
@@ -53,7 +53,7 @@
 /* RS FEC constants (must match kernel beamfs.h) */
 
 /* Superblock RS layout (stage 3 item 4, v4 format, must match kernel beamfs.h) */
-                                          /* index in s_pad[]: 1175     */
+					  /* index in s_pad[]: 1175     */
 
 /* Format version (must match kernel beamfs.h) */
 
@@ -126,7 +126,7 @@ static int poison_data_area(int fd, uint64_t data_start, uint64_t nblocks)
 
 /* Minimal CRC32 for userspace mkfs */
 static uint32_t crc32_table[256];
-static int crc32_init_done = 0;
+static int crc32_init_done;
 
 static void crc32_init(void)
 {
@@ -146,7 +146,8 @@ static void crc32_init(void)
  */
 static uint32_t crc32_internal(uint32_t seed, const void *buf, size_t len)
 {
-	if (!crc32_init_done) crc32_init();
+	if (!crc32_init_done)
+		crc32_init();
 	uint32_t c = seed;
 	const uint8_t *p = buf;
 	while (len--)
@@ -314,7 +315,7 @@ static void encode_rs_userspace(const uint8_t *data, size_t data_len,
 	 */
 	static uint8_t alpha_to[256], index_of[256];
 	static uint8_t genpoly[17];
-	static int     rs_table_init = 0;
+	static int     rs_table_init;
 	uint8_t        par[16];
 	size_t         i;
 
@@ -1276,7 +1277,7 @@ int main(int argc, char *argv[])
 				ind_parity_mode = BEAMFS_IND_PARITY_RS;
 			else {
 				fprintf(stderr,
-				        "beamfs: --indirect-parity must be none, crc or rs\n");
+					"beamfs: --indirect-parity must be none, crc or rs\n");
 				return 1;
 			}
 			break;
@@ -1339,7 +1340,11 @@ int main(int argc, char *argv[])
 		return 1;
 
 	struct stat st;
-	if (fstat(fd, &st) < 0) { perror("fstat"); close(fd); return 1; }
+	if (fstat(fd, &st) < 0) {
+		perror("fstat");
+		close(fd);
+		return 1;
+	}
 
 	uint64_t total_bytes;
 	if (S_ISBLK(st.st_mode)) {
@@ -1406,7 +1411,7 @@ int main(int argc, char *argv[])
 	 * few rounds for all practical sizes.
 	 */
 	uint64_t bits_per_bitmap_blk = (uint64_t)BEAMFS_BITMAP_SUBBLOCKS *
-	                              BEAMFS_SUBBLOCK_DATA * 8u; /* 30592 */
+				      BEAMFS_SUBBLOCK_DATA * 8u; /* 30592 */
 	uint64_t bitmap_blocks_count = 1;
 	uint64_t ind_parity_count = 0;
 
@@ -1444,15 +1449,16 @@ int main(int argc, char *argv[])
 
 	for (int iter = 0; iter < 6; iter++) {
 		uint64_t fixed_overhead = 1 + inode_table_len + bitmap_blocks_count +
-		                         ind_parity_count + budget_count +
-		                         (canary_present ? 2 : 1);
+					 ind_parity_count + budget_count +
+					 (canary_present ? 2 : 1);
 		uint64_t data_blocks_est = (total_blocks > fixed_overhead) ?
-		                          (total_blocks - fixed_overhead) : 0;
+					  (total_blocks - fixed_overhead) : 0;
 		uint64_t need = (data_blocks_est + bits_per_bitmap_blk - 1) /
-		               bits_per_bitmap_blk;
+			       bits_per_bitmap_blk;
 		uint64_t need_par = 0;
 
-		if (need < 1) need = 1;
+		if (need < 1)
+			need = 1;
 		if (ind_slots_per_blk) {
 			/*
 			 * Slots, not bytes. The region block carries its own
@@ -1461,7 +1467,7 @@ int main(int argc, char *argv[])
 			 * in that payload, not how many bytes fit in a block.
 			 */
 			need_par = (data_blocks_est + ind_slots_per_blk - 1) /
-			          ind_slots_per_blk;
+				  ind_slots_per_blk;
 		}
 		uint64_t need_bud = 0;
 
@@ -1479,8 +1485,8 @@ int main(int argc, char *argv[])
 	}
 	if (bitmap_blocks_count > 0xFFFFu) {
 		fprintf(stderr,
-		        "beamfs: volume too large for s_flags (need %lu blocks, max 65535)\n",
-		        (unsigned long)bitmap_blocks_count);
+			"beamfs: volume too large for s_flags (need %lu blocks, max 65535)\n",
+			(unsigned long)bitmap_blocks_count);
 		return 1;
 	}
 	uint64_t ind_parity_blk  = bitmap_blk + bitmap_blocks_count;
@@ -1489,8 +1495,8 @@ int main(int argc, char *argv[])
 	uint64_t root_dir_blk    = after_parity;
 	uint64_t canary_blk      = after_parity + 1;
 	uint64_t data_start_blk  = canary_present ?
-	                          (after_parity + 2) :
-	                          (after_parity + 1);
+				  (after_parity + 2) :
+				  (after_parity + 1);
 	uint64_t inodes_per_block = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
 	uint64_t total_inodes    = inode_table_len * inodes_per_block;
 
@@ -1537,7 +1543,7 @@ int main(int argc, char *argv[])
 	uint8_t *bitmap_buf = calloc(1, bitmap_total_bytes);
 	if (!bitmap_buf) {
 		fprintf(stderr, "mkfs.beamfs: OOM allocating bitmap (%zu bytes)\n",
-		        bitmap_total_bytes);
+			bitmap_total_bytes);
 		return 1;
 	}
 	/* Seed all bits to 1 (= all data blocks free) in every bitmap block. */
@@ -2182,7 +2188,7 @@ int main(int argc, char *argv[])
 				uint64_t blk_off = slot % inodes_per_block;
 				struct beamfs_inode *di = (struct beamfs_inode *)
 				    (it_buf + blk_idx * BEAMFS_BLOCK_SIZE
-				            + blk_off * sizeof(struct beamfs_inode));
+					    + blk_off * sizeof(struct beamfs_inode));
 				di->i_nlink = (uint16_t)(2 + cur->subdir_count);
 				di->i_size  = (uint64_t)cur->n_dir_blocks * BEAMFS_DATA_INLINE_BYTES;
 				/* Populate i_direct[] from dir_blk_nums (first 12) */
@@ -2216,7 +2222,7 @@ int main(int argc, char *argv[])
 			const char *name = cur->names[cur->name_idx];
 			char child_path[4096];
 			int rc = snprintf(child_path, sizeof(child_path), "%s/%s",
-			                  cur->path, name);
+					  cur->path, name);
 			if (rc < 0 || (size_t)rc >= sizeof(child_path)) {
 				fprintf(stderr, "mkfs.beamfs --from-dir: path too long for %s\n", name);
 				free(it_buf);
@@ -2262,7 +2268,7 @@ int main(int argc, char *argv[])
 
 				/* Need to allocate a new dirblock. Grow heap buffer first. */
 				uint8_t *new_buf = realloc(cur->dir_blocks_buf,
-				                           (size_t)(cur->n_dir_blocks + 1) * BEAMFS_BLOCK_SIZE);
+							   (size_t)(cur->n_dir_blocks + 1) * BEAMFS_BLOCK_SIZE);
 				if (!new_buf) {
 					fprintf(stderr, "mkfs.beamfs --from-dir: OOM dir_blocks_buf grow\n");
 					free(it_buf);
@@ -2289,9 +2295,9 @@ int main(int argc, char *argv[])
 					uint64_t byte_in_sub = bit_in_sub / 8;
 					unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 					uint8_t *bp = bitmap_buf
-					              + bmap_idx * BEAMFS_BLOCK_SIZE
-					              + sub * BEAMFS_SUBBLOCK_TOTAL
-					              + byte_in_sub;
+						      + bmap_idx * BEAMFS_BLOCK_SIZE
+						      + sub * BEAMFS_SUBBLOCK_TOTAL
+						      + byte_in_sub;
 					*bp &= (uint8_t)~(1u << bit_in_byte);
 				}
 
@@ -2323,9 +2329,9 @@ int main(int argc, char *argv[])
 							uint64_t byte_in_sub = bit_in_sub / 8;
 							unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 							uint8_t *bp = bitmap_buf
-							              + bmap_idx * BEAMFS_BLOCK_SIZE
-							              + sub * BEAMFS_SUBBLOCK_TOTAL
-							              + byte_in_sub;
+								      + bmap_idx * BEAMFS_BLOCK_SIZE
+								      + sub * BEAMFS_SUBBLOCK_TOTAL
+								      + byte_in_sub;
 							*bp &= (uint8_t)~(1u << bit_in_byte);
 						}
 					}
@@ -2352,7 +2358,7 @@ int main(int argc, char *argv[])
 			uint64_t child_blk_off = child_slot % inodes_per_block;
 			struct beamfs_inode *ci = (struct beamfs_inode *)
 			    (it_buf + child_blk_idx * BEAMFS_BLOCK_SIZE
-			            + child_blk_off * sizeof(struct beamfs_inode));
+				    + child_blk_off * sizeof(struct beamfs_inode));
 
 			/* Add dirent in current dirblock */
 			size_t nlen = strlen(name);
@@ -2392,7 +2398,7 @@ int main(int argc, char *argv[])
 						uint64_t e_blk_off = e_slot % inodes_per_block;
 						struct beamfs_inode *ei = (struct beamfs_inode *)
 						    (it_buf + e_blk_idx * BEAMFS_BLOCK_SIZE
-						            + e_blk_off * sizeof(struct beamfs_inode));
+							    + e_blk_off * sizeof(struct beamfs_inode));
 						ei->i_nlink++;
 						ei->i_crc32 = crc32_inode(ei);
 						rs_encode_inode((uint8_t *)ei);
@@ -2426,8 +2432,10 @@ int main(int argc, char *argv[])
 						   ? BEAMFS_CAPSULE_DATA_BYTES
 						   : BEAMFS_DATA_INLINE_BYTES;
 				uint64_t nblocks = (fsize + per_block - 1) / per_block;
-				if (nblocks == 0) nblocks = 1; /* empty file: 1 data block (might be zero-size; skip alloc?) */
-				if (fsize == 0) nblocks = 0; /* truly empty file: no data block */
+				if (nblocks == 0) /* empty file: 1 data block (might be zero-size; skip alloc?) */
+					nblocks = 1;
+				if (fsize == 0) /* truly empty file: no data block */
+					nblocks = 0;
 
 				/* Phase 4b: cascade capacity now includes dindirect (12 + 512 + 262144 = 262668).
 				 * Tindirect (additional 134M blocks) deferred since no rootfs file > 1 GiB. */
@@ -2502,7 +2510,8 @@ int main(int argc, char *argv[])
 					if (!dind_l2_bufs || !dind_l2_blkno || !dind_l2_used) {
 						fprintf(stderr, "mkfs.beamfs --from-dir: OOM dindirect L2 state for %s\n", child_path);
 						free(dind_l2_bufs); free(dind_l2_blkno); free(dind_l2_used);
-						if (src_fd >= 0) close(src_fd);
+						if (src_fd >= 0)
+							close(src_fd);
 						free(it_buf);
 						return 1;
 					}
@@ -2513,7 +2522,8 @@ int main(int argc, char *argv[])
 					if (indirect_blk >= (uint64_t)(bitmap_blocks_count * BEAMFS_BITMAP_BITS_PER_BLOCK)) {
 						fprintf(stderr, "mkfs.beamfs --from-dir: indirect_blk %lu beyond Phase 3d bitmap[0]\n",
 							(unsigned long)indirect_blk);
-						if (src_fd >= 0) close(src_fd);
+						if (src_fd >= 0)
+							close(src_fd);
 						free(it_buf);
 						return 1;
 					}
@@ -2527,9 +2537,9 @@ int main(int argc, char *argv[])
 						uint64_t byte_in_sub = bit_in_sub / 8;
 						unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 						uint8_t *bp = bitmap_buf
-						              + bmap_idx * BEAMFS_BLOCK_SIZE
-						              + sub * BEAMFS_SUBBLOCK_TOTAL
-						              + byte_in_sub;
+							      + bmap_idx * BEAMFS_BLOCK_SIZE
+							      + sub * BEAMFS_SUBBLOCK_TOTAL
+							      + byte_in_sub;
 						*bp &= (uint8_t)~(1u << bit_in_byte);
 					}
 					ci->i_indirect = indirect_blk;
@@ -2543,7 +2553,8 @@ int main(int argc, char *argv[])
 						fprintf(stderr, "mkfs.beamfs --from-dir: dind_l1_blk %lu beyond bitmap range\n",
 							(unsigned long)dind_l1_blk);
 						free(dind_l2_bufs); free(dind_l2_blkno); free(dind_l2_used);
-						if (src_fd >= 0) close(src_fd);
+						if (src_fd >= 0)
+							close(src_fd);
 						free(it_buf);
 						return 1;
 					}
@@ -2557,9 +2568,9 @@ int main(int argc, char *argv[])
 						uint64_t byte_in_sub = bit_in_sub / 8;
 						unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 						uint8_t *bp = bitmap_buf
-						              + bmap_idx * BEAMFS_BLOCK_SIZE
-						              + sub * BEAMFS_SUBBLOCK_TOTAL
-						              + byte_in_sub;
+							      + bmap_idx * BEAMFS_BLOCK_SIZE
+							      + sub * BEAMFS_SUBBLOCK_TOTAL
+							      + byte_in_sub;
 						*bp &= (uint8_t)~(1u << bit_in_byte);
 					}
 					ci->i_dindirect = dind_l1_blk;
@@ -2640,9 +2651,9 @@ int main(int argc, char *argv[])
 						uint64_t byte_in_sub = bit_in_sub / 8;
 						unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 						uint8_t *bp = bitmap_buf
-						              + bmap_idx * BEAMFS_BLOCK_SIZE
-						              + sub * BEAMFS_SUBBLOCK_TOTAL
-						              + byte_in_sub;
+							      + bmap_idx * BEAMFS_BLOCK_SIZE
+							      + sub * BEAMFS_SUBBLOCK_TOTAL
+							      + byte_in_sub;
 						*bp &= (uint8_t)~(1u << bit_in_byte);
 					}
 
@@ -2669,7 +2680,8 @@ int main(int argc, char *argv[])
 								fprintf(stderr, "mkfs.beamfs --from-dir: dindirect L2 block %lu beyond bitmap range\n",
 									(unsigned long)l2_blk);
 								free(dind_l2_bufs); free(dind_l2_blkno); free(dind_l2_used);
-								if (src_fd >= 0) close(src_fd);
+								if (src_fd >= 0)
+									close(src_fd);
 								free(it_buf);
 								return 1;
 							}
@@ -2685,9 +2697,9 @@ int main(int argc, char *argv[])
 								uint64_t byte_in_sub = bit_in_sub / 8;
 								unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 								uint8_t *bp = bitmap_buf
-								              + bmap_idx * BEAMFS_BLOCK_SIZE
-								              + sub * BEAMFS_SUBBLOCK_TOTAL
-								              + byte_in_sub;
+									      + bmap_idx * BEAMFS_BLOCK_SIZE
+									      + sub * BEAMFS_SUBBLOCK_TOTAL
+									      + byte_in_sub;
 								*bp &= (uint8_t)~(1u << bit_in_byte);
 							}
 							/* Record in L1 buffer */
@@ -2697,7 +2709,8 @@ int main(int argc, char *argv[])
 						((uint64_t *)dind_l2_bufs[l1_slot])[l2_slot] = blk;
 					}
 				}
-				if (src_fd >= 0) close(src_fd);
+				if (src_fd >= 0)
+					close(src_fd);
 
 				/* Write indirect block if used */
 				if (need_indirect) {
@@ -2760,9 +2773,9 @@ int main(int argc, char *argv[])
 					uint64_t byte_in_sub = bit_in_sub / 8;
 					unsigned bit_in_byte = (unsigned)(bit_in_sub % 8);
 					uint8_t *bp = bitmap_buf
-					              + bmap_idx * BEAMFS_BLOCK_SIZE
-					              + sub * BEAMFS_SUBBLOCK_TOTAL
-					              + byte_in_sub;
+						      + bmap_idx * BEAMFS_BLOCK_SIZE
+						      + sub * BEAMFS_SUBBLOCK_TOTAL
+						      + byte_in_sub;
 					*bp &= (uint8_t)~(1u << bit_in_byte);
 				}
 
@@ -2822,7 +2835,7 @@ int main(int argc, char *argv[])
 				de_dotdot->d_rec_len   = BEAMFS_DIRENT_LEN(2);
 
 				stack[sp].dirent_slot = BEAMFS_DIRENT_LEN(1) +
-						        BEAMFS_DIRENT_LEN(2);
+							BEAMFS_DIRENT_LEN(2);
 				stack[sp].subdir_count = 0;
 				stack[sp].is_root = 0;
 				stack[sp].names = NULL;
