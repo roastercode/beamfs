@@ -54,6 +54,23 @@
 #include "fsck_pass6.h"
 
 /*
+ * How many of an indirect block's pointers the parity slot describes.
+ *
+ * The slot is the RS parity of BEAMFS_DATA_INLINE_SUBBLOCKS codewords
+ * of BEAMFS_SUBBLOCK_DATA bytes: 16 x 239 = 3824 of the block's 4096
+ * bytes. The last 272 bytes, pointers 478..511, are in no codeword:
+ * a pointer there leaves the slot as it was, and a block holding
+ * pointers only there has a zero slot. Measured on generic/013,
+ * 2026-09-27: 1821 of 1824 updates that left the region page
+ * unchanged followed a store at index 478 or above, all 48 845 that
+ * changed it followed one below, and every block this checker named
+ * had its pointers at 478..511 and nowhere else. A limit of the v5
+ * format, not damage; format v6 covers the whole block.
+ */
+#define FSCK_IND_PTRS_COVERED \
+	((unsigned int)(BEAMFS_DATA_INLINE_BYTES / sizeof(__le64)))
+
+/*
  * Has this name already been seen in this directory?
  *
  * Returns its index, or @nnames when it is new. Split out of the walk
@@ -212,18 +229,41 @@ static uint64_t claim_tree(struct p6 *p, uint64_t blk, int level, uint64_t ino)
 		 * will report as out of range or shared.
 		 */
 		if (ist == FSCK_READ_UNDESCRIBED) {
-			unsigned int nz = 0;
+			unsigned int nz = 0, reach = 0;
 
 			for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++)
-				if (ptrs[i])
+				if (ptrs[i]) {
 					nz++;
+					if (i < FSCK_IND_PTRS_COVERED)
+						reach++;
+				}
 			if (nz == 0) {
 				p->r.undescribed_empty++;
 				return n;
 			}
-			p->r.undescribed_indirect++;
-			note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s) and no parity describes it -- the block reached the medium, its parity slot did not; walked, counted as damage\n",
-			     (unsigned long long)blk, (unsigned long long)ino, nz);
+			/*
+			 * Pointers only at 478..511 under a zero slot is the
+			 * format's doing, not the writer's (see
+			 * FSCK_IND_PTRS_COVERED): the slot the kernel filed
+			 * is the parity of the 3824 bytes it covers, which
+			 * are zero. Said, counted apart, walked, and not a
+			 * verdict: until 0.1.8 these were "the block reached
+			 * the medium, its parity slot did not", which was
+			 * false, and failed generic/013, 076, 083, 269, 361.
+			 */
+			if (reach == 0) {
+				p->r.beyond_reach_indirect++;
+				note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s), all at indices %u..%u, beyond the reach of its parity slot -- format v5 covers %u of %u bytes; unprotected, not damage\n",
+				     (unsigned long long)blk, (unsigned long long)ino, nz,
+				     FSCK_IND_PTRS_COVERED,
+				     (unsigned int)(BEAMFS_INDIRECT_PTRS - 1),
+				     (unsigned int)BEAMFS_DATA_INLINE_BYTES,
+				     (unsigned int)BEAMFS_BLOCK_SIZE);
+			} else {
+				p->r.undescribed_indirect++;
+				note(p, "fsck.beamfs: pass 6: indirect block %llu of inode %llu holds %u pointer(s), %u within the reach of its parity slot, and no parity describes it; walked, counted as damage\n",
+				     (unsigned long long)blk, (unsigned long long)ino, nz, reach);
+			}
 		}
 	}
 	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
@@ -654,8 +694,14 @@ void fsck_pass6_report(const struct fsck_pass6_result *r)
 	 * one finding that names the write path.
 	 */
 	if (r->undescribed_indirect)
-		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers and no parity describes them -- written, named by an inode, parity never filed; walked, counted as damage\n",
+		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers within the reach of their parity slot and no parity describes them; walked, counted as damage\n",
 			r->undescribed_indirect);
+	if (r->beyond_reach_indirect)
+		fprintf(stderr, "fsck.beamfs: pass 6: %u indirect block(s) hold pointers only at indices %u..%u, beyond the reach of the parity slot -- format v5 protects %u of %u bytes of an indirect block; unprotected, not damage\n",
+			r->beyond_reach_indirect, FSCK_IND_PTRS_COVERED,
+			(unsigned int)(BEAMFS_INDIRECT_PTRS - 1),
+			(unsigned int)BEAMFS_DATA_INLINE_BYTES,
+			(unsigned int)BEAMFS_BLOCK_SIZE);
 	if (r->undescribed_empty)
 		fprintf(stderr, "fsck.beamfs: pass 6: %u empty indirect block(s) under a zero parity slot -- the parity of an all-zero block is zero; not damage\n",
 			r->undescribed_empty);

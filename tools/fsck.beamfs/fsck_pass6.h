@@ -86,6 +86,8 @@ struct fsck_pass6_result {
 	 * afternoon while the defect was in the write path.
 	 */
 	unsigned int undescribed_indirect;
+	/* Pointers only at 478..511 under a zero slot: format v5 limit. */
+	unsigned int beyond_reach_indirect;
 	/* Indirect blocks that are all zero under a zero parity slot: the
 	 * parity of nothing is nothing, and these are not damage.
 	 */

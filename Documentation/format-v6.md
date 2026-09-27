@@ -367,3 +367,32 @@ before code lands:
 - **7.3 fsck.beamfs behaviour** on a `csum_type` mismatch found
   during offline scan (repair from parity vs report-only). TBD,
   tracked with the Phase 2 fsck deliverable.
+
+## 8. Indirect parity slot: the whole block
+
+### 8.1 What v5 covers
+
+The v5 slot of an indirect block is the RS(255,239) parity of 16
+codewords of 239 bytes: 3824 of the block's 4096 bytes. Pointers
+478..511 are outside every codeword, unprotected at write, unchecked
+at read, and a block holding pointers only there has a zero slot
+(known-limitations 3.38, measured 2026-09-27).
+
+### 8.2 v6 geometry
+
+A slot of 18 codewords covers 4302 bytes, the whole block and 206
+bytes to spare: 18 x 16 = 288 parity bytes a slot. The region's data
+view, 16 x 239 = 3824 bytes, then holds 13 slots (3744 bytes) instead
+of 14. Regions per volume: ceil(data_blocks / 13). BEAMFS_IND_PARITY_RS_BYTES
+becomes 288, BEAMFS_IND_PARITY_RS_SLOTS 13, and the update encodes
+block + i*239 for i < 18 with the 18th codeword short (4096 - 17*239 =
+33 bytes, zero-padded to 239 for the code, the padding not stored).
+
+### 8.3 Feature bit and migration
+
+An incompat feature bit (13 slots a region change every slot's
+address): a v5 volume is not mountable read-write by a v6 kernel that
+does not carry the bit, and vice versa. mkfs.beamfs writes the bit
+with the new geometry; fsck.beamfs reads the geometry from the bit.
+No in-place migration: the region zone grows by 14/13, and the data
+start moves.

@@ -778,8 +778,24 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 			}
 		}
 		if (!described) {
-			pr_warn_ratelimited("beamfs: indirect block %llu has no parity written yet; not checked\n",
-					    (unsigned long long)phys);
+			/*
+			 * The slot covers BEAMFS_DATA_INLINE_BYTES of the
+			 * block, 3824 of 4096: pointers 478..511 are in no
+			 * codeword, and a block that holds pointers only
+			 * there has, correctly, a zero slot. That is the v5
+			 * format and not an event, so it is not warned
+			 * about; a zero slot over pointers the slot does
+			 * cover is (known-limitations 3.38).
+			 */
+			const __le64 *ptrs = (const __le64 *)bh->b_data;
+			unsigned int within = 0;
+
+			for (k = 0; k < BEAMFS_DATA_INLINE_BYTES / sizeof(__le64); k++)
+				if (ptrs[k])
+					within++;
+			if (within)
+				pr_warn_ratelimited("beamfs: indirect block %llu: parity slot empty over %u pointer(s) it covers; not checked\n",
+						    (unsigned long long)phys, within);
 			/*
 			 * Nothing to check it against until an update files
 			 * its slot, which marks it verified itself; until

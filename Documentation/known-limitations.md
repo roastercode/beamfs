@@ -1633,7 +1633,7 @@ Open, from the same run: fsck reports these blocks and does not count
 them as damage (exit 0). Under the ext4 model a metadata block without
 its checksum is corruption; fsck.beamfs should exit 4 on them.
 
-### 3.28 Buffers that go back to what the medium held (open; diagnostics in 0.1.12)
+### 3.28 Buffers that go back to what the medium held (diagnostics in 0.1.12; cause in 3.38)
 
 generic/476 on 0.1.11, scratch image kept by beamfs-xfstests: 97 indirect
 blocks under a zero parity slot, 43 of them under a region block that is
@@ -1787,3 +1787,38 @@ medium, and no witness has yet seen the bytes change. The code goes
 back to 0.1.11, which keeps the one real fix (the generation bumped
 under the lock). fsck.beamfs 0.1.7 counts those blocks as damage, so
 generic/476 fails the checker until this is closed.
+
+### 3.38 The parity slot covers 3824 of an indirect block's 4096 bytes (0.1.22)
+
+The cause of 3.28 to 3.37, established by measurement on 2026-09-27
+(beamfs-xfstests 2.3.47, scripts/undeposited.bt, generic/013). The
+slot of an indirect block is the RS parity of BEAMFS_DATA_INLINE_SUBBLOCKS
+codewords of BEAMFS_SUBBLOCK_DATA bytes, 16 x 239 = 3824 bytes; the
+block has 4096. Pointers 478..511 (BEAMFS_INDIRECT_PTRS = 512) are in
+no codeword. beamfs_ind_parity_update encodes block + i*239 for i < 16,
+so a pointer stored at 478 or above changes nothing in the region;
+beamfs_ind_parity_verify and fsck.beamfs check the same bytes, so a
+flipped pointer there is neither detected nor corrected; a block whose
+pointers all lie there has a zero slot, which fsck read as "the block
+reached the medium, its parity slot did not".
+
+Measured: of 57 819 updates traced with the region page summed before
+and after, 2083 left it unchanged while the block had changed; 1821 of
+1824 of those followed a pointer store at index 478 or above, and all
+48 845 that changed the page followed a store below 478. Every block
+fsck named had its pointers at 478..511 and nowhere else. mkfs sizes
+the region zone for the whole volume (17 408 regions for 243 701 data
+blocks); the only bound is the 3824 bytes.
+
+Not a lost write, not a cache, not the device: the readings of 3.28 to
+3.37 were correct and could not see this, because they watched slots
+that had been written. What the tests measure: generic/013, 076, 083,
+269 and 361 fail the sealed sweep under fsck 0.1.7 because it counted
+these blocks as damage; fsck 0.1.8 tells them apart and reports them
+as beyond the slot's reach, unprotected, not a verdict.
+
+Consequence for v5: 34 of the 512 pointers of every indirect block,
+the file offsets they serve, are without protection or detection. In
+GF(256) with RS(255,239) a 256-byte slot cannot cover 4096 bytes:
+covering the whole block takes 18 codewords, a 288-byte slot and 13
+slots a region, an on-disk change. Format v6, section 8.
