@@ -329,7 +329,11 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc);
 int  beamfs_scrub_init(struct super_block *sb);
 void beamfs_scrub_exit(struct super_block *sb);
 int  beamfs_scrub_check_block(struct super_block *sb, u64 phys,
-			      unsigned int *corrected);
+			      unsigned int *corrected,
+			      struct inode *owner, u64 iblock);
+void beamfs_scrub_stop(struct super_block *sb);
+int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
+			       u64 *phys_out);
 /*
  * beamfs_log_rs_event -- record a Reed-Solomon correction event in the
  *                       persistent superblock journal.

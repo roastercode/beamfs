@@ -663,11 +663,12 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
  * Under CRC the block is checked and left alone: detection turns the
  * section 6.1 residual from silent corruption into a clean fail-closed
  * error, which is the contract beamfs states everywhere else. Under RS
- * the block is corrected in place, so a hit pointer is repaired and the
- * file survives.
+ * a copy is decoded and the block is left alone: damage is reported
+ * and journalled, never repaired here -- the comment at the decode
+ * below says why a verify must not write.
  *
- * Returns 0 if the block is sound or was corrected, -EUCLEAN if it is
- * damaged beyond the mode's ability to fix.
+ * Returns 0 if the block is sound or its damage is within correction,
+ * -EUCLEAN if it is damaged beyond the mode's ability to fix.
  */
 int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 {

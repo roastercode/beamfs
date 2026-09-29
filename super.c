@@ -1834,11 +1834,27 @@ static int beamfs_init_fs_context(struct fs_context *fc)
 	return 0;
 }
 
+/*
+ * Stop the scrubber before the rest of the unmount.
+ *
+ * The sweep holds a reference on the inode it walks, and put_super,
+ * where it used to be stopped, runs after generic_shutdown_super has
+ * evicted the volume's inodes: an inode held then is busy after
+ * unmount, and its iput later touches a superblock that is gone. Only
+ * a volume whose fill_super got as far as the root has a scrubber.
+ */
+static void beamfs_kill_sb(struct super_block *sb)
+{
+	if (sb->s_root)
+		beamfs_scrub_stop(sb);
+	kill_block_super(sb);
+}
+
 static struct file_system_type beamfs_fs_type = {
 	.owner            = THIS_MODULE,
 	.name             = "beamfs",
 	.init_fs_context  = beamfs_init_fs_context,
-	.kill_sb          = kill_block_super,
+	.kill_sb          = beamfs_kill_sb,
 	.fs_flags         = FS_REQUIRES_DEV,
 };
 
@@ -1919,6 +1935,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.22");
+MODULE_VERSION("0.1.23");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

@@ -1822,3 +1822,54 @@ the file offsets they serve, are without protection or detection. In
 GF(256) with RS(255,239) a 256-byte slot cannot cover 4096 bytes:
 covering the whole block takes 18 codewords, a 288-byte slot and 13
 slots a region, an on-disk change. Format v6, section 8.
+
+### 3.39 The scrubber wrote over blocks that had changed owner (fixed in 0.1.23)
+
+Measured on 2026-09-28 on generic/083 with XFSTESTS_SEED=274870549
+(beamfs-xfstests 2.3.55 to 2.3.57, scripts/scrubwb.bt): 7 failures in
+36 trials with the scrubber at 100 ms, 0 in 8 with it parked. Over 8
+traced trials, all 17 write-backs and "uncorrectable" verdicts of the
+sweep were on blocks freed and allocated to another file since the walk
+began, which held pointers when the sweep decoded them as data blocks.
+Trial 3: indirect block 15011, freed and allocated again as inode
+1017's with 15012 in its slot 0, was "corrected" on two subblocks and
+written back without that pointer; 15012 and its 17 children were
+lost. In a later run of 12 trials, a block that had become a data block
+of inode 1724 was "corrected" over its 16 subblocks and written back:
+another file's data replaced, which no checker reports.
+
+The cause, in scrub.c. beamfs_scrub_one_inode judged a file safe to
+sweep once, at the start (ilookup: not open, not dirty; a file unlinked
+and evicted since is not in the cache at all). beamfs_scrub_walk_level
+walked the leaves from a copy of the pointers, sleeping the pace
+interval between leaves, and asked only whether each leaf was still
+allocated. beamfs_scrub_check_block copied the block under its buffer
+lock, decoded the copy, and wrote the correction back without checking
+what the buffer held by then. A nearly empty pointer array is within
+eight bytes of a zero codeword, and RS(255,239) "corrects" it to zero.
+The "sweep: block N subblock M/16 uncorrectable" lines followed by "is a
+leaf under indirect" were the same confusion, journalled as RS events.
+The confirming read of an uncorrectable subblock cleared the uptodate
+bit of the shared buffer and read the medium into it, which discards a
+writer's change not yet written; no trace caught it doing so (12
+confirming reads, all on clean buffers), the code allowed it.
+
+0.1.23. The sweep holds the inode it walks (beamfs_iget, which refuses
+a freed slot) and walks its tree as it is in memory. Before an indirect
+block is verified and copied, and before a leaf is read and again
+before it is written, the owner is asked under i_alloc_mutex whether
+the block is still where the walk found it: beamfs_inline_lookup_phys
+for a leaf, a walk down from the inode's root for an indirect block.
+A reserved inode, immutable and outside the bitmap, is answered from
+its own pointers: the canary at inode 2 lies below the data region,
+where beamfs_inline_lookup_phys refuses a file's pointer.
+A leaf is written back only if its buffer still holds exactly the bytes
+that were decoded, and never on a read-only or frozen volume. The
+confirming read goes to a private page through a bio. The wear step,
+which does not know what a block is, only reports. beamfs_kill_sb stops
+the sweep before the VFS evicts the inodes.
+
+What it costs: a file unlinked while the sweep walks it is evicted,
+and its blocks freed, when the walk reaches its next block, up to one
+pace interval late. A worn block the wear step finds is repaired when
+the sweep reaches the file that owns it.

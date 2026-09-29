@@ -36,6 +36,8 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include "beamfs.h"
+#include <linux/bio.h>
+#include <linux/math64.h>
 
 #define BEAMFS_SCRUB_DEFAULT_INTERVAL_MS  100
 
@@ -64,20 +66,205 @@ MODULE_PARM_DESC(scrub_interval_ms,
 		 "milliseconds between blocks for newly mounted volumes (0 parks the scrubber)");
 
 /*
- * beamfs_scrub_check_block -- decode one block, report what it found.
+ * Read @phys from the medium into @buf, around the block device's cache.
+ *
+ * The confirming read of an uncorrectable subblock asks whether the
+ * damage is on the medium. It used to ask by clearing the uptodate bit
+ * of the shared buffer and reading into it again: whatever the buffer
+ * held that the medium did not -- a writer's change not yet written,
+ * a block that had become another file's -- was replaced by what the
+ * disk held, in a buffer other paths read and may still write back. A
+ * private page and a bio ask the same question and change nothing
+ * anyone else sees.
+ */
+static int beamfs_scrub_read_medium(struct super_block *sb, u64 phys, u8 *buf)
+{
+	struct page *page;
+	struct bio *bio;
+	int ret;
+
+	page = alloc_page(GFP_NOFS);
+	if (!page)
+		return -ENOMEM;
+	bio = bio_alloc(sb->s_bdev, 1, REQ_OP_READ | REQ_SYNC, GFP_NOFS);
+	bio->bi_iter.bi_sector = phys << (sb->s_blocksize_bits - SECTOR_SHIFT);
+	__bio_add_page(bio, page, BEAMFS_BLOCK_SIZE, 0);
+	ret = submit_bio_wait(bio);
+	bio_put(bio);
+	if (!ret)
+		memcpy(buf, page_address(page), BEAMFS_BLOCK_SIZE);
+	__free_page(page);
+	return ret;
+}
+
+/*
+ * Decode what the medium holds for @phys into @r2, in the layout the
+ * first decode settled on. @buf is a scratch page.
+ */
+static noinline_for_stack void beamfs_scrub_confirm(struct super_block *sb,
+						    u64 phys, u8 *buf,
+						    bool woven, int *r2)
+{
+	int p2[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
+	unsigned int k;
+	int mr;
+
+	mr = beamfs_scrub_read_medium(sb, phys, buf);
+	if (mr) {
+		/*
+		 * No page: nothing confirmed, nothing reported. The
+		 * medium refusing the read is damage.
+		 */
+		for (k = 0; k < BEAMFS_DATA_INLINE_SUBBLOCKS; k++)
+			r2[k] = mr == -ENOMEM ? 0 : -1;
+		return;
+	}
+	/*
+	 * The confirming read takes the layout the first decode settled
+	 * on. Reading it the other way would confirm damage that is not
+	 * there, which is the whole reason this second read exists.
+	 */
+	if (woven)
+		beamfs_rs_decode_woven(buf + BEAMFS_CAPSULE_DATA_OFF,
+				       buf + BEAMFS_CAPSULE_PARITY_OFF,
+				       BEAMFS_RS_PARITY,
+				       BEAMFS_SUBBLOCK_DATA,
+				       BEAMFS_DATA_INLINE_SUBBLOCKS,
+				       r2, "sweep-confirm");
+	else
+		beamfs_rs_decode_region(buf, BEAMFS_SUBBLOCK_TOTAL,
+					buf + BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_SUBBLOCK_TOTAL,
+					BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_DATA_INLINE_SUBBLOCKS,
+					r2, p2, BEAMFS_RS_PARITY / 2,
+					"sweep-confirm");
+}
+
+/* The first logical block under each root: single, double, triple. */
+static u64 beamfs_scrub_root_base(unsigned int top)
+{
+	if (top == 1)
+		return BEAMFS_DIRECT_BLOCKS;
+	if (top == 2)
+		return BEAMFS_MAX_IBLOCK_INDIRECT;
+	return BEAMFS_MAX_IBLOCK_DINDIRECT;
+}
+
+/*
+ * Is @blk still the block at @depth on the path to logical block @base
+ * of @inode, in the tree whose root is at depth @top?
+ *
+ * The walk copies an indirect block's pointers and descends into them
+ * one at a time, sleeping the pace interval between leaves; a child
+ * freed and allocated again in the meantime is another file's block,
+ * and its "pointers" are whatever that file put there. Asked under
+ * i_alloc_mutex, from the root the inode holds now, reading the raw
+ * pointers: an identity check, not a verify.
+ */
+static bool beamfs_scrub_node_current(struct inode *inode, unsigned int top,
+				      unsigned int depth, u64 base, u64 blk)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	u64 off = base - beamfs_scrub_root_base(top);
+	u64 node, span = 1;
+	unsigned int d;
+
+	lockdep_assert_held(&fi->i_alloc_mutex);
+	if (top == 1)
+		node = le64_to_cpu(fi->i_indirect);
+	else if (top == 2)
+		node = le64_to_cpu(fi->i_dindirect);
+	else
+		node = le64_to_cpu(fi->i_tindirect);
+
+	for (d = 1; d < top; d++)
+		span *= BEAMFS_INDIRECT_PTRS;
+
+	for (d = top; d > depth && node; d--) {
+		struct buffer_head *bh;
+		u64 slot = div64_u64(off, span);
+
+		if (slot >= BEAMFS_INDIRECT_PTRS)
+			return false;
+		off -= slot * span;
+		span = div64_u64(span, BEAMFS_INDIRECT_PTRS);
+		bh = sb_bread(sb, node);
+		if (!bh)
+			return false;
+		lock_buffer(bh);
+		node = le64_to_cpu(((__le64 *)bh->b_data)[slot]);
+		unlock_buffer(bh);
+		brelse(bh);
+	}
+	return node == blk;
+}
+
+/*
+ * Is @phys still logical block @iblock of @inode?
+ *
+ * Asked under i_alloc_mutex, which every path that frees one of the
+ * inode's blocks or installs a new one holds: truncate through both
+ * callers of beamfs_inline_free_blocks_from, eviction around
+ * beamfs_free_data_blocks, allocation throughout.
+ *
+ * A reserved inode is answered from its own pointers. Its blocks are
+ * placed by mkfs and never change hands: iget marks it immutable and
+ * the allocator skips it. The canary at inode 2 (format-v4.md section
+ * 11.1) sits just below the data region, where lookup_phys refuses any
+ * file's pointer as corrupted: asked there, the sweep skipped the
+ * canary it used to check and logged "corrupted direct pointer ino=2"
+ * on every volume, every pass.
+ */
+static bool beamfs_scrub_leaf_current(struct inode *inode, u64 iblock,
+				      u64 phys)
+{
+	u64 now = 0;
+
+	lockdep_assert_held(&BEAMFS_I(inode)->i_alloc_mutex);
+	if (beamfs_ino_is_reserved(inode->i_ino))
+		return iblock < BEAMFS_DIRECT_BLOCKS &&
+		       le64_to_cpu(BEAMFS_I(inode)->i_direct[iblock]) == phys;
+	return beamfs_inline_lookup_phys(inode, iblock, &now) == 0 &&
+	       now == phys;
+}
+
+/*
+ * beamfs_scrub_check_block -- decode one block, report what it found,
+ * and repair it while it is still what the caller took it for.
  *
  * @corrected receives the number of subblocks that needed correction.
- * Returns 0 if the block decodes, -EUCLEAN if any subblock exceeded the
- * correction radius, or a negative errno on read failure.
+ * @owner and @iblock name the file and the logical block @phys is
+ * believed to be. Returns 0 if the block decodes, -EUCLEAN if any
+ * subblock exceeded the correction radius on the medium, -ESTALE if
+ * @owner no longer maps @iblock to @phys, or a negative errno on read
+ * failure.
  *
- * Works on the physical block without reference to an inode: the
- * scrubber sweeps the allocation bitmap and does not know, or need to
- * know, which file a block belongs to.
+ * Without an owner -- the wear step, which visits whatever is
+ * allocated -- the block is checked and reported and never written:
+ * nothing says what it is.
+ *
+ * It used to work on the physical block alone, and that was wrong. The
+ * sweep walks a file's leaves from a copy of its pointers taken
+ * seconds earlier, and a leaf freed and allocated again as another
+ * file's indirect block was decoded as a data block of the first file:
+ * a nearly empty pointer array is within eight bytes of a zero
+ * codeword, so it was "corrected" to zero and written back. Measured
+ * on generic/083 (known-limitations 3.39): 17 of 17 write-backs and
+ * uncorrectable verdicts of the sweep over 8 trials were on blocks that
+ * had changed hands and held pointers; one of them, indirect block
+ * 15011, took 15012 and its 17 children with it. Another trial rewrote
+ * a data block of another file over its 16 subblocks. The owner is now
+ * asked, under its allocation mutex, before the block is read and
+ * again before it is written, and the write happens only if the buffer
+ * still holds exactly the bytes that were decoded.
  */
 int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
-			     unsigned int *corrected)
+			     unsigned int *corrected,
+			     struct inode *owner, u64 iblock)
 {
-	struct buffer_head *bh;
+	struct buffer_head *bh = NULL;
 	/*
 	 * On the stack, as in beamfs_dirent_decode: 64 and 512 bytes,
 	 * against a 2 KiB frame budget, on a sweep that must not wait on
@@ -85,80 +272,112 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 */
 	int  results[BEAMFS_DATA_INLINE_SUBBLOCKS];
 	int  positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
-	u8   *staging;
+	int  r2[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	u8   *staging, *orig;
 	unsigned int i, n_corrected = 0;
-	int ret = 0;
+	int ret = 0, dret;
 	/*
 	 * Which layout the first decode settled on, so the confirming
 	 * read takes the same one.
 	 */
 	bool woven = false;
+	bool confirmed = false, repairable = true, wrote = false;
 
 	*corrected = 0;
 
 	memset(results, 0, sizeof(results));
+	memset(r2, 0, sizeof(r2));
+	/*
+	 * Both pages before any mutex: the pool waits when it is empty,
+	 * and nothing may wait on it holding the owner's allocation
+	 * mutex. orig keeps the bytes the decode started from, to tell
+	 * at write-back whether anybody wrote the buffer since.
+	 */
 	staging = beamfs_scratch_get(sb);
-	if (!staging) {
+	orig = beamfs_scratch_get(sb);
+	if (!staging || !orig) {
 		ret = -ENOMEM;
 		goto out_free;
 	}
 
+	/*
+	 * Still the owner's block, at the place the walk took it from?
+	 * Asked under the mutex every free of the owner's blocks holds,
+	 * and the snapshot is taken inside it: the block cannot change
+	 * hands between the answer and the copy.
+	 */
+	if (owner) {
+		mutex_lock(&BEAMFS_I(owner)->i_alloc_mutex);
+		if (!beamfs_scrub_leaf_current(owner, iblock, phys)) {
+			mutex_unlock(&BEAMFS_I(owner)->i_alloc_mutex);
+			ret = -ESTALE;
+			goto out_free;
+		}
+	}
 	bh = sb_bread(sb, phys);
+	if (bh) {
+		/*
+		 * Decode into staging rather than in place: the
+		 * buffer_head is shared through the block device page
+		 * cache, and a scrub has no business modifying what a
+		 * concurrent reader sees.
+		 */
+		/*
+		 * Under the buffer lock, or the snapshot is of two blocks.
+		 *
+		 * Writers hold lock_buffer across memcpy plus
+		 * rs_encode_region -- the payload changes, then the
+		 * sixteen parity fields catch up. Copying without the
+		 * lock catches that halfway and hands the decoder a
+		 * payload from after the write with parity from before,
+		 * which is uncorrectable by construction.
+		 *
+		 * That is what the sweep kept reporting: block 1110
+		 * failing all sixteen codewords while fsck called the
+		 * same volume clean, and blocks 1062 and 1631 failing
+		 * only the subblocks that held data. Twenty such reports
+		 * appeared the moment new data blocks started being
+		 * encoded on allocation, because there were simply more
+		 * writes to collide with.
+		 *
+		 * The lock is held for a 4096-byte copy and nothing
+		 * else. The decode runs afterwards, on the copy.
+		 */
+		lock_buffer(bh);
+		/*
+		 * The whole block, parity included.
+		 *
+		 * decode_rs8 corrects data and parity in place -- it
+		 * writes to both buffers it is given. Copying only the
+		 * payload and pointing the decoder at bh->b_data for the
+		 * parity means every read rewrites the shared buffer's
+		 * parity bytes. A block read often enough degrades until
+		 * it will not decode at all, which is what the sweep
+		 * kept reporting on blocks fsck called clean, and why
+		 * the count grew as the volume got busier.
+		 *
+		 * The data path has done this correctly all along:
+		 * "Decode RS(255,239) subblocks into a private scratch
+		 * buffer, never into bh->b_data."
+		 */
+		memcpy(orig, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
+		unlock_buffer(bh);
+	}
+	if (owner)
+		mutex_unlock(&BEAMFS_I(owner)->i_alloc_mutex);
 	if (!bh) {
 		ret = -EIO;
 		goto out_free;
 	}
-
-	/*
-	 * Decode into staging rather than in place: the buffer_head is
-	 * shared through the block device page cache, and a scrub has no
-	 * business modifying what a concurrent reader sees.
-	 */
-	/*
-	 * Under the buffer lock, or the snapshot is of two blocks.
-	 *
-	 * Writers hold lock_buffer across memcpy plus rs_encode_region --
-	 * the payload changes, then the sixteen parity fields catch up.
-	 * Copying without the lock catches that halfway and hands the
-	 * decoder a payload from after the write with parity from before,
-	 * which is uncorrectable by construction.
-	 *
-	 * That is what the sweep kept reporting: block 1110 failing all
-	 * sixteen codewords while fsck called the same volume clean, and
-	 * blocks 1062 and 1631 failing only the subblocks that held data.
-	 * Twenty such reports appeared the moment new data blocks started
-	 * being encoded on allocation, because there were simply more
-	 * writes to collide with.
-	 *
-	 * The lock is held for a 3824-byte copy and nothing else. The
-	 * decode runs afterwards, on the copy.
-	 */
-	lock_buffer(bh);
-	/*
-	 * The whole block, parity included.
-	 *
-	 * decode_rs8 corrects data and parity in place -- it writes to
-	 * both buffers it is given. Copying only the payload and pointing
-	 * the decoder at bh->b_data for the parity means every read
-	 * rewrites the shared buffer's parity bytes. A block read often
-	 * enough degrades until it will not decode at all, which is what
-	 * the sweep kept reporting on blocks fsck called clean, and why
-	 * the count grew as the volume got busier.
-	 *
-	 * The data path has done this correctly all along: "Decode
-	 * RS(255,239) subblocks into a private scratch buffer, never into
-	 * bh->b_data."
-	 */
-	memcpy(staging, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
-	unlock_buffer(bh);
+	memcpy(staging, orig, BEAMFS_BLOCK_SIZE);
 
 	/*
 	 * Which layout, when the sweep does not know what it is holding.
 	 *
-	 * Two of the three callers know: the children of a level-one
+	 * The callers with an owner know: the children of a level-one
 	 * indirect block and an inode's i_direct are data blocks, and on
-	 * an interleaved volume they are capsules. The third walks the
-	 * wear map and visits whatever is allocated -- a capsule, an
+	 * an interleaved volume they are capsules. The wear step walks
+	 * the wear map and visits whatever is allocated -- a capsule, an
 	 * indirect block, a directory block -- with nothing to say
 	 * which.
 	 *
@@ -184,9 +403,13 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 		if (ret != -EUCLEAN)
 			goto decoded;
 
-		/* Not a capsule: an indirect or directory block. */
+		/*
+		 * Not a capsule: an indirect or directory block. From
+		 * the snapshot, not from the buffer, which is not
+		 * locked now and may have been written since.
+		 */
 		woven = false;
-		memcpy(staging, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
+		memcpy(staging, orig, BEAMFS_BLOCK_SIZE);
 	}
 
 	ret = beamfs_rs_decode_region(staging, BEAMFS_SUBBLOCK_TOTAL,
@@ -198,6 +421,12 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 				      BEAMFS_RS_PARITY / 2,
 				"sweep");
 decoded:
+	dret = ret;
+	ret = 0;
+	if (dret < 0 && dret != -EUCLEAN) {
+		ret = dret;
+		goto out_brelse;
+	}
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
 		if (results[i] > 0) {
@@ -227,53 +456,20 @@ decoded:
 			 * clean offline, byte-identical on disk. A real
 			 * defect survives a re-read; a half-flushed block
 			 * does not.
+			 *
+			 * Once per block, into a private page: see
+			 * beamfs_scrub_read_medium. A block with an
+			 * uncorrectable subblock is not written back
+			 * this pass; the next sweep retries from a
+			 * fresh read.
 			 */
-			struct buffer_head *rbh;
-			int rc2 = -EUCLEAN;
-
-			if (bh) {
-				clear_buffer_uptodate(bh);
-				brelse(bh);
-				bh = NULL;
+			repairable = false;
+			if (!confirmed) {
+				confirmed = true;
+				beamfs_scrub_confirm(sb, phys, staging,
+						     woven, r2);
 			}
-			rbh = __bread(sb->s_bdev, phys, BEAMFS_BLOCK_SIZE);
-			if (rbh) {
-				int r2[BEAMFS_DATA_INLINE_SUBBLOCKS];
-				int p2[BEAMFS_DATA_INLINE_SUBBLOCKS *
-				       (BEAMFS_RS_PARITY / 2)];
-
-				lock_buffer(rbh);
-				memcpy(staging, (u8 *)rbh->b_data,
-				       BEAMFS_BLOCK_SIZE);
-				unlock_buffer(rbh);
-				/*
-				 * The confirming read takes the layout
-				 * the first decode settled on. Reading
-				 * it the other way would confirm damage
-				 * that is not there, which is the whole
-				 * reason this second read exists.
-				 */
-				if (woven)
-					beamfs_rs_decode_woven(
-						staging + BEAMFS_CAPSULE_DATA_OFF,
-						staging + BEAMFS_CAPSULE_PARITY_OFF,
-						BEAMFS_RS_PARITY,
-						BEAMFS_SUBBLOCK_DATA,
-						BEAMFS_DATA_INLINE_SUBBLOCKS,
-						r2, "sweep-confirm");
-				else
-					beamfs_rs_decode_region(staging,
-						BEAMFS_SUBBLOCK_TOTAL,
-						staging + BEAMFS_SUBBLOCK_DATA,
-						BEAMFS_SUBBLOCK_TOTAL,
-						BEAMFS_SUBBLOCK_DATA,
-						BEAMFS_DATA_INLINE_SUBBLOCKS,
-						r2, p2, BEAMFS_RS_PARITY / 2,
-						"sweep-confirm");
-				rc2 = r2[i];
-				brelse(rbh);
-			}
-			if (rc2 >= 0)
+			if (r2[i] >= 0)
 				continue;
 			/*
 			 * Say which block and which codeword. An
@@ -317,32 +513,44 @@ decoded:
 	 * block whole, and only when something was corrected: an
 	 * untouched block must not be dirtied, or a quiet volume would
 	 * rewrite itself endlessly and wear the medium for nothing.
+	 *
+	 * And only to the block the owner still names at @iblock, only
+	 * if the buffer still holds the bytes the decode started from --
+	 * a writer that came in between is right and the scrubber is
+	 * not -- and never on a volume that is read-only or frozen.
 	 */
-	/*
-	 * bh is NULL when the confirm path above dropped it. A block with
-	 * both a corrected and an uncorrectable subblock skips write-back
-	 * this pass; it is damaged, and the next sweep retries from a
-	 * fresh read.
-	 */
-	if (n_corrected && bh) {
-		lock_buffer(bh);
-		/*
-		 * The whole block. staging holds the corrected codewords
-		 * in their on-disk layout now -- data and parity both, at
-		 * a 255-byte stride -- because that is what decode_rs8
-		 * produces and what the block has to go back as.
-		 */
-		memcpy((u8 *)bh->b_data, staging, BEAMFS_BLOCK_SIZE);
-		set_buffer_uptodate(bh);
-		unlock_buffer(bh);
-		mark_buffer_dirty(bh);
+	if (n_corrected && repairable && owner && !sb_rdonly(sb) &&
+	    sb_start_write_trylock(sb)) {
+		mutex_lock(&BEAMFS_I(owner)->i_alloc_mutex);
+		if (beamfs_scrub_leaf_current(owner, iblock, phys)) {
+			lock_buffer(bh);
+			if (!memcmp(bh->b_data, orig, BEAMFS_BLOCK_SIZE)) {
+				/*
+				 * The whole block. staging holds the
+				 * corrected codewords in their on-disk
+				 * layout now -- data and parity both, at
+				 * a 255-byte stride -- because that is
+				 * what decode_rs8 produces and what the
+				 * block has to go back as.
+				 */
+				memcpy((u8 *)bh->b_data, staging,
+				       BEAMFS_BLOCK_SIZE);
+				set_buffer_uptodate(bh);
+				wrote = true;
+			}
+			unlock_buffer(bh);
+			if (wrote)
+				mark_buffer_dirty(bh);
+		}
+		mutex_unlock(&BEAMFS_I(owner)->i_alloc_mutex);
+		sb_end_write(sb);
 	}
 
 	*corrected = n_corrected;
-	if (bh)
-		brelse(bh);
-
+out_brelse:
+	brelse(bh);
 out_free:
+	beamfs_scratch_put(sb, orig);
 	beamfs_scratch_put(sb, staging);
 	return ret;
 }
@@ -367,20 +575,26 @@ out_free:
  */
 static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 				   unsigned int depth,
-				   struct beamfs_sb_info *sbi)
+				   struct beamfs_sb_info *sbi,
+				   struct inode *inode, unsigned int top,
+				   u64 base)
 {
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	u64 nptrs = BEAMFS_BLOCK_SIZE / sizeof(__le64);
 	struct buffer_head *ibh;
 	__le64 *ptrs;
 	u64 visited = 0;
+	u64 span = 1;
 	u64 j;
+	unsigned int d;
+	int bad;
 
 	if (!blk || !beamfs_block_is_allocated(sb, blk))
 		return 0;
 
-	ibh = sb_bread(sb, blk);
-	if (!ibh)
-		return 0;
+	/* Logical blocks under one pointer of this block. */
+	for (d = 1; d < depth; d++)
+		span *= nptrs;
 
 	/*
 	 * Copy the pointers and let the buffer go, for the same reason
@@ -392,8 +606,37 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 	 * came to be called on an already-free buffer.
 	 *
 	 * One page copied per indirect block visited, against a sweep
-	 * that walks at one block per interval.
+	 * that walks at one block per interval. Allocated before the
+	 * mutex below, which the allocator must not be waited on under.
 	 */
+	ptrs = kmalloc(BEAMFS_BLOCK_SIZE, GFP_NOFS);
+	if (!ptrs)
+		return 0;
+
+	/*
+	 * Still this file's block, at this place in its tree?
+	 *
+	 * @blk comes from a copy of its parent taken when the walk
+	 * started on the parent, which may be minutes ago; a block
+	 * freed and allocated again since is another file's, and its
+	 * verify below reports that file's state as this one's damage
+	 * -- or its pointers are walked as this file's leaves. Asked
+	 * under i_alloc_mutex, and the verify and the copy are done
+	 * inside it, so the answer holds for both.
+	 */
+	mutex_lock(&fi->i_alloc_mutex);
+	if (!beamfs_scrub_node_current(inode, top, depth, base, blk)) {
+		mutex_unlock(&fi->i_alloc_mutex);
+		kfree(ptrs);
+		return 0;
+	}
+	ibh = sb_bread(sb, blk);
+	if (!ibh) {
+		mutex_unlock(&fi->i_alloc_mutex);
+		kfree(ptrs);
+		return 0;
+	}
+
 	/*
 	 * Check the indirect block itself before reading it.
 	 *
@@ -403,43 +646,48 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 	 * a data block uses. A corrupted pointer array is worse than a
 	 * corrupted data block: it loses everything below it.
 	 */
-	if (beamfs_ind_parity_verify_medium(sb, ibh)) {
+	bad = beamfs_ind_parity_verify_medium(sb, ibh);
+	if (!bad) {
+		/*
+		 * The copy under the buffer lock, for the reason
+		 * beamfs_scrub_check_block gives about data blocks and
+		 * that was never applied to the blocks holding the
+		 * pointers.
+		 *
+		 * Every site in file_inline.c that installs a pointer
+		 * holds lock_buffer across the store. Copying without it
+		 * catches the block halfway, and the walk below then
+		 * descends into slots holding neither the old pointer
+		 * nor the new one.
+		 *
+		 * The verify above stays outside the lock on purpose. It
+		 * reads the parity region through beamfs_bread and takes
+		 * a scratch page from a pool of thirty-two, and holding
+		 * a buffer lock across that is the shape super.c
+		 * documents at the scratch pool: three tasks stalled 191
+		 * seconds in __bread_gfp under beamfs_ind_parity_verify,
+		 * the machine at 330% CPU, never returning. A verify
+		 * that reads a half-written block reports a block that
+		 * is sound as uncorrectable, which is noise in dmesg; a
+		 * walk over a half-written copy loses pointers, which is
+		 * not. The lock goes where the damage is.
+		 */
+		lock_buffer(ibh);
+		memcpy(ptrs, ibh->b_data, BEAMFS_BLOCK_SIZE);
+		unlock_buffer(ibh);
+	}
+	mutex_unlock(&fi->i_alloc_mutex);
+	brelse(ibh);
+	if (bad) {
 		pr_err_ratelimited("beamfs: sweep: indirect block %llu fails its parity\n",
 				   (unsigned long long)blk);
 		sbi->s_scrub_uncorrectable++;
-		brelse(ibh);
+		kfree(ptrs);
 		return 0;
 	}
 
-	/*
-	 * The copy under the buffer lock, for the reason
-	 * beamfs_scrub_check_block gives about data blocks and that was
-	 * never applied to the blocks holding the pointers.
-	 *
-	 * Every site in file_inline.c that installs a pointer holds
-	 * lock_buffer across the store. Copying without it catches the
-	 * block halfway, and the walk below then descends into slots
-	 * holding neither the old pointer nor the new one.
-	 *
-	 * The verify above stays outside the lock on purpose. It reads
-	 * the parity region through beamfs_bread and takes a scratch page
-	 * from a pool of thirty-two, and holding a buffer lock across
-	 * that is the shape super.c documents at the scratch pool: three
-	 * tasks stalled 191 seconds in __bread_gfp under
-	 * beamfs_ind_parity_verify, the machine at 330% CPU, never
-	 * returning. A verify that reads a half-written block reports a
-	 * block that is sound as uncorrectable, which is noise in dmesg;
-	 * a walk over a half-written copy loses pointers, which is not.
-	 * The lock goes where the damage is.
-	 */
-	lock_buffer(ibh);
-	ptrs = kmemdup(ibh->b_data, BEAMFS_BLOCK_SIZE, GFP_NOFS);
-	unlock_buffer(ibh);
-	brelse(ibh);
-	if (!ptrs)
-		return 0;
-
-	for (j = 0; j < nptrs && !kthread_should_stop(); j++) {
+	for (j = 0; j < nptrs && !kthread_should_stop() && inode->i_nlink;
+	     j++) {
 		u64 child = le64_to_cpu(ptrs[j]);
 		unsigned int corrected = 0;
 		int ret;
@@ -449,14 +697,25 @@ static u64 beamfs_scrub_walk_level(struct super_block *sb, u64 blk,
 
 		if (depth > 1) {
 			visited += beamfs_scrub_walk_level(sb, child,
-							   depth - 1, sbi);
+							   depth - 1, sbi,
+							   inode, top,
+							   base + j * span);
 			continue;
 		}
 
 		if (!beamfs_block_is_allocated(sb, child))
 			continue;
 
-		ret = beamfs_scrub_check_block(sb, child, &corrected);
+		/*
+		 * The copy is as old as this walk, and the leaf is not
+		 * trusted for what it says: check_block asks the owner
+		 * whether logical block @base + j is still @child, and
+		 * skips it with -ESTALE when it is not.
+		 */
+		ret = beamfs_scrub_check_block(sb, child, &corrected,
+					       inode, base + j);
+		if (ret == -ESTALE)
+			continue;
 		if (ret == -EUCLEAN)
 			pr_err_ratelimited("beamfs: sweep: block %llu is a leaf under indirect %llu (depth %u, slot %llu)\n",
 					   (unsigned long long)child,
@@ -569,27 +828,78 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	if (!S_ISREG(mode))
 		return;
 
-	for (i = 0; i < BEAMFS_DIRECT_BLOCKS && !kthread_should_stop(); i++) {
-		u64 blk = le64_to_cpu(raw->i_direct[i]);
-		unsigned int corrected = 0;
-		int ret;
+	{
+		/*
+		 * The inode, held from here to the end of the walk.
+		 *
+		 * The check above says nobody is writing the file
+		 * now. The walk takes seconds to minutes, and a file
+		 * unlinked in the meantime was evicted, its blocks
+		 * freed and handed to other files, while the walk
+		 * still took them for its leaves: that is how the
+		 * sweep came to "correct" other files' indirect
+		 * blocks to zero (known-limitations 3.39). A
+		 * reference keeps eviction, and so those frees, until
+		 * iput; truncate frees under i_alloc_mutex, under
+		 * which every block of the walk is checked. The walk
+		 * stops at its next block once the file is unlinked,
+		 * so the frees wait one pace interval at most.
+		 * beamfs_iget refuses, with -ESTALE, a slot freed
+		 * since the snapshot above.
+		 *
+		 * The tree walked is the one in memory, under the same
+		 * mutex: the snapshot says what the inode was when it
+		 * last reached the medium, not what its writers have
+		 * made of it since.
+		 */
+		struct inode *inode;
+		struct beamfs_inode_info *fi;
+		__le64 direct[BEAMFS_DIRECT_BLOCKS];
+		u64 roots[3];
 
-		if (!blk || !beamfs_block_is_allocated(sb, blk))
-			continue;
+		inode = beamfs_iget(sb, ino);
+		if (IS_ERR(inode))
+			return;
+		if (!S_ISREG(inode->i_mode) || !inode->i_nlink) {
+			iput(inode);
+			return;
+		}
+		fi = BEAMFS_I(inode);
+		mutex_lock(&fi->i_alloc_mutex);
+		memcpy(direct, fi->i_direct, sizeof(direct));
+		roots[0] = le64_to_cpu(fi->i_indirect);
+		roots[1] = le64_to_cpu(fi->i_dindirect);
+		roots[2] = le64_to_cpu(fi->i_tindirect);
+		mutex_unlock(&fi->i_alloc_mutex);
 
-		ret = beamfs_scrub_check_block(sb, blk, &corrected);
-		sbi->s_scrub_blocks++;
-		if (corrected)
-			sbi->s_scrub_corrected++;
-		if (ret == -EUCLEAN)
-			sbi->s_scrub_uncorrectable++;
+		for (i = 0; i < BEAMFS_DIRECT_BLOCKS &&
+		     !kthread_should_stop() && inode->i_nlink; i++) {
+			u64 blk = le64_to_cpu(direct[i]);
+			unsigned int corrected = 0;
+			int ret;
 
-		msleep_interruptible(READ_ONCE(sbi->s_scrub_interval_ms));
+			if (!blk || !beamfs_block_is_allocated(sb, blk))
+				continue;
+
+			ret = beamfs_scrub_check_block(sb, blk, &corrected,
+						       inode, i);
+			if (ret == -ESTALE)
+				continue;
+			sbi->s_scrub_blocks++;
+			if (corrected)
+				sbi->s_scrub_corrected++;
+			if (ret == -EUCLEAN)
+				sbi->s_scrub_uncorrectable++;
+
+			msleep_interruptible(READ_ONCE(sbi->s_scrub_interval_ms));
+		}
+
+		for (i = 0; i < 3; i++)
+			beamfs_scrub_walk_level(sb, roots[i], i + 1, sbi,
+						inode, i + 1,
+						beamfs_scrub_root_base(i + 1));
+		iput(inode);
 	}
-
-	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_indirect), 1, sbi);
-	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_dindirect), 2, sbi);
-	beamfs_scrub_walk_level(sb, le64_to_cpu(raw->i_tindirect), 3, sbi);
 	}
 }
 
@@ -705,7 +1015,14 @@ static void beamfs_scrub_wear_step(struct super_block *sb,
 	if (!beamfs_block_is_allocated(sb, phys))
 		return;
 
-	if (beamfs_scrub_check_block(sb, phys, &corrected) == -EUCLEAN)
+	/*
+	 * Checked and reported, never written: the wear map names a
+	 * physical block, and nothing says what it holds now or whose it
+	 * is. A worn block is repaired when the sweep reaches the file
+	 * that owns it, which asks the owner first (known-limitations
+	 * 3.39).
+	 */
+	if (beamfs_scrub_check_block(sb, phys, &corrected, NULL, 0) == -EUCLEAN)
 		sbi->s_scrub_uncorrectable++;
 	sbi->s_scrub_blocks++;
 	if (corrected)
@@ -1055,6 +1372,26 @@ int beamfs_scrub_init(struct super_block *sb)
 	return 0;
 }
 
+/*
+ * Stop the sweep. Safe to call more than once.
+ *
+ * The sweep holds a reference on the inode it walks, and put_super runs
+ * after generic_shutdown_super has evicted the volume's inodes: an
+ * inode still held then is busy after unmount, and its iput later
+ * touches a superblock that is gone. beamfs_kill_sb calls this before
+ * kill_block_super; put_super calls beamfs_scrub_exit, which finds the
+ * thread already stopped and takes down the sysfs directory.
+ */
+void beamfs_scrub_stop(struct super_block *sb)
+{
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+
+	if (sbi && sbi->s_scrub_thread) {
+		kthread_stop(sbi->s_scrub_thread);
+		sbi->s_scrub_thread = NULL;
+	}
+}
+
 void beamfs_scrub_exit(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
@@ -1062,10 +1399,7 @@ void beamfs_scrub_exit(struct super_block *sb)
 	if (!sbi)
 		return;
 
-	if (sbi->s_scrub_thread) {
-		kthread_stop(sbi->s_scrub_thread);
-		sbi->s_scrub_thread = NULL;
-	}
+	beamfs_scrub_stop(sb);
 	if (sbi->s_kobj.state_initialized) {
 		kobject_del(&sbi->s_kobj);
 		kobject_put(&sbi->s_kobj);

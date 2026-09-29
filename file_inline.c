@@ -140,8 +140,8 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 	return 0;
 }
 
-static int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
-				     u64 *phys_out)
+int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
+			      u64 *phys_out)
 {
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
 	struct super_block       *sb = inode->i_sb;
