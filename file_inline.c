@@ -770,6 +770,36 @@ int beamfs_seal_data_block(struct super_block *sb, u8 *block)
 				       BEAMFS_DATA_INLINE_SUBBLOCKS);
 }
 
+/*
+ * Dirty an indirect block and attach it to @inode, unless its last
+ * write failed.
+ *
+ * An install reads the parent block, allocates the child -- which can
+ * sleep -- and only then stores the pointer and dirties the parent. A
+ * write of the parent that fails in between leaves it not uptodate
+ * (end_buffer_write_sync clears the bit on an error): the medium holds
+ * an older block than memory does, and dirtying it anyway is what
+ * mark_buffer_dirty warns about. The volume is failed instead, as
+ * beamfs_write_bitmap_block does for a bitmap block (known-limitations
+ * 3.40 and 3.41).
+ *
+ * Tested under the buffer lock: a write in flight holds it until its
+ * completion has set or cleared uptodate.
+ */
+static void beamfs_attach_dirty(struct inode *inode, struct buffer_head *bh)
+{
+	lock_buffer(bh);
+	if (!buffer_uptodate(bh)) {
+		unlock_buffer(bh);
+		pr_err_ratelimited("beamfs: block %llu: its last write failed, not dirtied again\n",
+				   (unsigned long long)bh->b_blocknr);
+		beamfs_fail(inode->i_sb, "indirect block write", -EIO);
+		return;
+	}
+	mmb_mark_buffer_dirty(bh, &BEAMFS_I(inode)->i_metadata_bhs);
+	unlock_buffer(bh);
+}
+
 static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						  u64 iblock_logical,
 						  u64 *phys_out,
@@ -1196,7 +1226,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * the flusher reallocating for the same inode seconds later
 		 * because the tree it read had none of them.
 		 */
-		mmb_mark_buffer_dirty(ibh, &BEAMFS_I(inode)->i_metadata_bhs);
+		beamfs_attach_dirty(inode, ibh);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
 		brelse(ibh);
@@ -1474,8 +1504,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
 			 */
-			mmb_mark_buffer_dirty(ibh,
-					      &BEAMFS_I(inode)->i_metadata_bhs);
+			beamfs_attach_dirty(inode, ibh);
 			/*
 			 * And the inode, so the list gets flushed.
 			 *
@@ -1661,7 +1690,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * the flusher reallocating for the same inode seconds later
 		 * because the tree it read had none of them.
 		 */
-		mmb_mark_buffer_dirty(l1bh, &BEAMFS_I(inode)->i_metadata_bhs);
+		beamfs_attach_dirty(inode, l1bh);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
 		brelse(l1bh);
@@ -1907,8 +1936,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
 			 */
-			mmb_mark_buffer_dirty(ibh,
-					      &BEAMFS_I(inode)->i_metadata_bhs);
+			beamfs_attach_dirty(inode, ibh);
 			/*
 			 * And the inode, so the list gets flushed.
 			 *
@@ -2060,8 +2088,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * any other: the parent goes on the inode's list too,
 			 * or it is dirty on nobody's.
 			 */
-			mmb_mark_buffer_dirty(l1bh,
-					      &BEAMFS_I(inode)->i_metadata_bhs);
+			beamfs_attach_dirty(inode, l1bh);
 			/*
 			 * And the inode, so the list gets flushed.
 			 *
@@ -2217,7 +2244,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * the flusher reallocating for the same inode seconds later
 		 * because the tree it read had none of them.
 		 */
-		mmb_mark_buffer_dirty(l2bh, &BEAMFS_I(inode)->i_metadata_bhs);
+		beamfs_attach_dirty(inode, l2bh);
 		inode_set_ctime_current(inode);
 		mark_inode_dirty(inode);
 		brelse(l2bh);

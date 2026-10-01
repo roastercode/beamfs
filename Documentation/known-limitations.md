@@ -1900,3 +1900,30 @@ and, when a write of the block has failed, fails the volume
 the buffer. The allocation or free in progress is not undone: its
 callers ignore the return, as before, and the volume refuses the
 writes that follow.
+
+### 3.41 An indirect block whose write failed was dirtied again (fixed in 0.1.25)
+
+Measured on 2026-10-01 on aarch64 (compute01), kernel 7.3-rc5, beamfs
+0.1.24, generic/361 (beamfs-xfstests bench, seed 20260910), four trials
+of four. Once 3.40 had failed the volume at the first lost bitmap
+write, the write in progress went on, and 3 to 9 ms later came
+"WARNING: fs/buffer.c:991 at mark_buffer_dirty" from
+mmb_mark_buffer_dirty in beamfs_inline_lookup_or_alloc_phys_new: the
+install of a data block into an L1 block of the double-indirect tree.
+x86-64 passed four of four; there a single write was lost, the
+superblock's, and the volume failed before any other.
+
+The cause is the one of 3.40, in another buffer. Six installs read the
+parent block (sb_bread), allocate the child (beamfs_alloc_block, which
+can sleep), store the pointer under the parent's lock and dirty the
+parent. A write of the parent that fails in between leaves it not
+uptodate, and it was dirtied regardless.
+
+0.1.25. The six installs dirty the parent through beamfs_attach_dirty,
+which tests uptodate under the buffer lock and, when the last write of
+the block failed, names the block, fails the volume and leaves the
+buffer clean. The install in progress is not undone, as in 3.40.
+
+Not changed, not measured: the same sequence exists in file.c
+(beamfs_iomap_begin) and in namei.c (beamfs_dir_get_block, a
+directory's indirect block).
