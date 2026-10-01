@@ -486,6 +486,33 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 */
 	lock_buffer(bh);
 	/*
+	 * Not over a write that failed.
+	 *
+	 * The bitmap blocks are read at mount into buffers held until
+	 * unmount, and the module never reads them again. A write of one
+	 * that fails leaves its buffer not uptodate (end_buffer_write_sync
+	 * clears the bit on an error): the medium holds an older bitmap
+	 * than memory does. Dirtying the buffer anyway is what
+	 * mark_buffer_dirty warns about. The superblock, the other buffer
+	 * held for the mount, is treated this way in
+	 * beamfs_dirty_super_now: the volume is failed and refuses further
+	 * writes.
+	 *
+	 * generic/361 on aarch64, kernel 7.3-rc5, beamfs 0.1.23, on
+	 * 2026-10-01: writes to loop0, the device under the volume,
+	 * failed ("lost sync page write"), and within a millisecond came
+	 * the WARNING at fs/buffer.c:991 from here, called by
+	 * beamfs_alloc_block.
+	 *
+	 * Tested under the buffer lock: a write in flight holds it until
+	 * its completion has set or cleared uptodate.
+	 */
+	if (!buffer_uptodate(bh)) {
+		unlock_buffer(bh);
+		beamfs_fail(sb, "write_bitmap_block", -EIO);
+		return -EIO;
+	}
+	/*
 	 * Only the codeword this bit belongs to. The other fifteen are
 	 * untouched and their parity still holds.
 	 */

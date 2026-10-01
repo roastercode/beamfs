@@ -1873,3 +1873,30 @@ What it costs: a file unlinked while the sweep walks it is evicted,
 and its blocks freed, when the walk reaches its next block, up to one
 pace interval late. A worn block the wear step finds is repaired when
 the sweep reaches the file that owns it.
+
+### 3.40 A bitmap block whose write failed was dirtied again (fixed in 0.1.24)
+
+Measured on 2026-10-01 on aarch64 (compute01), kernel 7.3-rc5, beamfs
+0.1.23: generic/361 fails on "_check_dmesg: something found in dmesg",
+in the aarch64 sweep (sweep-1790856078) and in a beamfs-xfstests bench
+of the same day (seed 20260910). The kernel
+reports writes to loop0, the device under the volume the test builds,
+failing with "Buffer I/O error ... lost sync page write", and within a
+millisecond "WARNING: fs/buffer.c:991 at mark_buffer_dirty", called
+from beamfs_write_bitmap_block, itself called by beamfs_alloc_block on
+the write path. The x86-64 sweep of 0.1.23 passed it
+(sweep-1790676774, 734/734).
+
+The cause. The bitmap blocks are read once at mount into buffers held
+until unmount (s_bitmap_blkhs). A write that fails clears the buffer's
+uptodate bit in its completion (end_buffer_write_sync); the module
+never reads the block again, and the next allocation or free dirtied
+the buffer regardless. The superblock, the only other buffer held for
+the mount, was already tested in beamfs_dirty_super_now.
+
+0.1.24. beamfs_write_bitmap_block tests uptodate under the buffer lock
+and, when a write of the block has failed, fails the volume
+(beamfs_fail, as for the superblock) and returns -EIO without dirtying
+the buffer. The allocation or free in progress is not undone: its
+callers ignore the return, as before, and the volume refuses the
+writes that follow.
