@@ -948,9 +948,11 @@ void beamfs_fail(struct super_block *sb, const char *where, int err)
 	 * and every test after it got "No space left on device" from a
 	 * mount that had quietly refused: nine failures from one.
 	 *
-	 * Every write path already tests beamfs_failed(). The VFS keeps
-	 * sending work and gets EIO for it, which is what a failed device
-	 * should produce, and the next mount starts from a zeroed sb_info.
+	 * What refuses a failed volume, with EIO: a write through
+	 * beamfs_inline_iomap_begin (since 0.1.26), the allocator and its
+	 * callers, an inode write, the superblock and the bitmap. Data
+	 * already accepted into the page cache is still written back. The
+	 * next mount starts from a zeroed sb_info.
 	 */
 }
 
@@ -1935,6 +1937,6 @@ module_exit(beamfs_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aurelien DESBRIERES <aurelien@hackers.camp>");
 MODULE_DESCRIPTION("beamfs - resilient filesystem");
-MODULE_VERSION("0.1.25");
+MODULE_VERSION("0.1.26");
 MODULE_ALIAS_FS("beamfs");
 MODULE_SOFTDEP("pre: reed_solomon");

@@ -878,6 +878,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		}
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
+			if (beamfs_failed(sb))
+				return -EIO;
 			pr_warn_once("beamfs/inline: volume full, first refusal at direct\n");
 			return -ENOSPC;
 		}
@@ -974,6 +976,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			/* Allocate indirect block first, zero-init. */
 			indirect_blk = beamfs_alloc_block(sb, inode);
 			if (!indirect_blk) {
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at indirect\n");
 				return -ENOSPC;
 			}
@@ -1120,6 +1124,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(ibh);
+			if (beamfs_failed(sb))
+				return -EIO;
 			pr_warn_once("beamfs/inline: volume full, first refusal at data\n");
 			return -ENOSPC;
 		}
@@ -1259,6 +1265,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		if (!dindirect_blk) {
 			dindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!dindirect_blk) {
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at dindirect\n");
 				return -ENOSPC;
 			}
@@ -1397,6 +1405,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at L1 indirect\n");
 				return -ENOSPC;
 			}
@@ -1584,6 +1594,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l1bh);
+			if (beamfs_failed(sb))
+				return -EIO;
 			pr_warn_once("beamfs/inline: volume full, first refusal at dindirect data\n");
 			return -ENOSPC;
 		}
@@ -1722,6 +1734,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		if (!tindirect_blk) {
 			tindirect_blk = beamfs_alloc_block(sb, inode);
 			if (!tindirect_blk) {
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect\n");
 				return -ENOSPC;
 			}
@@ -1829,6 +1843,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			l1_blk = beamfs_alloc_block(sb, inode);
 			if (!l1_blk) {
 				brelse(ibh);
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect L1\n");
 				return -ENOSPC;
 			}
@@ -1981,6 +1997,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			l2_blk = beamfs_alloc_block(sb, inode);
 			if (!l2_blk) {
 				brelse(l1bh);
+				if (beamfs_failed(sb))
+					return -EIO;
 				pr_warn_once("beamfs/inline: volume full, first refusal at tindirect L2\n");
 				return -ENOSPC;
 			}
@@ -2138,6 +2156,8 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		new_block = beamfs_alloc_block(sb, inode);
 		if (!new_block) {
 			brelse(l2bh);
+			if (beamfs_failed(sb))
+				return -EIO;
 			pr_warn_once("beamfs/inline: volume full, first refusal at tindirect data\n");
 			return -ENOSPC;
 		}
@@ -3062,6 +3082,20 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		 * often enough by 256 threads.
 		 */
 		bool fresh = false;
+
+		/*
+		 * Not on a failed volume.
+		 *
+		 * beamfs_fail says "refusing further writes" and nothing in
+		 * this file asked: a write into a block the file already had
+		 * was accepted, and one that needed a block was told ENOSPC by
+		 * the allocator, which answers 0 for a failed volume as for a
+		 * full one. generic/361 on aarch64, 2026-10-01: "pwrite: No
+		 * space left on device" on a 1 GiB volume holding 520 MiB
+		 * (known-limitations 3.42).
+		 */
+		if (beamfs_failed(inode->i_sb))
+			return -EIO;
 
 		mutex_lock(&fi->i_alloc_mutex);
 		ret = beamfs_inline_lookup_or_alloc_phys_new(inode, b, &phys,

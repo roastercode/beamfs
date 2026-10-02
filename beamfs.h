@@ -691,8 +691,8 @@ void beamfs_fail(struct super_block *sb, const char *where, int err);
  * dirtied a buffer nobody could read -- the WARN_ON_ONCE inside
  * mark_buffer_dirty, which generic/338 provokes with dm-error.
  *
- * One wrapper, so a read that fails is a volume that has failed, and
- * every write path already tests beamfs_failed().
+ * One wrapper, so a read that fails is a volume that has failed. What a
+ * failed volume refuses is listed in beamfs_fail.
  */
 static inline struct buffer_head *beamfs_bread(struct super_block *sb,
 					       sector_t block,

@@ -1927,3 +1927,29 @@ buffer clean. The install in progress is not undone, as in 3.40.
 Not changed, not measured: the same sequence exists in file.c
 (beamfs_iomap_begin) and in namei.c (beamfs_dir_get_block, a
 directory's indirect block).
+
+### 3.42 A failed volume answered ENOSPC and took writes into existing blocks (fixed in 0.1.26)
+
+Measured on 2026-10-01, generic/361 on aarch64 (compute01), beamfs
+0.1.25: once the volume had failed at the first lost bitmap write, the
+write in progress was answered "No space left on device", on a 1 GiB
+volume holding 520 MiB, and dmesg said "volume full, first refusal at L1
+indirect". beamfs_alloc_block returns 0 for a failed volume as for a
+full one, and its ten callers in file_inline.c read 0 as full.
+
+Read in the source at the same time: beamfs_failed() was tested in the
+allocator (alloc.c), in beamfs_write_inode_raw_flags (namei.c) and for
+the superblock, and nowhere in file_inline.c. A write into a block the
+file already had was accepted, against the "refusing further writes" of
+beamfs_fail and two comments that said every write path tested it.
+
+0.1.26. beamfs_inline_iomap_begin refuses a write on a failed volume
+with EIO before any allocation, and the ten callers of the allocator
+answer EIO rather than ENOSPC when the volume fails under them. Data
+already accepted into the page cache before the failure is still
+written back.
+
+Not changed: mount -o remount,ro of a failed volume returns the error of
+sync_filesystem, which beamfs_reconfigure passes on as it is. generic/361
+issues it after its writes and checks only that it does not hang; it
+fails on x86-64 and aarch64 alike ("can't read superblock" from mount).
