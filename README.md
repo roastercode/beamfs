@@ -8,9 +8,9 @@ Linux.
 
 ## Changelog
 
-**Warning:** beamfs up to 0.1.26 has known defects that lose data,
-weaken security or crash the kernel; read the 0.1.26 entry below before
-using it.
+**Warning:** beamfs 0.1.26 (`beamfs-v3`), and `main` since, have known
+defects that lose data, weaken security or crash the kernel; read the
+0.1.26 entry below before using it.
 
 The full record is in [CHANGELOG.md](CHANGELOG.md); its latest entries
 follow.
@@ -43,6 +43,9 @@ follow.
   255) becomes a build-time check, `max()` replaces a spelled-out
   maximum, and two lines past 100 columns are reflowed; no change in
   behaviour.
+- Releases are numbered the way the kernel numbers its own, as the
+  README now sets out under Versions: `beamfs-v3` is 3.0, and the next
+  release is 3.1, in place of the 0.2.0 announced before.
 
 #### Added
 
@@ -72,13 +75,14 @@ follow.
 
 ### [0.1.26] - 2026-10-02
 
-The version the v3 report measures (commit `1bf151d`).
+The version the v3 report measures (commit `1bf151d`), released as
+`beamfs-v3`: 3.0 in the numbering that follows it.
 
 #### Known defects
 
 A code review on 2026-10-09 found these defects in 0.1.26 and in every
 earlier version. They were established by reading the code; each fix
-in 0.2.0 comes with a test that reproduces the defect. Until a release
+in 3.1 comes with a test that reproduces the defect. Until a release
 says otherwise, do not keep data you cannot afford to lose on beamfs,
 do not mount an image you did not create, and do not mount beamfs where
 untrusted users can write to it.
@@ -222,9 +226,45 @@ kernel.
 - [ ] v4, the items of section XI of the v3 report: indirect blocks with
       a whole parity slot and a generation, `DATA_CSUM` and `DATA_SELFID`
       by default, parity interleaving, a fixed injector, a beam campaign
-- [ ] beamfs 0.2.0: the fixes of the known defects of 0.1.26 (see the
+- [ ] beamfs 3.1: the fixes of the known defects of 0.1.26 (see the
       changelog), each with its test
 - [ ] beamfs RFC to linux-fsdevel
+
+## Versions
+
+beamfs numbers its releases the way the kernel numbers its own
+(`Documentation/process/2.Process.rst`), not by semantic versioning:
+
+- A release is a signed tag on `main`, `beamfs-vX.Y`, as mainline
+  releases are tags `vX.Y`. It carries everything merged since the
+  previous one, new work, cleanups and fixes alike. Y goes up by one at
+  each release. X goes up when it is deemed time to, as the kernel's
+  does when its second number is deemed large enough, and says nothing
+  about compatibility; the next is planned with the work of section XI
+  of the v3 report. `beamfs-v3` is 3.0.
+- `beamfs-vX.Y.Z` is a stable update of X.Y: fixes already on `main`
+  and nothing else, on a branch cut from the `beamfs-vX.Y` tag, under
+  the rules of `Documentation/process/stable-kernel-rules.rst`. There
+  is none so far.
+- The number in the source changes only at a tag. The tagged commit
+  sets `MODULE_VERSION` to X.Y.Z, Z being 0 for a release; between two
+  tags the source keeps the number of the last one, and a build is
+  identified by its commit (`git describe`) and by the module's
+  `srcversion`.
+- Compatibility is not carried by the number. The format of a volume
+  is carried by its feature flags (compat, ro_compat, incompat), as in
+  ext2 and ext4. Interfaces to userspace fall under the kernel's rule
+  of no regressions, as
+  `Documentation/admin-guide/reporting-regressions.rst` states it: once
+  described in `Documentation/ABI`, an interface can gain features but
+  does not break, short of grave errors or security problems, and is
+  removed only after going through `obsolete`
+  (`Documentation/ABI/README`).
+- The tools in `tools/` keep their own numbers, which move with each
+  change to them; a release names the versions it carries.
+
+The module of `beamfs-v3` declares 0.1.26, the last number of the
+scheme used before this one.
 
 ## Cite
 

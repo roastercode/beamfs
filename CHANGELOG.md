@@ -1,14 +1,18 @@
 # Changelog
 
 All notable changes to beamfs are recorded here: the kernel module, its
-on-disk format and the userspace tools in `tools/`. Versions are those
-of the module (`MODULE_VERSION`); the tools keep their own version
-numbers, named in an entry when they change. The layout follows Keep a
-Changelog (https://keepachangelog.com/en/1.1.0/), with one section of
-its own, Known defects.
+on-disk format and the userspace tools in `tools/`. The layout follows
+Keep a Changelog (https://keepachangelog.com/en/1.1.0/), with one
+section of its own, Known defects.
 
-This record starts at 0.1.26, the version the v3 report measures; the
-history before it is in `git log`.
+Releases are numbered the way the kernel numbers its own, not by
+semantic versioning; the README sets the rule out under Versions. An
+entry is a release, `beamfs-vX.Y`, named by its number; the tools keep
+their own numbers, named in an entry when they change.
+
+This record starts at 0.1.26, the version the v3 report measures and
+the module of `beamfs-v3` (3.0) declares; the history before it is in
+`git log`.
 
 ## [Unreleased]
 
@@ -38,6 +42,9 @@ history before it is in `git log`.
   255) becomes a build-time check, `max()` replaces a spelled-out
   maximum, and two lines past 100 columns are reflowed; no change in
   behaviour.
+- Releases are numbered the way the kernel numbers its own, as the
+  README now sets out under Versions: `beamfs-v3` is 3.0, and the next
+  release is 3.1, in place of the 0.2.0 announced before.
 
 ### Added
 
@@ -67,13 +74,14 @@ history before it is in `git log`.
 
 ## [0.1.26] - 2026-10-02
 
-The version the v3 report measures (commit `1bf151d`).
+The version the v3 report measures (commit `1bf151d`), released as
+`beamfs-v3`: 3.0 in the numbering that follows it.
 
 ### Known defects
 
 A code review on 2026-10-09 found these defects in 0.1.26 and in every
 earlier version. They were established by reading the code; each fix
-in 0.2.0 comes with a test that reproduces the defect. Until a release
+in 3.1 comes with a test that reproduces the defect. Until a release
 says otherwise, do not keep data you cannot afford to lose on beamfs,
 do not mount an image you did not create, and do not mount beamfs where
 untrusted users can write to it.
