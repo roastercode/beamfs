@@ -6,14 +6,33 @@ decodes it, and a read beamfs cannot vouch for fails with `-EIO` instead
 of returning wrong bytes. It descends from FTRFS and targets mainline
 Linux.
 
-## Warning: known defects in beamfs up to 0.1.26
+## Changelog
 
-A code review on 2026-10-09 found defects in beamfs 0.1.26 (commit
-`1bf151d`, the code the v3 report measures) and in every earlier
-version. They were established by reading the code; a test that
-reproduces each one is written with its fix. Until a release says
-otherwise, do not keep data you cannot afford to lose on beamfs, do not
-mount an image you did not create, and do not mount beamfs where
+**Warning:** beamfs up to 0.1.26 has known defects that lose data,
+weaken security or crash the kernel; read the 0.1.26 entry below before
+using it.
+
+The full record is in [CHANGELOG.md](CHANGELOG.md); its latest entries
+follow.
+
+### [Unreleased]
+
+#### Added
+
+- This changelog. The README carries its latest entries at the top, and
+  the warning on the known defects of 0.1.26 is now one of them.
+
+### [0.1.26] - 2026-10-02
+
+The version the v3 report measures (commit `1bf151d`).
+
+#### Known defects
+
+A code review on 2026-10-09 found these defects in 0.1.26 and in every
+earlier version. They were established by reading the code; each fix
+in 0.2.0 comes with a test that reproduces the defect. Until a release
+says otherwise, do not keep data you cannot afford to lose on beamfs,
+do not mount an image you did not create, and do not mount beamfs where
 untrusted users can write to it.
 
 Data loss:
@@ -50,8 +69,7 @@ Kernel crashes:
   protection scheme 5, unknown indirect-parity mode) crashes the kernel.
 
 The measurements of the v3 report stand as measured: none of the tests
-that ran detected these defects. The fixes and their tests will be in
-beamfs 0.2.0; this section will say what remains.
+that ran detected these defects.
 
 ## State: beamfs v3
 
@@ -156,8 +174,8 @@ kernel.
 - [ ] v4, the items of section XI of the v3 report: indirect blocks with
       a whole parity slot and a generation, `DATA_CSUM` and `DATA_SELFID`
       by default, parity interleaving, a fixed injector, a beam campaign
-- [ ] beamfs 0.2.0: the fixes of the defects listed under Warning, each
-      with its test
+- [ ] beamfs 0.2.0: the fixes of the known defects of 0.1.26 (see the
+      changelog), each with its test
 - [ ] beamfs RFC to linux-fsdevel
 
 ## Cite
