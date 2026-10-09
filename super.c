@@ -1147,7 +1147,7 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 	 */
 	if (WARN_ON_ONCE(n_positions > BEAMFS_RS_PARITY / 2))
 		return;
-	if (WARN_ON_ONCE((n_positions == 0) != (positions == NULL)))
+	if (WARN_ON_ONCE(!n_positions != !positions))
 		return;
 	if (WARN_ON_ONCE(code_len_bytes == 0 ||
 			 code_len_bytes > BEAMFS_SUBBLOCK_DATA))

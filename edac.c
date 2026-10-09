@@ -253,12 +253,12 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
  * full subblock length. The same length must be passed to the matching
  * beamfs_rs_decode call.
  *
- * The kernel encode_rs8 API takes uint8_t *data directly; parity is
- * returned via a uint16_t *par buffer (low byte holds the parity symbol).
+ * encode_rs8() takes the data as bytes and returns the parity in a u16
+ * buffer, one symbol in the low byte of each entry.
  */
-int beamfs_rs_encode(uint8_t *data, size_t len, uint8_t *parity)
+int beamfs_rs_encode(u8 *data, size_t len, u8 *parity)
 {
-	uint16_t par[BEAMFS_RS_PARITY];
+	u16 par[BEAMFS_RS_PARITY];
 	struct rs_control **ctrl_p;
 	struct rs_control *ctrl;
 	int i;
@@ -279,7 +279,7 @@ int beamfs_rs_encode(uint8_t *data, size_t len, uint8_t *parity)
 	put_cpu_ptr(beamfs_rs_ctrl_pcpu);
 
 	for (i = 0; i < BEAMFS_RS_PARITY; i++)
-		parity[i] = (uint8_t)par[i];
+		parity[i] = (u8)par[i];
 
 	return 0;
 }

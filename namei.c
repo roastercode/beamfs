@@ -606,9 +606,8 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 					if (!prev->d_ino &&
 					    prev_off / BEAMFS_SUBBLOCK_DATA ==
 					    offset / BEAMFS_SUBBLOCK_DATA)
-						prev->d_rec_len = cpu_to_le16(
-						    le16_to_cpu(prev->d_rec_len) +
-						    le16_to_cpu(de->d_rec_len));
+						le16_add_cpu(&prev->d_rec_len,
+							     le16_to_cpu(de->d_rec_len));
 				}
 
 				lock_buffer(bh);

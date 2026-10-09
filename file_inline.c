@@ -2480,7 +2480,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	/* Defensive contract checks (cheap; helpful in audit and fuzzing). */
 	if (WARN_ON_ONCE(phys == 0))
 		return -EINVAL;
-	if (WARN_ON_ONCE(dst_buf == NULL))
+	if (WARN_ON_ONCE(!dst_buf))
 		return -EINVAL;
 	if (WARN_ON_ONCE(slice_length == 0))
 		return -EINVAL;
