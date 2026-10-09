@@ -17,6 +17,22 @@ follow.
 
 ### [Unreleased]
 
+#### Changed
+
+- Comments rewritten to describe the code as it is: the scrubber writes
+  a corrected block back, the block bitmap is on disk, a capsule
+  survives a burst of 129 coded bytes (not 139) and its parity is not
+  interleaved, RS-mode indirect parity reports damage without repairing
+  it, readdir positions are byte offsets, the size limits are those of
+  the code. References to documents outside the tree, the project's
+  stage numbering, version history and validation claims nothing in the
+  tree substantiates are removed. Only comments and white space change:
+  with the comments stripped, every source file is the same token
+  stream.
+- `u8` and `u16` rather than `uint8_t` and `uint16_t`, `!p` rather than
+  `p == NULL`, and `le16_add_cpu`, as checkpatch --strict asks; no
+  change in behaviour.
+
 #### Added
 
 - This changelog. The README carries its latest entries at the top, and
