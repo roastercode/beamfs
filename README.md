@@ -1,89 +1,118 @@
 # beamfs - resilient filesystem
 
-beamfs is an EM-resilient Linux filesystem with RS(255,239) forward
-error correction, targeting mainline Linux RFC submission. It is the
-implementation successor to FTRFS, extending the original design with
-a formal recovery calculus and a soundness theorem.
+beamfs is an EM-resilient Linux filesystem. Every data block is a capsule
+of sixteen interleaved Reed-Solomon RS(255,239) codewords; every read
+decodes it, and a read beamfs cannot vouch for fails with `-EIO` instead
+of returning wrong bytes. It descends from FTRFS and targets mainline
+Linux.
 
-## Current state (2026-07-08)
+## State: beamfs v3
 
-The kernel module builds, mounts as rootfs, and passes the full R19
-validation pipeline (`beamfs-bench full`) under live RadFI electromagnetic
-fault injection on a 4-node aarch64 QEMU cluster (kernel 7.0.9 mainline).
-The §3.10 evict_inode bug (BUG_ON in clear_inode) is closed as of this
-date. Two known limitations remain open: §3.11 (RS silent miscorrection
-on data blocks under high-density injection) and §3.12 (emufi disabled
-on compute01).
+The beamfs v3 technical report measures beamfs 0.1.26, commit `1bf151d`,
+on Linux 7.3-rc5, on x86-64 and aarch64:
 
-Published artifacts:
-- beamfs v2 paper: [DOI 10.5281/zenodo.19886192](https://doi.org/10.5281/zenodo.19886192)
-- emufi v1 paper: [DOI 10.5281/zenodo.19885777](https://doi.org/10.5281/zenodo.19885777)
-- FTRFS v1 (predecessor): [DOI 10.5281/zenodo.19824442](https://doi.org/10.5281/zenodo.19824442)
+- xfstests, `auto` group, 734 tests: all 122 that ran on x86-64 passed,
+  and 122 of the 123 that ran on aarch64 (`generic/476` was stopped by
+  its time budget). xfstests declined the others, most of them for
+  features beamfs does not implement; they are counted apart, not as
+  passes.
+- Single-bit upsets injected into read bios by emufi 0.8.1, on a
+  four-node aarch64 cluster and on USB flash media: beamfs never
+  returned wrong data. It returned the correct file in every exercised
+  case but one, and in that one refused the read. In the same runs ext4
+  and ext3 returned silently corrupted data, and btrfs refused the read.
+- The injector itself is audited: on this kernel emufi logs one of its
+  two read hooks one bio before the block it flips, and the report
+  reconstructs the hook of every flip.
+
+The limits of these measurements are in section X of the report, the
+work toward v4 in section XI.
+
+- Report: [10.5281/zenodo.23253350](https://doi.org/10.5281/zenodo.23253350)
+  (all versions: [10.5281/zenodo.19886191](https://doi.org/10.5281/zenodo.19886191)).
+  The record also holds the workspace with the raw run records, the
+  root images and kernels measured, their build records, and the source
+  trees of the Yocto layer, the xfstests harness and the bench at the
+  commits used.
+- Sources of the report: [`papers/2026-10-beamfs-v3/`](papers/2026-10-beamfs-v3/).
+- Tags: `beamfs-v3` is the measured code plus the report; `beamfs-v2` is
+  the public `main` before v3.
+
+## Publications
+
+- beamfs v3, technical report: [10.5281/zenodo.23253350](https://doi.org/10.5281/zenodo.23253350)
+- beamfs v2: [10.5281/zenodo.19886192](https://doi.org/10.5281/zenodo.19886192)
+- EMUFI v1, the fault injector: [10.5281/zenodo.20041762](https://doi.org/10.5281/zenodo.20041762)
+- RadFI v1, methodology: [10.5281/zenodo.19885777](https://doi.org/10.5281/zenodo.19885777)
+- FTRFS v1, the predecessor: [10.5281/zenodo.19824442](https://doi.org/10.5281/zenodo.19824442)
+- FTRFS RFC to linux-fsdevel, April 2026: [lore.kernel.org](https://lore.kernel.org/linux-fsdevel/20260414120726.5713-1-aurelien@hackers.camp/T/)
 - ORCID: [0009-0002-0912-9487](https://orcid.org/0009-0002-0912-9487)
 
 ## Lineage
 
-The FTRFS name and original concept originates in:
+The FTRFS name and original concept originate in:
 
 > Fuchs, C.M., Langer, M., Trinitis, C. (2015).
 > *FTRFS: A Fault-Tolerant Radiation-Robust Filesystem for Space Use.*
 > ARCS 2015, Lecture Notes in Computer Science, vol 9017. Springer.
 > DOI: <https://doi.org/10.1007/978-3-319-16086-3_8>
 
-That work was developed at TU Munich (Institute for Astronautics) in the
-context of the MOVE-II CubeSat mission. FTRFS v1 (Desbrieres, 2026) is an
-independent open-source realization of the Fuchs et al. design with
-contemporary Linux kernel infrastructure. beamfs extends FTRFS with a
-formal recovery operator and a soundness theorem (Theorem IV.1, split
-into v2.2a proven + v2.2b conjecture in the v2 paper).
+FTRFS v1 (Desbrieres, 2026) is an independent open-source realisation of
+that design on contemporary Linux. beamfs is a new filesystem with its
+own on-disk format rather than a further FTRFS revision: the limits of
+FTRFS are conceptual (threat model, where correction sits, scale, kernel
+integration), as section II of the v3 report sets out. The soundness
+theorem of the first beamfs report was falsified by fault injection and
+withdrawn in v2.
 
 ## Repository layout
 
-  - `*.c`, `*.h`             kernel module sources
-  - `Kconfig`, `Makefile`    kernel build glue
-  - `tools/`                 fsck.beamfs, helper scripts
-  - `Documentation/`         design notes, known limitations, roadmap
-  - `papers/`                LaTeX sources (v1, v2, v3-findings)
-  - `context/`               session context, patches archive
+- `*.c`, `*.h`: kernel module sources
+- `Kconfig`, `Makefile`: kernel build glue
+- `tools/`: userspace tools (`mkfs.beamfs`, `fsck.beamfs`) and helper scripts
+- `Documentation/`: design notes, on-disk format, known limitations, roadmap
+- `papers/`: LaTeX sources of the reports
+- `context/`: working rules and notes of the project
 
 ## Build
 
-The reference target is the Yocto styhead research image built by
-`~/git/yocto-beamfs/` (layer `yocto-beamfs`), producing
-`beamfs-research-image-qemuarm64.beamfs` for the 4-VM aarch64
-cluster. The `~/git/beamfs/` tree is the canonical source; it is
-mirrored byte-exact under `yocto-beamfs/recipes-kernel/beamfs/files/
-beamfs-0.1.3/` (lockstep, enforced by R9/R19 pipeline).
+beamfs is built into the kernel of a Yocto image by the layer
+`yocto-beamfs`, which carries a copy of the module sources; for v3 every
+source file of the module was checked to have the same hash in this
+repository and in the layer. The v3 measurements used layer commit
+`9d43172`, Linux 7.3-rc5 (`72d3fcf8`) and `CONFIG_BEAMFS_FS=y` on both
+architectures. The layer is not public: its
+source tree at `9d43172` is in the Zenodo record of the v3 report, with
+the images built from it.
 
-Validation kernel: linux-stable `linux-7.0.y` branch, currently 7.0.9.
-Host: Gentoo amd64, kernel 7.1.3 (cross-compiles via Yocto).
+A build of the module alone against a kernel tree:
 
-For a host smoke-test against a Yocto-built kernel tree:
+    make KDIR=<path-to-kernel-build>
 
-make KDIR=<path-to-yocto-kernel-build>
-
-
-Compiling against a desktop kernel (e.g. Gentoo 7.1.x) is not supported
-and will fail on missing APIs (`inode_state_read_once`, mainline 7.0+).
+checks that it compiles; only the image build exercises the target
+kernel.
 
 ## Companion repositories
 
-- [yocto-beamfs](https://github.com/roastercode/yocto-beamfs) - Yocto layer (lockstep mirror, cluster config, HPC stack)
-- [beamfs-bench](https://github.com/roastercode/beamfs-bench) - Rust validation pipeline (R0/R19, multifs bench, RadFI orchestration)
-- [emufi](https://github.com/roastercode/emufi) - EM fault injector (kprobe-based, bio-layer)
-- [beamfs-overlay](https://github.com/roastercode/beamfs-overlay) - Gentoo ebuild overlay
+- [beamfs-xfstests](https://github.com/roastercode/beamfs-xfstests): the
+  xfstests harness used for v3.
+- `yocto-beamfs` (the Yocto layer, which also carries emufi 0.8.1),
+  `beamfs-bench` (the bench) and `beamfs-overlay` (Gentoo ebuilds) are
+  not public; their source trees at the commits the v3 measurements used
+  are in the Zenodo record.
 
 ## Status
 
-- [x] Yocto research image builds, mounts rootfs=beamfs, boots 4-node cluster
-- [x] R19 bench pipeline (`beamfs-bench full`) passes under RadFI injection
-- [x] §3.10 evict_inode BUG_ON closed (invalidate_inode_buffers, 2026-07-08)
-- [x] Published on Zenodo (beamfs v2 + emufi v1)
-- [ ] beamfs recovery calculus (Theorem v2.2b) proven
-- [ ] §3.11 RS silent miscorrection on data blocks resolved
-- [ ] §3.12 emufi re-enabled on compute01
-- [ ] RFC submitted to linux-fsdevel
-- [ ] Published on GitHub (public, roastercode/beamfs)
+- [x] beamfs 0.1.26 measured on two architectures (v3 report)
+- [x] Code public on GitHub, reports on Zenodo
+- [ ] v4, the items of section XI of the v3 report: indirect blocks with
+      a whole parity slot and a generation, `DATA_CSUM` and `DATA_SELFID`
+      by default, parity interleaving, a fixed injector, a beam campaign
+- [ ] beamfs RFC to linux-fsdevel
+
+## Cite
+
+See [`papers/2026-10-beamfs-v3/README.md`](papers/2026-10-beamfs-v3/README.md).
 
 ## License
 
