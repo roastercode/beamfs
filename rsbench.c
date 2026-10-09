@@ -2,7 +2,7 @@
 /*
  * beamfs -- Reed-Solomon micro-benchmark
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * What the codec costs, with no block layer underneath it.
  *
@@ -44,8 +44,8 @@ static struct dentry *beamfs_debugfs_root;
 static u32 beamfs_rsbench_iters = BEAMFS_RSBENCH_DEFAULT_ITERS;
 
 /*
- * One encode and one decode over a full 4096-byte block, which is
- * BEAMFS_DATA_INLINE_SUBBLOCKS shortened codewords.
+ * One encode and one decode over a block's payload: 3824 bytes, as
+ * BEAMFS_DATA_INLINE_SUBBLOCKS full-length RS(255,239) codewords.
  *
  * The decode runs on undamaged data. That is the case that matters:
  * every read pays it, whether or not anything is wrong, because the
@@ -209,12 +209,10 @@ static int beamfs_rsbench_show(struct seq_file *m, void *v)
 	/*
 	 * And what a burst costs, either way.
 	 *
-	 * Nine consecutive bytes is one ion track through a die. Laid
-	 * out contiguously they all land in one codeword and it is lost;
-	 * interleaved they land one per codeword and the block comes
-	 * back whole. The bench measured that in userspace; this is the
-	 * same question asked of the kernel's own codec, which is the
-	 * one that will be under the beam.
+	 * Nine consecutive bad bytes laid out contiguously all land in
+	 * one codeword and it is lost; interleaved they land one per
+	 * codeword and the block comes back whole. Asked here of the
+	 * kernel's own codec, the one that decodes the volume.
 	 */
 	beamfs_rsbench_burst(m);
 

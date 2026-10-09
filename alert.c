@@ -2,7 +2,7 @@
 /*
  * beamfs -- threshold alerting
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Everything beamfs knows about its own health is already recorded:
  * dmesg carries each uncorrectable, the RS journal holds coordinates,
@@ -26,8 +26,9 @@
  * notifications about it.
  *
  * No overlap with the report side: this signals that something
- * happened, raf-decode says what. A notification carrying its own
- * diagnosis would duplicate the decoder and drift from it.
+ * happened, and the RS journal, read by the userspace decoder, says
+ * what. A notification carrying its own diagnosis would duplicate the
+ * decoder and drift from it.
  */
 
 #include <linux/fs.h>

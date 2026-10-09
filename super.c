@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * beamfs - Superblock operations
- * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
 #include <linux/module.h>
@@ -50,7 +50,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 }
 
 /*
- * free_inode - return inode to slab cache (kernel 5.9+ uses free_inode)
+ * free_inode - return inode to slab cache
  */
 static void beamfs_free_inode(struct inode *inode)
 {
@@ -91,15 +91,10 @@ static void beamfs_put_super(struct super_block *sb)
 		beamfs_tc_exit(sbi);
 
 		/*
-		 * Belt and braces. The VFS calls sync_fs before put_super,
-		 * so anything pending has normally been rebuilt and written
-		 * already -- but the encode is now deferred, and an image
-		 * that never gets rebuilt is an image that reaches the disk
-		 * stale. Doing it here costs one pass over blocks that are
-		 * usually already clean.
-		 */
-		/*
 		 * Rebuild, then write, then release -- in that order.
+		 *
+		 * The VFS calls sync_fs before put_super, so this is usually
+		 * one pass over buffers that are already clean.
 		 *
 		 * The rebuild was here and the write was not, so
 		 * beamfs_destroy_bitmap released the buffers with brelse
@@ -179,14 +174,10 @@ static void beamfs_put_super(struct super_block *sb)
 }
 
 /*
- * evict_inode - called when inode nlink drops to 0 and last reference released
- * Frees the inode number back to the bitmap.
- */
-/*
  * seen_block -- linear search for a block id in the seen[] array.
- * Used by beamfs_free_data_blocks to deduplicate block frees in
- * evict path under inode corruption (RadFI flipping a pointer so
- * that two slots end up pointing at the same physical block).
+ * Used by beamfs_free_data_blocks to free each direct block once when
+ * the inode is corrupted -- a bit flip in a pointer can leave two
+ * slots naming the same physical block.
  */
 static bool seen_block(const u64 *seen, unsigned int n, u64 blk)
 {
@@ -378,8 +369,9 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 	}
 	/*
 	 * Free the block only once nothing points out of it. A block with
-	 * one surviving pointer is still load-bearing, and freeing it is
-	 * the mistake this rewrite exists to prevent.
+	 * one surviving pointer is still load-bearing: freeing it hands
+	 * the allocator a block whose live pointers a later lookup still
+	 * follows.
 	 */
 	if (survivors == 0) {
 		/*
@@ -428,23 +420,20 @@ bool beamfs_free_ind_range(struct super_block *sb, u64 blk,
 /*
  * beamfs_free_data_blocks -- release all data blocks of a deleted inode.
  *
- * Frees direct blocks and the single indirect block (and all blocks
- * it points to). Called from evict_inode when nlink drops to 0.
+ * Frees the direct blocks and the three indirection trees, or the data
+ * block of a long symlink. Called from evict_inode, under
+ * i_alloc_mutex, when nlink has dropped to 0.
  *
- * EM-resilience: under inode pointer corruption (e.g. RadFI bit-flip
- * landing on i_direct[i] or an entry of the indirect block), two
- * inode slots can end up pointing at the same physical block. The
- * naive free path would then call beamfs_free_block twice on that
- * block, triggering the 'double free of block N' pr_warn + stack
- * dump in alloc.c. Deduplicate explicitly: collect distinct block
- * IDs first, then free each once.
+ * A bit flip landing on i_direct[] can leave two slots naming the same
+ * physical block, and freeing it once per slot is a double free. A
+ * direct block is freed only if no earlier slot named it, tracked in
+ * seen[]; the indirection trees go through beamfs_free_one_block, which
+ * refuses a block the bitmap already calls free.
  *
- * Allocation budget: max BEAMFS_DIRECT_BLOCKS (12) + nptrs (512) +
- * 1 (indirect itself) = 525 u64 = 4200 bytes. kmalloc with GFP_NOFS
- * to avoid recursion into the filesystem from this path. On OOM
- * fall back to the un-deduplicated path: the bitmap stays correct
- * (beamfs_free_block silently rejects a 2nd free) at the cost of a
- * pr_warn per duplicate.
+ * seen[] is allocated with GFP_NOFS, to avoid recursion into the
+ * filesystem from this path. On OOM the direct blocks are freed without
+ * deduplication, and beamfs_free_block then refuses, with a
+ * rate-limited warning, a second free of a block still free.
  */
 static void beamfs_free_data_blocks(struct inode *inode)
 {
@@ -526,6 +515,12 @@ static void beamfs_free_data_blocks(struct inode *inode)
 	kfree(seen);
 }
 
+/*
+ * evict_inode - called when the last reference to an inode is dropped.
+ * An inode with no links left has its blocks freed, its mode zeroed on
+ * disk and its number returned to the bitmap. Every inode's metadata
+ * buffers are written before its list is dropped.
+ */
 static void beamfs_evict_inode(struct inode *inode)
 {
 	/* Its reservation window, before its blocks. */
@@ -573,20 +568,17 @@ static void beamfs_evict_inode(struct inode *inode)
 	 *
 	 * mmb_invalidate empties the list without writing anything --
 	 * fs/buffer.c takes each buffer off the queue and the contents go
-	 * with whatever they held. For an inode being deleted that is
-	 * right: the blocks are freed above and what they hold no longer
-	 * matters. For an inode that still has links it is not, and
-	 * nothing here told the two apart.
+	 * with whatever they held. For an inode that still has links,
+	 * that is metadata its pointers still reach.
 	 *
-	 * generic/269 leaves 2230 indirect blocks whose pointer is
-	 * installed and whose contents never reached the medium -- fsck
-	 * reads each as never described, the subtree under it
-	 * unreachable. A probe counted 23510 evictions and 23510
+	 * Without the sync, generic/269 left 2230 indirect blocks whose
+	 * pointer was installed and whose contents never reached the
+	 * medium -- fsck read each as never described, the subtree under
+	 * it unreachable. A probe counted 23510 evictions and 23510
 	 * invalidations, 16381 of them from umount: every dirty metadata
 	 * buffer an inode still owned at unmount was dropped.
 	 *
-	 * write_inode already syncs the same list; this is the path that
-	 * did not.
+	 * write_inode syncs the same list; eviction has to as well.
 	 */
 	{
 		int had = mmb_has_buffers(&BEAMFS_I(inode)->i_metadata_bhs);
@@ -655,7 +647,7 @@ static void beamfs_evict_inode(struct inode *inode)
 	 * truncate_inode_pages_final() had emptied it, which tripped
 	 * clear_inode()'s assertion. Confirmed by ftrace/kprobe on
 	 * beamfs_evict_inode and clear_inode during `depmod -a` on the
-	 * rootfs (renameat2 path, section 3.10).
+	 * rootfs (renameat2 path).
 	 *
 	 * The mechanism was i_data.i_private_list with
 	 * mark_buffer_dirty_inode() and invalidate_inode_buffers() until
@@ -670,7 +662,7 @@ static void beamfs_evict_inode(struct inode *inode)
 /*
  * beamfs_sync_fs - establish bitmap-before-inode ordering at sync time.
  *
- * Race fixed (sec. 3.10): without this hook, sync_filesystem() submits
+ * Without this hook, sync_filesystem() submits
  * the inode-table buffer (containing fresh inode->i_direct[] pointers)
  * through sync_blockdev_nowait() while the bitmap buffer (carrying the
  * matching bit clear) is left to the bdi writeback queue without
@@ -715,13 +707,11 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 	t0_ns = ktime_get_ns();
 
 	/*
-	 * Rebuild what changed, once, before any of it is written.
-	 *
-	 * The bits themselves moved in s_block_bitmap as they were
-	 * allocated and freed; the on-disk images and their RS parity are
-	 * built here instead of on every bit. One rebuild per bitmap block
-	 * that was touched, rather than one per data block -- 220000 of
-	 * them for an 800 MiB write, measured.
+	 * Rebuild anything still flagged as stale before any of it is
+	 * written. beamfs_write_bitmap_block and beamfs_dirty_super
+	 * rebuild as they mark the buffer dirty, so this normally finds
+	 * nothing to do; see beamfs_write_bitmap_block for why the bitmap
+	 * cannot wait for sync.
 	 */
 	beamfs_bitmap_encode_pending(sb);
 	beamfs_super_encode_pending(sbi);
@@ -805,20 +795,6 @@ static const struct super_operations beamfs_super_ops = {
 };
 
 /*
- * beamfs_dirty_super - propagate the authoritative in-memory superblock
- * (sbi->s_beamfs_sb) onto the buffer head, recompute s_crc32, and mark
- * the buffer dirty for writeback.
- *
- * Every site that mutates the on-disk superblock (free_blocks,
- * free_inodes, RS journal, ...) must call this helper instead of
- * mark_buffer_dirty(sbi->s_sbh) directly. Without the CRC refresh,
- * the on-disk superblock keeps a stale checksum that fails verification
- * at the next mount.
- *
- * Caller MUST hold sbi->s_lock so that the snapshot copied to the
- * buffer head is taken atomically with respect to other writers.
- */
-/*
  * beamfs_sb_to_rs_staging -- serialize the CRC32-covered region of a
  * superblock into a contiguous staging buffer for RS encode/decode.
  *
@@ -886,13 +862,12 @@ static void beamfs_sb_from_rs_staging(const u8 staging[BEAMFS_SB_RS_STAGING_BYTE
 }
 
 /*
- * Rebuild the superblock's on-disk image if anything changed it.
+ * Rebuild the superblock's on-disk image if it is flagged as stale.
  *
- * The same reasoning as the bitmap: the in-memory superblock is the
- * authority, and its 2743-byte staging copy plus RS encode only has to
- * be right when the buffer is written. Doing it per allocation meant a
- * kvmalloc and a full re-encode for every data block -- the second of
- * two metadata encodes per block of payload.
+ * beamfs_dirty_super rebuilds on every change and clears
+ * s_super_needs_encode -- see there for why the superblock cannot wait
+ * for sync -- so from sync_fs and put_super this normally finds nothing
+ * to do.
  */
 void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
 {
@@ -902,16 +877,6 @@ void beamfs_super_encode_pending(struct beamfs_sb_info *sbi)
 	beamfs_dirty_super_now(sbi);
 }
 
-/*
- * Note that the superblock changed. The rebuild happens at sync.
- */
-/*
- * A scratch page from the mount's reserve.
- *
- * mempool_alloc with GFP_NOFS does not return NULL: it waits on the
- * reserve rather than on the allocator, and the reserve is sized so
- * that every path which can be in flight at once has one.
- */
 /*
  * The volume has failed. Say so once, and stop writing.
  *
@@ -949,7 +914,7 @@ void beamfs_fail(struct super_block *sb, const char *where, int err)
 	 * mount that had quietly refused: nine failures from one.
 	 *
 	 * What refuses a failed volume, with EIO: a write through
-	 * beamfs_inline_iomap_begin (since 0.1.26), the allocator and its
+	 * beamfs_inline_iomap_begin, the allocator and its
 	 * callers, an inode write, the superblock and the bitmap. Data
 	 * already accepted into the page cache is still written back. The
 	 * next mount starts from a zeroed sb_info.
@@ -998,26 +963,38 @@ void beamfs_scratch_put(struct super_block *sb, void *p)
 	mempool_free(p, sbi->s_scratch_pool);
 }
 
+/*
+ * beamfs_dirty_super - propagate the authoritative in-memory superblock
+ * (sbi->s_beamfs_sb) onto the buffer head, recompute its RS parity and
+ * s_crc32, and mark the buffer dirty for writeback.
+ *
+ * Every site that mutates the on-disk superblock (free_blocks,
+ * free_inodes, RS journal, ...) must call this helper instead of
+ * mark_buffer_dirty(sbi->s_sbh) directly. Without the CRC refresh,
+ * the on-disk superblock keeps a stale checksum that fails verification
+ * at the next mount.
+ *
+ * Caller MUST hold sbi->s_lock so that the snapshot copied to the
+ * buffer head is taken atomically with respect to other writers.
+ */
 void beamfs_dirty_super(struct beamfs_sb_info *sbi)
 {
 	if (!sbi)
 		return;
 
 	/*
+	 * Rebuilt now, not at sync.
+	 *
 	 * The superblock buffer comes from the block device's cache, so
 	 * the periodic flusher can write it at any time without going
-	 * through sync_fs. Deferring its rebuild the way the bitmap's is
-	 * deferred would let it reach the disk with the bits of one state
-	 * and the parity of another -- and a superblock whose parity does
-	 * not match is a volume that may not mount.
+	 * through sync_fs. A rebuild left for later would let it reach
+	 * the disk with the bits of one state and the parity of another
+	 * -- and a superblock whose parity does not match is a volume
+	 * that may not mount. The cost is thirteen shortened RS codewords
+	 * per change.
 	 *
-	 * So the rebuild stays here, where it always was. What the
-	 * bitmap's deferral bought does not apply: this is one buffer,
-	 * and the RS pass over 2743 bytes is a fraction of the sixteen
-	 * codewords a bitmap block needs.
-	 *
-	 * The flag is still set, so sync_fs and put_super have something
-	 * to act on if a future path marks without rebuilding.
+	 * The flag is cleared here, so beamfs_super_encode_pending, called
+	 * from sync_fs and put_super, finds nothing left to do.
 	 */
 	sbi->s_super_needs_encode = false;
 	beamfs_dirty_super_now(sbi);
@@ -1057,12 +1034,13 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 	 */
 	memcpy(fsb, sbi->s_beamfs_sb, sizeof(*fsb));
 
-	/* Encode RS parity over CRC32-covered region (skipping s_crc32).
-	 * staging is BEAMFS_SB_RS_STAGING_BYTES (2743 bytes); allocated on
-	 * the heap to keep this function under the kernel 2 KB stack budget.
-	 * On OOM, skip the RS encode -- CRC32 below is still updated, and
-	 * the previous on-disk RS parity remains valid for the previous
-	 * payload.
+	/*
+	 * Encode RS parity over the CRC32-covered region (skipping
+	 * s_crc32). The staging buffer, BEAMFS_SB_RS_STAGING_BYTES (2769
+	 * bytes), is allocated once per mount by beamfs_fill_super rather
+	 * than placed on the stack, which it would push past the 2 KiB
+	 * frame budget. Without it the RS encode is skipped and only the
+	 * CRC32 below is refreshed.
 	 */
 	{
 		u8 *staging = sbi->s_sb_rs_staging;
@@ -1118,9 +1096,9 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
 
 /*
  * beamfs_log_rs_event_flagged -- record an RS correction event in the
- *                       superblock persistent journal (v4 format,
- *                       40-byte entry), with caller-supplied extra
- *                       flags OR-ed into re_flags.
+ *                       superblock persistent journal (40-byte
+ *                       entry), with caller-supplied extra flags
+ *                       OR-ed into re_flags.
  *
  * See beamfs.h for full parameter contract. Forensic policy summary:
  *   n_positions >= 2 -> Shannon entropy computed, ENTROPY_VALID set
@@ -1158,10 +1136,12 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 	if (!sbi || !sbi->s_sbh)
 		return;
 
-	/* Invariant guards: surface bug at WARN_ON_ONCE without panicking.
-	 * The journal entry is silently skipped if invariants are violated.
+	/*
+	 * Invariant guards: surface bug at WARN_ON_ONCE without panicking.
+	 * The journal entry is skipped if an invariant is violated;
+	 * reserved bits in extra_flags are cleared instead.
 	 *
-	 * Two valid call shapes (see Documentation/format-v4.md sec 6.5):
+	 * Two valid call shapes:
 	 *   (a) correctable: positions != NULL, 1 <= n_positions <= RS/2
 	 *   (b) uncorrectable: positions == NULL, n_positions == 0
 	 */
@@ -1175,7 +1155,8 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 	if (WARN_ON_ONCE(extra_flags & reserved_mask))
 		extra_flags &= ~reserved_mask;
 
-	/* Forensic policy: see Documentation/format-v4.md sections 6.4-6.6.
+	/*
+	 * Forensic policy:
 	 *   n_positions >= 2  -> entropy computed, ENTROPY_VALID set
 	 *   n_positions == 1  -> entropy zero, ENTROPY_VALID cleared
 	 *                       (single-sample, not forensically significant)
@@ -1231,12 +1212,9 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 }
 
 /*
- * beamfs_log_rs_event -- legacy entry point. Thin wrapper that records
- *                       an RS event with no extra context flag. Equivalent
- *                       to beamfs_log_rs_event_flagged(..., 0). Kept as
- *                       the idiomatic call from sites that do not need
- *                       to discriminate caller context: bitmap
- *                       allocation, inode read, and superblock load.
+ * beamfs_log_rs_event -- record an RS event with no extra context flag.
+ * Equivalent to beamfs_log_rs_event_flagged(..., 0); used by the
+ * replay of superblock recovery events in beamfs_fill_super.
  */
 void beamfs_log_rs_event(struct super_block *sb,
 			u64 block_no,
@@ -1252,11 +1230,11 @@ void beamfs_log_rs_event(struct super_block *sb,
  * Pending RS recovery event captured during the SB CRC32-failure path,
  * to be replayed into the journal once sbi is fully initialized.
  *
- * The capture-then-replay pattern (Option 3) decouples the recovery
- * detection from the journal write: it preserves the fail-secure
- * invariant (validate the SB image before allocating sbi) while
- * ensuring forensic events from SB recovery are not lost. See
- * Documentation/format-v4.md "Stage 3 item 4 fill_super event flow".
+ * Capturing first and replaying later decouples the recovery detection
+ * from the journal write: it preserves the fail-secure invariant
+ * (validate the SB image before allocating sbi) while keeping the
+ * forensic record of SB recovery, unless the mount fails between
+ * capture and replay.
  */
 struct beamfs_pending_rs_event {
 	u64 block_no;
@@ -1266,17 +1244,14 @@ struct beamfs_pending_rs_event {
 };
 
 /*
- * beamfs_fill_super - read superblock from disk and initialize VFS sb
- */
-/*
  * beamfs_capture_sb_rs_events -- record which superblock subblocks RS
  * repaired, for replay into the journal once sbi exists.
  *
  * The journal cannot be written yet: the superblock is being read, so
- * sbi is not initialised. The corrections themselves are already on
- * disk; what is deferred is only their forensic record, which is why a
- * failed allocation here warns and returns 0 rather than failing the
- * mount.
+ * sbi is not initialised. The corrections themselves are already in
+ * the superblock buffer, which carries them to disk with its next
+ * write; what is deferred is only their forensic record, which is why
+ * a failed allocation here returns 0 rather than failing the mount.
  *
  * @rs_results:   per-subblock symbol counts from beamfs_rs_decode_region,
  *                positive where that subblock was corrected
@@ -1308,8 +1283,8 @@ beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
 		 * The kernel already reports the allocation failure itself,
 		 * so this says only what it does not: how many recovery
 		 * events go unrecorded as a result. Debug level because the
-		 * superblock is corrected on disk either way -- what is lost
-		 * is the forensic trace, not the data.
+		 * superblock is corrected either way -- what is lost is the
+		 * forensic trace, not the data.
 		 */
 		pr_debug("beamfs: %u SB recovery events not journalled\n",
 			 n_events);
@@ -1339,6 +1314,9 @@ beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
 	return k;
 }
 
+/*
+ * beamfs_fill_super - read superblock from disk and initialize VFS sb
+ */
 int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct beamfs_sb_info     *sbi;
@@ -1393,7 +1371,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		int rc;
 
 		/*
-		 * Heap-allocate the RS scratch buffers (2743 + 52 + 416 bytes
+		 * Heap-allocate the RS scratch buffers (2769 + 52 + 416 bytes
 		 * total) to keep beamfs_fill_super under the 2 KB stack budget.
 		 */
 		staging      = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES, GFP_NOFS);
@@ -1455,7 +1433,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	/*
-	 * Validate v3 feature fields.
+	 * Validate the feature fields.
 	 *
 	 * s_data_protection_scheme: range-check against the enum maximum.
 	 *   The three high-order bytes of the __le32 act as a structural
@@ -1497,7 +1475,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		 */
 		if (!(le64_to_cpu(fsb->s_feat_incompat) &
 		      BEAMFS_FEATURE_INCOMPAT_INODE_CRC_FULL)) {
-			errorf(fc, "beamfs: this volume predates INODE_CRC_FULL -- its inode checksums do not cover the block pointers, so a corrupted pointer would go uncorrected. Copy the data off and remake the volume.");
+			errorf(fc,
+			       "beamfs: this volume predates INODE_CRC_FULL -- its inode checksums do not cover the block pointers, so a corrupted pointer would go uncorrected. Copy the data off and remake the volume.");
 			goto out_brelse;
 		}
 
@@ -1518,7 +1497,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		if (le32_to_cpu(fsb->s_ind_parity_mode) != BEAMFS_IND_PARITY_NONE &&
 		    !(le64_to_cpu(fsb->s_feat_incompat) &
 		      BEAMFS_FEATURE_INCOMPAT_IND_PARITY_FEC)) {
-			errorf(fc, "beamfs: this volume predates IND_PARITY_FEC -- its parity region has no protection of its own and a different slot geometry, so reading it here would return the wrong block's parity. Copy the data off and remake the volume.");
+			errorf(fc,
+			       "beamfs: this volume predates IND_PARITY_FEC -- its parity region has no protection of its own and a different slot geometry, so reading it here would return the wrong block's parity. Copy the data off and remake the volume.");
 			goto out_brelse;
 		}
 
@@ -1708,18 +1688,6 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		le64_to_cpu(fsb->s_feat_ro_compat));
 
 	/*
-	 * Start the scrubber last, once the volume is fully usable: it
-	 * reads blocks and journals what it finds, so it has no business
-	 * running against a superblock still being assembled.
-	 *
-	 * A failure to start is not a failure to mount. The filesystem
-	 * still corrects on read; what is lost is the sweep that would
-	 * have found the drift before a reader did. Refusing the mount
-	 * over it would trade a degraded guarantee for no filesystem at
-	 * all, which is the worse outcome on a device that has no second
-	 * copy.
-	 */
-	/*
 	 * Anchor before the scrubber starts: the first sweep may journal
 	 * an event, and an entry with no anchor to convert against is
 	 * ordering information wearing a timestamp's clothes.
@@ -1732,9 +1700,10 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 * ext2 has done this since the beginning: a flag set while mounted
 	 * and cleared by a clean unmount tells the next mount, and fsck,
 	 * whether the volume was ever put down properly; a second flag
-	 * says the kernel saw damage. Until 0.1.10 beamfs recorded
-	 * neither, so nothing could tell a volume that needed checking
-	 * from one that did not.
+	 * says the kernel saw damage. beamfs keeps the same two,
+	 * BEAMFS_SB_FLAG_MOUNTED and BEAMFS_SB_FLAG_ERRORS; without them
+	 * nothing could tell a volume that needed checking from one that
+	 * did not.
 	 */
 	{
 		u32 fl = le32_to_cpu(sbi->s_beamfs_sb->s_flags);
@@ -1756,6 +1725,19 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	beamfs_tc_init(sbi);
+
+	/*
+	 * Start the scrubber last, once the volume is fully usable: it
+	 * reads blocks and journals what it finds, so it has no business
+	 * running against a superblock still being assembled.
+	 *
+	 * A failure to start is not a failure to mount. The filesystem
+	 * still corrects on read; what is lost is the sweep that would
+	 * have found the drift before a reader did. Refusing the mount
+	 * over it would trade a degraded guarantee for no filesystem at
+	 * all, which is the worse outcome on a device that has no second
+	 * copy.
+	 */
 	ret = beamfs_scrub_init(sb);
 	if (ret) {
 		pr_warn("beamfs: scrubber did not start (%d); correction on read is unaffected\n",
@@ -1771,9 +1753,9 @@ out_free_fsb:
 	kfree(sbi->s_beamfs_sb);
 out_free_sbi:
 	/*
-	 * Everything fill_super allocated before it could fail here.
-	 * Until 0.1.7 the scratch pool and the RS staging were left
-	 * behind by every mount that failed past them.
+	 * Everything fill_super allocated before it could fail here, the
+	 * scratch pool and the RS staging included: a mount that fails
+	 * past them must not leave them behind.
 	 */
 	mempool_destroy(sbi->s_wb_pages);
 	mempool_destroy(sbi->s_scratch_pool);
@@ -1792,7 +1774,7 @@ out_brelse:
 }
 
 /*
- * fs_context ops - kernel 5.15+ mount API
+ * fs_context ops
  */
 static int beamfs_get_tree(struct fs_context *fc)
 {

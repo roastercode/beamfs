@@ -2,7 +2,7 @@
 /*
  * beamfs -- background scrubber
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * beamfs corrects on read. A block nobody reads therefore accumulates
  * upsets until it passes the eight-symbol correction radius and becomes
@@ -11,21 +11,34 @@
  * written once and read years later -- so waiting for a reader is
  * waiting for the failure.
  *
- * The scrubber walks allocated blocks at a bounded rate and decodes
- * each one. It does not write back. Rewriting cold data turns a read
- * into a read-modify-write with a power-loss window, and the corrected
- * bytes the decode produced are what a subsequent reader would get
- * anyway. Detection is the point: an operator who learns a volume is
- * drifting can act while the drift is still correctable, which is the
- * whole difference between a warning and a post-mortem.
+ * The scrubber steps through the inode table and, for each regular
+ * file nobody is writing, follows the file's own pointers and decodes
+ * every data block; an indirect block is checked against its parity,
+ * where the volume keeps one, before its pointers are followed. At
+ * most one block named by the error-budget wear map is checked per
+ * step as well.
  *
- * Rate rather than priority. The threat-model text called for RT
- * priority; a thread that reads every block on the device at RT
- * priority would starve the workload it is meant to protect. The
- * bounded interval gives the same guarantee that matters -- a full
- * sweep completes in a knowable time -- without that cost. The
- * interval is per-block and settable through sysfs, so an operator
- * sizes the sweep against the expected upset rate.
+ * A corrected block is written back, whole, under the buffer lock:
+ * each upset is correctable, their sum is not. It is written only
+ * while the owner still maps the block at the same place, asked under
+ * i_alloc_mutex, only if the buffer still holds the bytes the decode
+ * started from, and never on a read-only or frozen volume. A block
+ * with an uncorrectable codeword is not written and is retried on a
+ * later pass. Blocks reached through the wear map are checked and
+ * reported, never written: nothing says whose they are.
+ *
+ * Rate rather than priority. A thread that read every block on the
+ * device at RT priority would starve the workload it is meant to
+ * protect; a bounded interval gives the guarantee that matters -- a
+ * full sweep completes in a knowable time -- without that cost. The
+ * thread sleeps the interval after each file block it checks and after
+ * each inode-table slot it steps past, except at the end of a pass,
+ * where it sleeps a second. The interval is settable through sysfs, so
+ * an operator sizes the sweep against the expected upset rate;
+ * beamfs_scrub_pace then adjusts it once per pass, halving it after a
+ * pass that corrected anything and adding an eighth of the value set
+ * back after a quiet one, never below 1 ms and never above the value
+ * set.
  */
 
 #include <linux/fs.h>
@@ -47,11 +60,10 @@
  * Per-volume it is settable through sysfs once mounted, which is no
  * help for a volume something else mounts: xfstests makes and mounts
  * its scratch device itself, and the scrubber is running on it before
- * anything outside the kernel can say otherwise. Worse, the root
- * filesystem here is beamfs too, so a sweep was running under every
- * measurement ever taken on this machine -- ten blocks a second, each
- * one seventeen Reed-Solomon decodes, halving its interval again on
- * every correction.
+ * anything outside the kernel can say otherwise. Worse, on a machine
+ * whose root filesystem is beamfs, a sweep runs under every measurement
+ * taken there -- up to ten blocks a second at the default pace, and
+ * faster after any pass that needed a correction.
  *
  * As a parameter it is settable before the mount rather than after:
  * beamfs.scrub_interval_ms= on the kernel command line, or through
@@ -211,11 +223,11 @@ static bool beamfs_scrub_node_current(struct inode *inode, unsigned int top,
  *
  * A reserved inode is answered from its own pointers. Its blocks are
  * placed by mkfs and never change hands: iget marks it immutable and
- * the allocator skips it. The canary at inode 2 (format-v4.md section
- * 11.1) sits just below the data region, where lookup_phys refuses any
- * file's pointer as corrupted: asked there, the sweep skipped the
- * canary it used to check and logged "corrupted direct pointer ino=2"
- * on every volume, every pass.
+ * the allocator skips it. The canary at inode 2 sits just below the
+ * data region, where lookup_phys refuses any file's pointer as
+ * corrupted: asked there, the sweep skipped the canary it used to
+ * check and logged "corrupted direct pointer ino=2" on every volume,
+ * every pass.
  */
 static bool beamfs_scrub_leaf_current(struct inode *inode, u64 iblock,
 				      u64 phys)
@@ -251,14 +263,14 @@ static bool beamfs_scrub_leaf_current(struct inode *inode, u64 iblock,
  * file's indirect block was decoded as a data block of the first file:
  * a nearly empty pointer array is within eight bytes of a zero
  * codeword, so it was "corrected" to zero and written back. Measured
- * on generic/083 (known-limitations 3.39): 17 of 17 write-backs and
- * uncorrectable verdicts of the sweep over 8 trials were on blocks that
- * had changed hands and held pointers; one of them, indirect block
- * 15011, took 15012 and its 17 children with it. Another trial rewrote
- * a data block of another file over its 16 subblocks. The owner is now
- * asked, under its allocation mutex, before the block is read and
- * again before it is written, and the write happens only if the buffer
- * still holds exactly the bytes that were decoded.
+ * on generic/083: 17 of 17 write-backs and uncorrectable verdicts of
+ * the sweep over 8 trials were on blocks that had changed hands and
+ * held pointers; one of them, indirect block 15011, took 15012 and its
+ * 17 children with it. Another trial rewrote a data block of another
+ * file over its 16 subblocks. The owner is now asked, under its
+ * allocation mutex, before the block is read and again before it is
+ * written, and the write happens only if the buffer still holds
+ * exactly the bytes that were decoded.
  */
 int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 			     unsigned int *corrected,
@@ -567,9 +579,9 @@ out_free:
  *
  * Following the inode's own pointers is what the read path does, so
  * the scrubber sees exactly the blocks a reader would decode and
- * nothing else. Indirect blocks are traversed but not decoded: they
- * carry raw pointers, which is the residual documented in
- * data-protection-design.md section 6.1.
+ * nothing else. Indirect blocks are not decoded as data: each is
+ * checked against its own parity, when the volume keeps an
+ * indirect-parity region, before its pointers are copied and followed.
  *
  * Returns the number of data blocks visited.
  */
@@ -838,14 +850,13 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 		 * freed and handed to other files, while the walk
 		 * still took them for its leaves: that is how the
 		 * sweep came to "correct" other files' indirect
-		 * blocks to zero (known-limitations 3.39). A
-		 * reference keeps eviction, and so those frees, until
-		 * iput; truncate frees under i_alloc_mutex, under
-		 * which every block of the walk is checked. The walk
-		 * stops at its next block once the file is unlinked,
-		 * so the frees wait one pace interval at most.
-		 * beamfs_iget refuses, with -ESTALE, a slot freed
-		 * since the snapshot above.
+		 * blocks to zero. A reference keeps eviction, and so
+		 * those frees, until iput; truncate frees under
+		 * i_alloc_mutex, under which every block of the walk
+		 * is checked. The walk stops at its next block once
+		 * the file is unlinked, so the frees wait one pace
+		 * interval at most. beamfs_iget refuses, with
+		 * -ESTALE, a slot freed since the snapshot above.
 		 *
 		 * The tree walked is the one in memory, under the same
 		 * mutex: the snapshot says what the inode was when it
@@ -1019,8 +1030,7 @@ static void beamfs_scrub_wear_step(struct super_block *sb,
 	 * Checked and reported, never written: the wear map names a
 	 * physical block, and nothing says what it holds now or whose it
 	 * is. A worn block is repaired when the sweep reaches the file
-	 * that owns it, which asks the owner first (known-limitations
-	 * 3.39).
+	 * that owns it, which asks the owner first.
 	 */
 	if (beamfs_scrub_check_block(sb, phys, &corrected, NULL, 0) == -EUCLEAN)
 		sbi->s_scrub_uncorrectable++;

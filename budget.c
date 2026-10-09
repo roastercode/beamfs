@@ -2,7 +2,7 @@
 /*
  * beamfs -- per-block error budget
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * How much correction capacity a block has left, rather than how many
  * corrections it has had.
@@ -101,12 +101,6 @@ void beamfs_budget_record(struct super_block *sb, u64 phys,
 }
 
 /*
- * beamfs_budget_read -- worst corrected-symbol count seen for @phys.
- *
- * Returns 0 when the feature is off, which reads as "no wear known"
- * rather than "no wear" -- the distinction belongs to the caller.
- */
-/*
  * The next block at or past @from whose margin has fallen to @threshold.
  *
  * The budget region is one byte per block -- a quarter of a per mille of
@@ -142,14 +136,11 @@ u64 beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold)
 	 * One block read per 4096 blocks examined, not one per block.
 	 *
 	 * The region is a flat array of one byte per data block, so a
-	 * single 4096-byte read covers 4096 of them. Calling
-	 * beamfs_budget_read in a loop did sb_bread and brelse for every
-	 * byte: on the 58 GiB volume in the lab that is 15115022 block
-	 * reads to find one worn block, and the sweep asks once every
-	 * hundred milliseconds.
-	 *
-	 * The comment on this function already claimed it read a block at
-	 * a time. It did not. Now it does.
+	 * single 4096-byte read covers 4096 of them. Going through
+	 * beamfs_budget_read for each would cost an sb_bread and a brelse
+	 * per byte: on a 58 GiB volume that is 15115022 calls to find one
+	 * worn block, and the sweep asks once per step, every hundred
+	 * milliseconds at the default pace.
 	 */
 	while (phys < last) {
 		struct buffer_head *bh;
@@ -189,6 +180,13 @@ u64 beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold)
 	return 0;
 }
 
+/*
+ * beamfs_budget_read -- worst corrected-symbol count seen for @phys.
+ *
+ * Returns 0 when the feature is off or the byte cannot be read, which
+ * reads as "no wear known" rather than "no wear" -- the distinction
+ * belongs to the caller.
+ */
 u8 beamfs_budget_read(struct super_block *sb, u64 phys)
 {
 	struct buffer_head *bh;
@@ -216,10 +214,10 @@ u8 beamfs_budget_read(struct super_block *sb, u64 phys)
  * hist[0] is untouched blocks and hist[MAX] is blocks with no margin
  * left.
  *
- * The whole region is read, which on a 931 GiB volume is 244 MiB. That
- * is a deliberate cost paid on request: the alternative is maintaining
- * counters in memory, which would have to be reconstructed at mount
- * anyway and would drift against the medium in between.
+ * The whole region is read, which on a 931 GiB volume is about 233 MiB.
+ * That is a deliberate cost paid on request: the alternative is
+ * maintaining counters in memory, which would have to be reconstructed
+ * at mount anyway and would drift against the medium in between.
  */
 void beamfs_budget_histogram(struct super_block *sb, u64 *hist)
 {

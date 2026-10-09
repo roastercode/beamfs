@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
-//
-// Author: Aurelien Desbrieres <aurelien@hackers.camp>
-
 /*
- * Directory blocks: variable-length entries, and parity over them.
+ * beamfs - Directory blocks: variable-length entries, and parity over them
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
- * Every other structure on this volume was covered and directory blocks
- * were not. They were written with memset and mark_buffer_dirty --
- * 4096 raw bytes, no checksum, no correction -- so an upset there was
- * silent and permanent: a flipped inode number points a name at the
- * wrong file, a flipped length walks the parser off the end of an
- * entry, and neither is detectable let alone correctable. That was the
- * one hole left in the chain.
+ * Every other structure on this volume is covered. A directory block
+ * without parity would be 4096 raw bytes, no checksum, no correction,
+ * and an upset there silent and permanent: a flipped inode number
+ * points a name at the wrong file, a flipped length walks the parser
+ * off the end of an entry, and neither is detectable let alone
+ * correctable.
  *
  * Parity is inline, sixteen RS codewords in the block, matching the
  * data path. The alternative -- a separate parity region, which is what
@@ -20,18 +17,15 @@
  * and leaves the filesystem with three different parity models instead
  * of two. ext4 puts its directory checksum inline for the same reason.
  *
- * Entries became variable length in the same change, because a
- * protected block has 3824 usable bytes rather than 4096 and the layout
- * moves either way. d_rec_len was already in the on-disk entry and
- * already written correctly; nothing read it, because every walk
- * stepped by sizeof(struct beamfs_dir_entry) -- a flat 268 bytes,
- * whatever the name's length. Fourteen entries per block, and a hard
- * ceiling of 7336 per directory.
+ * Entries are variable length, and every walk steps by d_rec_len.
+ * Stepping by sizeof(struct beamfs_dir_entry) instead -- a flat 268
+ * bytes, whatever the name's length -- would give fourteen entries per
+ * 3824-byte block and a hard ceiling of 7336 per directory.
  *
- * With the field used, an eleven-character name takes 24 bytes: 144
- * entries per block and a ceiling above 75000. Eleven times the
- * density, eleven times fewer blocks read per lookup, and eleven times
- * less metadata exposed for the same directory.
+ * An eleven-character name takes 24 bytes: 144 entries per block and a
+ * ceiling above 75000. Roughly ten times the density, ten times fewer
+ * blocks read per lookup, and ten times less metadata exposed for the
+ * same directory.
  */
 
 #include <linux/fs.h>
@@ -58,7 +52,7 @@ static inline u32 beamfs_dirent_sub_end(u32 off)
  * would straddle a subblock boundary and does not have to. Returns
  * BEAMFS_DIRENT_NOSPACE when the block cannot hold it.
  *
- * An entry longer than a subblock -- a name past 226 characters, which
+ * An entry longer than a subblock -- a name of 225 characters or more, which
  * NAME_MAX allows and xfstests exercises -- is placed where it falls.
  * Refusing it would mean rejecting a filename every other Linux
  * filesystem accepts, and the property is kept everywhere it can be.

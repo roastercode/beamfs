@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * beamfs - Inode operations
- * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
 #include <linux/fs.h>
@@ -11,14 +11,6 @@
 #include <linux/time.h>
 #include "beamfs.h"
 
-/*
- * beamfs_iget - read inode from disk into VFS
- * @sb:  superblock
- * @ino: inode number (1-based)
- *
- * Inode table starts at s_inode_table_blk.
- * Each block holds BEAMFS_BLOCK_SIZE / sizeof(beamfs_inode) inodes.
- */
 /*
  * Split a nanosecond count into the seconds and nanoseconds a timespec64
  * wants, with the nanosecond part never negative.
@@ -44,6 +36,14 @@ static void beamfs_split_ns(s64 ns, s64 *sec, long *nsec)
 		setter((inode), _sec, _nsec);				\
 	} while (0)
 
+/*
+ * beamfs_iget - read inode from disk into VFS
+ * @sb:  superblock
+ * @ino: inode number (1-based)
+ *
+ * Inode table starts at s_inode_table_blk.
+ * Each block holds BEAMFS_BLOCK_SIZE / sizeof(beamfs_inode) inodes.
+ */
 struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 {
 	struct beamfs_sb_info    *sbi = BEAMFS_SB(sb);
@@ -128,9 +128,9 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 	/*
 	 * A free inode is not a corrupt one.
 	 *
-	 * Free slots are zeroed, i_crc32 included, and crc32 of a zeroed
-	 * buffer is 0xf288b395 rather than zero -- so every read of a free
-	 * inode fails the check below by construction. Dozens of them
+	 * Free slots are zeroed, i_crc32 included, and beamfs_inode_crc of
+	 * a zeroed inode is 0x0ee93c94 rather than zero -- so every read of
+	 * a free inode fails the check below by construction. Dozens of them
 	 * appeared in twenty milliseconds during one test run, reported as
 	 * "CRC32 mismatch", which is both the wrong error and the wrong
 	 * diagnosis: nothing was corrupt, something had followed a stale
@@ -174,7 +174,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			 * Correcting there rewrites a buffer other inodes are
 			 * read from, and the mark_buffer_dirty below then
 			 * carries the result to disk -- a speculative fix
-			 * graved before the CRC has confirmed it, on a block
+			 * written before the CRC has confirmed it, on a block
 			 * that may simply have been mid-write.
 			 *
 			 * The same shape as beamfs_ind_parity_verify had, and
@@ -307,7 +307,10 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			inode->i_mapping->a_ops = &beamfs_aops;
 		}
 	} else if (S_ISLNK(inode->i_mode)) {
-		/* Fast symlink: target stored inline in i_direct[] (<= 96 b). */
+		/*
+		 * Symlink: a target under 96 bytes is inline in i_direct[],
+		 * a longer one in the data block i_direct[0] names.
+		 */
 		inode->i_op = &beamfs_symlink_inode_operations;
 	} else {
 		/* Special files: use generic */

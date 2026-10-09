@@ -2,7 +2,7 @@
 /*
  * beamfs -- parity for indirection blocks
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * An indirect block is 512 raw __le64 pointers filling all 4096 bytes,
  * with nowhere to put a checksum. beamfs_check_intermediate_block()
@@ -17,14 +17,15 @@
  * pointer gets none, and losing it costs 262144 blocks.
  *
  * Parity lives in a region of its own rather than inside the block, so
- * BEAMFS_INDIRECT_PTRS stays at 512 and no BEAMFS_MAX_IBLOCK_* moves --
- * the format churn that data-protection-design.md section 6.1 argues
- * against does not happen.
+ * BEAMFS_INDIRECT_PTRS stays at 512 and no BEAMFS_MAX_IBLOCK_* moves:
+ * an indirect block is laid out the same whether or not the volume
+ * carries parity for it.
  *
- * The slot for a block is computed, not looked up: parity for physical
- * block P sits at (P - s_data_start) * bytes_per_block into the region.
- * A table would be metadata needing protection itself, and the
- * recursion has to stop somewhere.
+ * The slot for a block is computed, not looked up: for physical block
+ * P, with n = P - s_data_start, the parity is slot n % slots of the
+ * region's block n / slots, slots being how many fit in one region
+ * block's payload. A table would be metadata needing protection
+ * itself, and the recursion has to stop somewhere.
  */
 
 #include <linux/fs.h>
@@ -172,7 +173,6 @@ void beamfs_ind_parity_cache_free(void)
 }
 
 static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
-
 			   u8 *scratch)
 {
 	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
@@ -189,9 +189,9 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 	 * times over the same 4096 bytes with nothing changed between.
 	 *
 	 * The generation rules out a decode from before an update. The
-	 * cache is per-cpu and taken without a lock: preemption between
-	 * the read and the copy can only give a miss, never a wrong hit,
-	 * because the key is checked again after the copy.
+	 * cache is per-cpu and taken without a lock: get_cpu_ptr keeps
+	 * preemption off from the key check through the copy, so nothing
+	 * on this cpu can replace the entry in between.
 	 */
 	{
 		struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
@@ -326,23 +326,6 @@ static void ind_slot_scatter(u8 *scratch, u32 off, size_t stride,
 	}
 }
 
-/* Encode @scratch, the decoded block, back into the buffer. */
-/*
- * Encode @scratch back into the buffer.
- *
- * @scratch is a decoded copy of the block and keeps its layout: sixteen
- * subblocks of BEAMFS_SUBBLOCK_TOTAL, each holding its data then its
- * parity. It is not a flat payload, and reading it as one -- at
- * i * BEAMFS_SUBBLOCK_DATA rather than i * BEAMFS_SUBBLOCK_TOTAL --
- * shifts every subblock against the one it came from.
- *
- * That is what happened when the second scratch page was removed: the
- * gather and scatter helpers were written for the interleaved layout,
- * this one was left reading the old flat one, and every region write
- * scrambled the block. Files came back with EUCLEAN moments after being
- * written -- generic/001 reporting "cp: error copying big.0 to big.1:
- * Structure needs cleaning" on its second iteration.
- */
 /*
  * Does the block decode as soon as it is encoded?
  *
@@ -408,6 +391,22 @@ static void ind_region_selfcheck(struct super_block *sb,
 }
 #endif
 
+/*
+ * Encode @scratch back into the buffer.
+ *
+ * @scratch is a decoded copy of the block and keeps its layout: sixteen
+ * subblocks of BEAMFS_SUBBLOCK_TOTAL, each holding its data then its
+ * parity. It is not a flat payload, and reading it as one -- at
+ * i * BEAMFS_SUBBLOCK_DATA rather than i * BEAMFS_SUBBLOCK_TOTAL --
+ * shifts every subblock against the one it came from.
+ *
+ * That is what happened when the second scratch page was removed: the
+ * gather and scatter helpers were written for the interleaved layout,
+ * this one was left reading the old flat one, and every region write
+ * scrambled the block. Files came back with EUCLEAN moments after being
+ * written -- generic/001 reporting "cp: error copying big.0 to big.1:
+ * Structure needs cleaning" on its second iteration.
+ */
 static void ind_region_write(struct super_block *sb,
 			     struct buffer_head *pbh, const u8 *scratch)
 {
@@ -531,9 +530,9 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * re-encoded.
 	 *
 	 * A region block beyond correction is left alone. Re-encoding it
-	 * would write parity over damaged payload and make fifteen other
-	 * indirect blocks' parity permanently wrong, in a way nothing
-	 * could afterwards detect.
+	 * would write parity over damaged payload and make the parity of
+	 * every other indirect block it covers permanently wrong, in a way
+	 * nothing could afterwards detect.
 	 */
 	if (ind_region_read(sb, pbh, scratch) == -EUCLEAN) {
 		pr_err_ratelimited("beamfs: parity region block %llu beyond correction; not updating the slot for indirect %llu\n",
@@ -551,27 +550,25 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		__le32 *slot = (__le32 *)slotbuf;
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
-			slot[i] = cpu_to_le32(crc32_le(~0U,
-				(const u8 *)block + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_DATA) ^ ~0U);
+			slot[i] = cpu_to_le32(crc32_le(~0U, (const u8 *)block +
+						       (size_t)i * BEAMFS_SUBBLOCK_DATA,
+						       BEAMFS_SUBBLOCK_DATA) ^ ~0U);
 	} else {
 		u8 *slot = slotbuf;
 
 		/*
 		 * The indirect block is 4096 bytes and an RS codeword
 		 * covers 239, so it is split the way a data block is: 16
-		 * subblocks, one 16-byte parity set each. The last
-		 * subblock runs past 3824 into the tail, deliberately --
-		 * the tail is part of the pointer array and needs
-		 * covering too.
+		 * subblocks, one 16-byte parity set each. That covers
+		 * the first 3824 bytes; pointers 478..511 are in no
+		 * codeword, as beamfs_ind_parity_verify notes.
 		 */
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++)
-			beamfs_rs_encode_region(
-				(u8 *)block + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_DATA,
-				slot + (size_t)i * BEAMFS_RS_PARITY,
-				BEAMFS_RS_PARITY,
-				BEAMFS_SUBBLOCK_DATA, 1);
+			beamfs_rs_encode_region((u8 *)block + (size_t)i * BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_SUBBLOCK_DATA,
+						slot + (size_t)i * BEAMFS_RS_PARITY,
+						BEAMFS_RS_PARITY,
+						BEAMFS_SUBBLOCK_DATA, 1);
 	}
 
 	ind_slot_scatter(scratch, offset, stride, slotbuf);
@@ -608,7 +605,7 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	 * written here went to the device once and was overwritten by
 	 * the next writer's stale copy of the region.
 	 *
-	 * generic/476 on 2026-09-23, module 0.1.10, parity.bt attached:
+	 * generic/476 on 2026-09-23, module 0.1.10:
 	 * 102 indirect blocks reported by fsck as holding pointers under
 	 * a zero parity slot. For every one of them the tracepoint had
 	 * recorded an update with exactly the pointer count fsck found,
@@ -660,12 +657,13 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 /*
  * beamfs_ind_parity_verify -- check an indirect block against its parity.
  *
- * Under CRC the block is checked and left alone: detection turns the
- * section 6.1 residual from silent corruption into a clean fail-closed
- * error, which is the contract beamfs states everywhere else. Under RS
- * a copy is decoded and the block is left alone: damage is reported
- * and journalled, never repaired here -- the comment at the decode
- * below says why a verify must not write.
+ * Under CRC the block is checked and left alone: detection turns a
+ * flipped pointer that lands in range, on an allocated block, from
+ * silent corruption into a clean fail-closed error, which is the
+ * contract beamfs states everywhere else. Under RS a copy is decoded
+ * and the block is left alone: damage is reported and journalled,
+ * never repaired here -- the comment at the decode below says why a
+ * verify must not write.
  *
  * Returns 0 if the block is sound or its damage is within correction,
  * -EUCLEAN if it is damaged beyond the mode's ability to fix.
@@ -786,7 +784,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 			 * there has, correctly, a zero slot. That is the v5
 			 * format and not an event, so it is not warned
 			 * about; a zero slot over pointers the slot does
-			 * cover is (known-limitations 3.38).
+			 * cover is.
 			 */
 			const __le64 *ptrs = (const __le64 *)bh->b_data;
 			unsigned int within = 0;
@@ -879,15 +877,15 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 			if (region_rc < 0 || results[0] < 0) {
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u uncorrectable\n",
 						   (unsigned long long)phys, i);
-				beamfs_log_rs_event_flagged(sb,
-					phys, NULL, 0, BEAMFS_SUBBLOCK_DATA,
-					beamfs_rs_event_subblock_bits(i));
+				beamfs_log_rs_event_flagged(sb, phys, NULL, 0,
+							    BEAMFS_SUBBLOCK_DATA,
+							    beamfs_rs_event_subblock_bits(i));
 				ret = -EUCLEAN;
 			} else if (results[0] > 0) {
-				beamfs_log_rs_event_flagged(sb,
-					phys, positions, (unsigned int)results[0],
-					BEAMFS_SUBBLOCK_DATA,
-					beamfs_rs_event_subblock_bits(i));
+				beamfs_log_rs_event_flagged(sb, phys, positions,
+							    (unsigned int)results[0],
+							    BEAMFS_SUBBLOCK_DATA,
+							    beamfs_rs_event_subblock_bits(i));
 			}
 		}
 		beamfs_scratch_put(sb, copy);

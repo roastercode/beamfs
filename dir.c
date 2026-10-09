@@ -14,15 +14,15 @@
  * ctx->pos encoding:
  *   0, 1       : '.' and '..' (emitted by dir_emit_dots)
  *   INT_MAX    : EOF
- *   other      : ((block_idx + 1) << 16) | entry_slot
+ *   other      : 2 + block_idx * BEAMFS_DATA_INLINE_BYTES + offset
  *
- * This encoding allows correct resumption if getdents() is interrupted
- * mid-directory. block_idx is 0-based index into i_direct[]; entry_slot
- * is the entry index within that block.
+ * block_idx is the 0-based logical block, direct then single indirect;
+ * offset is a byte offset into that block's 3824-byte payload. The
+ * cookie names where reading resumes, and any value is accepted: one
+ * that falls inside a record resumes at the next record boundary.
  *
- * Maximum directory size: BEAMFS_DIRECT_BLOCKS blocks × (4096 / 268) entries
- * = 12 × 15 = 180 entries. block_idx fits in 15 bits, entry_slot in 8 bits,
- * well within the 32-bit pos space.
+ * At most BEAMFS_DIRECT_BLOCKS + BEAMFS_INDIRECT_PTRS = 524 blocks, so
+ * pos is at most 2 + 524 * 3824, well within the 32-bit pos space.
  */
 static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 {

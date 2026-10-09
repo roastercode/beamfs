@@ -1,22 +1,32 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * beamfs - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE (v2)
+ * beamfs - File operations for BEAMFS_DATA_PROTECTION_UNIVERSAL_INLINE
  *
  * Per-block Reed-Solomon FEC on user data: each 4096-byte disk block
- * holds 16 RS(255,239) shortened subblocks (3824 user bytes + 256 parity
- * + 16 pad bytes).
+ * carries 16 shortened RS(255,239) codewords, in one of two layouts.
+ *
+ * With BEAMFS_FEATURE_INCOMPAT_RS_INTERLEAVE (the capsule), 3808 data
+ * bytes, an 8-byte checksum and an 8-byte self-identity make 3824 coded
+ * bytes, interleaved across the 16 codewords. 256 parity bytes follow,
+ * 16 per codeword, then 16 bytes outside the codewords: an 8-byte
+ * generation and 8 reserved bytes.
+ *
+ * Without it (alternating), each codeword is 239 data bytes followed by
+ * its 16 parity bytes, 16 x 255 = 4080 bytes, and the last 16 bytes of
+ * the block, outside every codeword, hold the checksum and the
+ * self-identity.
  *
  * This file implements the data path for scheme=2 (UNIVERSAL_INLINE).
  * The legacy iomap-based path in file.c is preserved for scheme=5
  * (INODE_UNIVERSAL); the dispatch happens in inode.c / namei.c when
  * setting i_fop and a_ops based on sbi->s_scheme.
  *
- * Threat model: validates against RadFI v0.1.0+ (single-bit flip in
- * bio_vec page payload during submit_bio_noacct). MIL-STD-883 SEE
- * coverage: up to 128 bytes corruption per disk block (8 byte symbols
- * per subblock * 16 subblocks).
+ * Each codeword corrects up to 8 corrupted bytes, so a block survives up
+ * to 128 when they fall 8 to a codeword. Interleaving puts consecutive
+ * coded bytes in different codewords, so a burst within the coded bytes
+ * is shared among the 16 codewords instead of landing in one.
  *
- * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -34,7 +44,7 @@
 #include <linux/iomap.h>
 
 /* ------------------------------------------------------------------------- */
-/* Forward declarations of v2 ops (stubs, populated in subsequent stages)    */
+/* Forward declarations                                                      */
 /* ------------------------------------------------------------------------- */
 
 static int     beamfs_inline_read_folio(struct file *file,
@@ -59,41 +69,44 @@ static int     beamfs_check_intermediate_block(struct super_block *sb,
 					       const char *label);
 
 /* ------------------------------------------------------------------------- */
-/* Block-mapping helpers (v2 INLINE)                                         */
+/* Block-mapping helpers                                                     */
 /*                                                                           */
 /* These mirror the layout used by beamfs_iomap_begin() in file.c (legacy    */
 /* iomap path, scheme=5 INODE_UNIVERSAL): direct blocks 0..11 in             */
 /* fi->i_direct[], single indirect via fi->i_indirect (512 entries) for      */
-/* iblocks 12..523. Maximum mapped iblock in v1 layout: 524 -> ~2.0 MiB of   */
-/* logical user data per file at 3824 user bytes per disk block.             */
+/* iblocks 12..523. Beyond those, fi->i_dindirect and fi->i_tindirect map    */
+/* double and triple indirect trees, up to BEAMFS_MAX_IBLOCK_TINDIRECT.      */
 /*                                                                           */
-/* Pure lookup, no allocation. Used by read_folio (4b2.2) and as the read    */
-/* leg of write_begin (4b3) RMW. The allocating variant lives below          */
-/* (added in 4b3).                                                           */
+/* Pure lookup, no allocation. Used by the read paths, by iomap_begin for    */
+/* anything but a write, by the scrubber, and by writeback and               */
+/* zero_tail_block to log a pointer the allocating variant changed. The      */
+/* allocating variant lives below.                                           */
 /*                                                                           */
 /* Returns:                                                                  */
 /*   0  + *phys_out = block number  (mapped)                                 */
 /*   0  + *phys_out = 0             (HOLE: not allocated yet)                */
 /*   <0 on error                    (-EIO indirect read fail,                */
-/*                                   -EOPNOTSUPP beyond v1 capacity,        */
-/*                                   -EINVAL on null phys_out)              */
+/*                                   -EUCLEAN corrupted or unallocated       */
+/*                                    pointer, or indirect parity failure,   */
+/*                                   -EOPNOTSUPP beyond triple indirect,     */
+/*                                   -EINVAL on null phys_out)               */
 /* ------------------------------------------------------------------------- */
 /*
  * beamfs_check_intermediate_block -- bounds and allocation check for a
  * pointer-to-pointers block (indirect, dindirect, tindirect and their L1/L2
  * levels) before it is read as 512 raw __le64 entries.
  *
- * The four existing call sites in this file check the terminal pointer --
- * the one that addresses a leaf data block -- against both the
+ * beamfs_inline_lookup_phys checks every terminal pointer -- the one that
+ * addresses a leaf data block -- against both the
  * [s_data_start, s_data_start + s_nblocks) range and the allocation bitmap.
- * The intermediate blocks that hold indirection pointers had neither check:
- * a bit flip on fi->i_indirect (or i_dindirect, i_tindirect, or an L1/L2
+ * The blocks that hold indirection pointers need the same two checks: a
+ * bit flip on fi->i_indirect (or i_dindirect, i_tindirect, or an L1/L2
  * entry) reaching a value inside the valid range but pointing at an
- * unrelated or unallocated block was read via sb_bread and its raw bytes
- * were reinterpreted as 512 pointers, with no signal. This closes that gap
- * the same way DATA_SELFID and beamfs_block_is_allocated closed it for
- * terminal pointers and file data: fail closed before the read rather than
- * trusting whatever the corrupted pointer happens to reach.
+ * unrelated or unallocated block would otherwise be read via sb_bread and
+ * its raw bytes reinterpreted as 512 pointers, with no signal. Fail closed
+ * before the read rather than trust whatever the corrupted pointer happens
+ * to reach, as DATA_SELFID and beamfs_block_is_allocated do for file data
+ * and terminal pointers.
  */
 static int beamfs_check_intermediate_block(struct super_block *sb,
 					   u64 block, ino_t ino,
@@ -125,9 +138,9 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 		 * is how the 2026-08-27 multifs run scored RS_FAILED rather
 		 * than RS_FAIL_CLOSED. positions == NULL with
 		 * n_positions == 0 is the uncorrectable call shape; the flag
-		 * is reserved and set by beamfs_log_rs_event_flagged itself
-		 * (format-v4.md section 6.5) -- passing it in extra_flags
-		 * would trip the reserved-mask guard, as 66b8492 fixed.
+		 * is reserved and set by beamfs_log_rs_event_flagged itself;
+		 * passing it in extra_flags would trip the reserved-mask
+		 * guard.
 		 */
 		beamfs_log_rs_event_flagged(sb, block, NULL, 0,
 					    BEAMFS_SUBBLOCK_DATA, 0);
@@ -174,12 +187,9 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EUCLEAN;
 			}
 			/*
-			 * dphys, not phys: until 2026-09-22 this tested the
-			 * uninitialised phys, and never once fired across every
-			 * run on record. A direct pointer into a freed block
-			 * walked through here unseen while the same case on an
-			 * indirect pointer is caught by
-			 * beamfs_check_intermediate_block.
+			 * A direct pointer into a freed block fails closed
+			 * here, as the same case on an indirect pointer does
+			 * in beamfs_check_intermediate_block.
 			 */
 			if (!beamfs_block_is_allocated(sb, dphys)) {
 				pr_err_ratelimited("beamfs/inline: unallocated direct pointer ino=%llu iblock=%llu phys=%llu\n",
@@ -207,7 +217,6 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		/* Already held when this call created it. */
 		{
 			int fresh = 0;
 
@@ -243,8 +252,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -331,8 +342,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -358,7 +371,6 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		/* Already held when this call created it. */
 		if (!l1bh)
 			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
@@ -370,8 +382,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l1bh)) {
 			brelse(l1bh);
@@ -461,8 +475,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -488,7 +504,6 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		/* Already held when this call created it. */
 		if (!l1bh)
 			l1bh = sb_bread(sb, l1_blk);
 		if (!l1bh) {
@@ -500,8 +515,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l1bh)) {
 			brelse(l1bh);
@@ -527,7 +544,6 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		if (ret)
 			return ret;
 
-		/* Already held when this call created it. */
 		if (!l2bh)
 			l2bh = sb_bread(sb, l2_blk);
 		if (!l2bh) {
@@ -539,8 +555,10 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l2bh)) {
 			brelse(l2bh);
@@ -587,29 +605,33 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 }
 
 /* ------------------------------------------------------------------------- */
-/* Allocating block-mapping (v2 INLINE write path)                           */
+/* Allocating block-mapping (write path)                                     */
 /*                                                                           */
 /* Variant of beamfs_inline_lookup_phys() that allocates on demand. Used by  */
-/* the write path (write_begin + writepages) to map a logical iblock to a    */
-/* physical block, allocating direct/indirect/data blocks as needed and      */
-/* zero-initializing freshly allocated data blocks so a subsequent read sees */
-/* deterministic content (16 zero subblocks of valid RS codewords -- the    */
-/* zero data plus zero parity is a valid RS(255,239) codeword by linearity). */
+/* iomap_begin for a write, by writeback_range and by zero_tail_block to     */
+/* map a logical iblock to a physical block, allocating direct, indirect,    */
+/* double and triple indirect and data blocks as needed. A freshly           */
+/* allocated data block is zeroed, stamped and RS-encoded at once, so a      */
+/* subsequent read finds a valid block of zeros rather than whatever the     */
+/* medium held.                                                              */
 /*                                                                           */
 /* Allocates:                                                                */
 /*   - Direct: writes phys into fi->i_direct[iblock] + mark_inode_dirty.     */
-/*   - Indirect: allocates the indirect block first (zero-init) if absent,   */
-/*     then allocates the data block and writes phys into ptrs[slot].        */
+/*   - Indirect levels: allocates each missing level first (zero-init),      */
+/*     then the data block, and writes phys into the leaf ptrs[slot].        */
 /*                                                                           */
-/* The freshly allocated data block is zero-initialized via sb_getblk +      */
-/* memset, NOT via sb_bread, because there is no on-disk content to read     */
-/* (the block was unallocated). The buffer is marked uptodate + dirty so     */
-/* writepages can RMW it without an extra sb_bread.                          */
+/* The freshly allocated data block is built via sb_getblk + memset, NOT     */
+/* via sb_bread, because there is no on-disk content to read (the block      */
+/* was unallocated). The buffer is marked uptodate + dirty, so a partial     */
+/* write at writeback finds it in the buffer cache instead of reading the    */
+/* device.                                                                   */
 /*                                                                           */
 /* Returns:                                                                  */
 /*   0  + *phys_out = block number (mapped or freshly allocated)             */
-/*   <0 on error (-ENOSPC if alloc fails, -EIO on indirect read fail,        */
-/*                -EOPNOTSUPP beyond v1 capacity)                            */
+/*   <0 on error (-ENOSPC if alloc fails, -EIO on indirect read fail, on     */
+/*                a failed volume or an inode being evicted, -EUCLEAN on     */
+/*                indirect parity failure, -EOPNOTSUPP beyond triple         */
+/*                indirect, -EINVAL on null phys_out)                        */
 /* ------------------------------------------------------------------------- */
 /*
  * Is this a block a file may point at?
@@ -716,15 +738,6 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
 }
 
 /*
- * Seal a block: encode it in whichever layout the volume uses.
- *
- * Four sites encode a freshly allocated data block with the same six
- * arguments, and a fifth and sixth do it for writeback. One function
- * so a layout change touches one place -- the four were identical
- * character for character, which is how a fifth comes to differ by
- * accident.
- */
-/*
  * Lay a block's payload down in whichever layout the volume uses.
  *
  * Alternating, the payload is sixteen runs of 239 bytes 255 apart, and
@@ -733,7 +746,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
  * belongs -- measured as the last 222 bytes of every block coming back
  * wrong, which is where the fifteenth run ends up.
  *
- * Paired with beamfs_seal_block, which encodes what this writes.
+ * Paired with beamfs_seal_data_block, which encodes what this writes.
  */
 void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
 			       const u8 *payload)
@@ -753,6 +766,11 @@ void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
 		       BEAMFS_SUBBLOCK_DATA);
 }
 
+/*
+ * Seal a data block: compute its RS parity in whichever layout the
+ * volume uses. Every site that encodes a data block goes through here,
+ * so a layout change touches one place.
+ */
 int beamfs_seal_data_block(struct super_block *sb, u8 *block)
 {
 	if (BEAMFS_SB(sb)->s_feat_incompat &
@@ -780,8 +798,7 @@ int beamfs_seal_data_block(struct super_block *sb, u8 *block)
  * (end_buffer_write_sync clears the bit on an error): the medium holds
  * an older block than memory does, and dirtying it anyway is what
  * mark_buffer_dirty warns about. The volume is failed instead, as
- * beamfs_write_bitmap_block does for a bitmap block (known-limitations
- * 3.40 and 3.41).
+ * beamfs_write_bitmap_block does for a bitmap block.
  *
  * Tested under the buffer lock: a write in flight holds it until its
  * completion has set or cleared uptodate.
@@ -813,21 +830,6 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		*allocated = false;
 
 	/*
-	 * Nothing free: say so once and return, rather than walking the
-	 * whole indirection tree to discover it at every level.
-	 *
-	 * Without this a full volume produced one failed allocation per
-	 * block per level -- 19531 suppressed log callbacks in three
-	 * seconds under generic/224 -- and the writeback path spent its
-	 * time in the allocator and the ring buffer instead of returning
-	 * ENOSPC. The test then exceeded its timeout for want of an error
-	 * the filesystem already knew.
-	 *
-	 * s_free_blocks is read without the lock. It is a hint here: a
-	 * concurrent free racing this check costs one retry, and the
-	 * allocation below is still the thing that decides.
-	 */
-	/*
 	 * Nothing to allocate for an inode being destroyed.
 	 *
 	 * __mark_inode_dirty returns without queueing when I_FREEING is
@@ -851,6 +853,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 	    (I_FREEING | I_WILL_FREE | I_CLEAR))
 		return -EIO;
 
+	/*
+	 * Nothing free: say so once and return, rather than walking the
+	 * whole indirection tree to discover it at every level.
+	 *
+	 * Without this a full volume produced one failed allocation per
+	 * block per level -- 19531 suppressed log callbacks in three
+	 * seconds under generic/224 -- and the writeback path spent its
+	 * time in the allocator and the ring buffer instead of returning
+	 * ENOSPC. The test then exceeded its timeout for want of an error
+	 * the filesystem already knew.
+	 *
+	 * s_free_blocks is read without the lock. It is a hint here: a
+	 * concurrent free racing this check costs one retry, and the
+	 * allocation below is still the thing that decides.
+	 */
 	if (BEAMFS_SB(inode->i_sb)->s_free_blocks == 0)
 		return -ENOSPC;
 
@@ -901,7 +918,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
 		 * test file logged "bad descriptor type=0x00" on five runs out
 		 * of six, because allocation writes the block here while the
-		 * only other stamp sites are writeback_folio and
+		 * only other stamp sites are writeback and
 		 * zero_tail_block, neither of which runs for a block that is
 		 * allocated but not yet written through the folio path. The
 		 * payload is the zeroed block itself. Indirect blocks carry no
@@ -1046,7 +1063,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * anything flushes it. Holding the reference closes it.
 			 */
 
-		/* The block, before the pointer that names it. */
+			/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
 			/*
 			 * The inode's own pointer is a slot store too.
@@ -1104,8 +1121,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -1147,7 +1166,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
 		 * test file logged "bad descriptor type=0x00" on five runs out
 		 * of six, because allocation writes the block here while the
-		 * only other stamp sites are writeback_folio and
+		 * only other stamp sites are writeback and
 		 * zero_tail_block, neither of which runs for a block that is
 		 * allocated but not yet written through the folio path. The
 		 * payload is the zeroed block itself. Indirect blocks carry no
@@ -1334,7 +1353,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
-		/* The block, before the pointer that names it. */
+			/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
 			/*
 			 * The inode's own pointer is a slot store too.
@@ -1392,8 +1411,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -1576,8 +1597,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l1bh)) {
 			brelse(l1bh);
@@ -1617,7 +1640,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
 		 * test file logged "bad descriptor type=0x00" on five runs out
 		 * of six, because allocation writes the block here while the
-		 * only other stamp sites are writeback_folio and
+		 * only other stamp sites are writeback and
 		 * zero_tail_block, neither of which runs for a block that is
 		 * allocated but not yet written through the folio path. The
 		 * payload is the zeroed block itself. Indirect blocks carry no
@@ -1803,7 +1826,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * dropping the last reference still lets it go before
 			 * anything flushes it. Holding the reference closes it.
 			 */
-		/* The block, before the pointer that names it. */
+			/* The block, before the pointer that names it. */
 			beamfs_order_before_pointer(ibh);
 			/*
 			 * The inode's own pointer is a slot store too.
@@ -1830,8 +1853,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -1984,8 +2009,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l1bh)) {
 			brelse(l1bh);
@@ -2138,8 +2165,10 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, l2bh)) {
 			brelse(l2bh);
@@ -2179,7 +2208,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 		 * block is rejected. Observed 2026-08-18: iblocks 0..5 of a
 		 * test file logged "bad descriptor type=0x00" on five runs out
 		 * of six, because allocation writes the block here while the
-		 * only other stamp sites are writeback_folio and
+		 * only other stamp sites are writeback and
 		 * zero_tail_block, neither of which runs for a block that is
 		 * allocated but not yet written through the folio path. The
 		 * payload is the zeroed block itself. Indirect blocks carry no
@@ -2282,22 +2311,21 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 
 /* ------------------------------------------------------------------------- */
 /*
- * beamfs_inline_stamp_tail_pad -- write the DATA_CSUM descriptor into the
- * 16-byte block tail pad after RS encode. The pad is always fully zeroed
- * first, which covers the reserved bytes and the csum-disabled (NONE)
- * case. When the volume has DATA_CSUM active, stamp csum_type = CRC32 and
- * the beamfs_crc32 (crc32_le) of the 3824-byte decoded payload, the same
- * bytes just fed to the RS encoder. See format-v6.md sections 3 and 4.2.
- * The descriptor lives outside every RS codeword by design (3.3): a flip
- * in it yields at worst a false-positive fail-closed on read, never a
- * silent accept of wrong data.
+ * beamfs_inline_stamp_tail_pad -- write the DATA_CSUM descriptor and the
+ * DATA_SELFID digest into a data block. The 16-byte tail at
+ * BEAMFS_DATA_INLINE_TOTAL is always zeroed first; in the alternating
+ * layout that is where both go, and the zeroing covers the reserved
+ * bytes and the csum-disabled (NONE) case. When the volume has DATA_CSUM
+ * active, stamp csum_type = CRC32 and the beamfs_crc32 (crc32_le) of the
+ * payload, beamfs_block_payload() bytes of it. Where the descriptor and
+ * the digest live in each layout is below.
  */
 /*
  * Where the descriptor lives, and how much it covers.
  *
  * Alternating: at 4080, outside every codeword, over the 3824 bytes of
  * payload. A flip there fails a read closed rather than accepting
- * wrong data, which is what format-v6 3.3 argues for.
+ * wrong data.
  *
  * Capsule: at 3808, inside the coded area, over the 3808 bytes of
  * payload. The argument for staying outside was that a descriptor
@@ -2355,19 +2383,14 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 
 /*
  * beamfs_inline_payload_crc -- recompute the DATA_CSUM over the decoded
- * payload held in @codeword (post-RS-decode, interleaved 255-byte stride,
- * 16 subblocks of 239 data bytes). Chains crc32_le over the 16 data
- * segments; by associativity of crc32_le over concatenation this equals
- * beamfs_crc32() over the contiguous de-interleaved 3824-byte payload,
- * the value the write path stored (see beamfs_inline_stamp_tail_pad and
- * beamfs_crc32_sb for the same non-contiguous chaining idiom). No alloc.
- */
-/*
- * The CRC of a block's payload, in whichever layout it is written.
+ * payload held in @codeword, in whichever layout it is written.
  *
- * A capsule holds it contiguously; the alternating layout holds it in
- * sixteen runs 255 apart. Walking one as the other hashes the parity
- * along with the data and disagrees with what was stamped.
+ * A capsule holds the payload contiguously: one crc32_le over its 3808
+ * bytes. The alternating layout holds it in sixteen runs of 239 bytes,
+ * 255 apart: crc32_le is chained over the sixteen runs, which equals
+ * beamfs_crc32() over the contiguous 3824-byte payload, the value the
+ * write path stored. Walking one layout as the other hashes the parity
+ * along with the data and disagrees with what was stamped. No alloc.
  */
 static u32 beamfs_inline_payload_crc(struct super_block *sb,
 				     const u8 *codeword)
@@ -2387,21 +2410,22 @@ static u32 beamfs_inline_payload_crc(struct super_block *sb,
 	return c ^ 0xFFFFFFFF;
 }
 
-/* beamfs_inline_decode_block_into_buf -- read disk block, RS-decode all 16  */
-/*                                        subblocks, copy a user-byte slice  */
-/*                                        into the supplied buffer.          */
+/* beamfs_inline_decode_block_into_buf -- RS-decode a raw block image and    */
+/*                                        copy a user-byte slice into the    */
+/*                                        supplied buffer.                   */
 /*                                                                           */
-/* This helper is the algebraic decode operator Phi of Theorem v2.1: it      */
-/* maps (phys, slice) -> user_bytes union {bottom}. Reused by single-block   */
-/* read_folio (slice = full 0..3824) and the multi-block read/writeback      */
-/* paths added in subsequent sub-steps (slice = portion of a disk block      */
-/* covering one folio).                                                      */
+/* Called from read_folio_range, the partial-write fill                      */
+/* (write_read_folio_range), writeback's read of a partial block             */
+/* (beamfs_wb_read_old), zero_tail_block and the symlink reader.             */
 /*                                                                           */
 /* Inputs:                                                                   */
-/*   sb                       superblock (used for sb_bread + journal)       */
+/*   sb                       superblock (layout, journal)                   */
+/*   raw                      the block as read, BEAMFS_BLOCK_SIZE bytes;    */
+/*                            copied, never modified                         */
 /*   phys                     non-zero physical disk block number to decode  */
-/*   inode                    inode (used for ino in pr_warn/journal)        */
-/*   iblock_logical_for_log   logical iblock identifier for log lines        */
+/*   inode                    inode (its ino for DATA_SELFID and log lines)  */
+/*   iblock_logical_for_log   logical iblock, checked against DATA_SELFID    */
+/*                            and named in log lines                         */
 /*   dst_buf                  destination buffer; caller-allocated, must     */
 /*                            have at least slice_length bytes available     */
 /*   slice_offset             byte offset within the disk block user-area    */
@@ -2409,29 +2433,29 @@ static u32 beamfs_inline_payload_crc(struct super_block *sb,
 /*   slice_length             number of user bytes to copy into dst_buf      */
 /*                            (1..BEAMFS_DATA_INLINE_BYTES)                  */
 /*   rmw_path                 caller context flag: true when invoked from a  */
-/*                            read-modify-write transit (writeback_folio or  */
-/*                            zero_tail), false when invoked from a user-    */
-/*                            initiated read (read_folio). Propagated into   */
-/*                            the journal entry as                           */
+/*                            read-modify-write transit (beamfs_wb_read_old  */
+/*                            or zero_tail_block), false otherwise.          */
+/*                            Propagated into the journal entry as           */
 /*                            BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED so that   */
 /*                            silent neutralisation events become            */
 /*                            empirically distinguishable from user-visible  */
 /*                            corrections in post-run forensic analysis.     */
 /*                            Also discriminates the pr_warn / pr_err log    */
-/*                            line wording between "neutralised" and        */
-/*                            "corrected" / "uncorrectable".                */
+/*                            line wording between "neutralised" and         */
+/*                            "corrected" / "uncorrectable".                 */
 /*                                                                           */
 /* Slice contract: slice_offset + slice_length <= BEAMFS_DATA_INLINE_BYTES   */
 /* (3824). HOLE (phys == 0) is NOT handled here -- caller must check.        */
 /*                                                                           */
-/* On any subblock corrected: durable autonomic repair via mark_buffer_dirty */
-/* + sync_dirty_buffer before return, same pattern as alloc.c bitmap path.   */
-/* On any subblock uncorrectable: journal entry with UNCORRECTABLE flag,     */
-/* then -EIO; no slice copy is performed.                                    */
+/* On any subblock corrected: the correction is journalled and the           */
+/* corrected bytes are copied out; the block on the medium is not            */
+/* rewritten here (see the end of the function).                             */
+/* On any subblock uncorrectable, or a DATA_CSUM or DATA_SELFID mismatch:    */
+/* journal entry with UNCORRECTABLE flag, then -EIO; no slice copy is        */
+/* performed.                                                                */
 /*                                                                           */
-/* Anti-NAK rationale: this isolates the RS decode + autonomic repair logic  */
-/* from folio lifecycle management. The folio lock and folio_end_read are    */
-/* the caller's responsibility.                                              */
+/* This isolates the RS decode from folio lifecycle management. The folio    */
+/* lock and the end of the read are the caller's responsibility.             */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					       const u8 *raw,
@@ -2465,19 +2489,12 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		return -EINVAL;
 
 	/*
-	 * Contract: caller owns @bh -- it must be sb_bread'd and
-	 * lock_buffer'd before calling, and unlock_buffer'd + brelse'd
-	 * after. The lock_buffer serialises the RMW transit against
-	 * other writers on the same physical block via the block-device
-	 * page cache. Reads from bh->b_data into tmp happen here under
-	 * that exclusion. See writeback_folio and zero_tail_block for
-	 * the canonical callsite pattern.
-	 *
-	 * Decode RS(255,239) subblocks into a private scratch buffer
-	 * (tmp), never into bh->b_data. decode_rs8 mutates both data
-	 * and parity bytes in its input. The decode_rs8 upstream race
-	 * on rs_control->buffers[] is resolved by the per-CPU
-	 * rs_control allocation in edac.c.
+	 * @raw is only read: it is copied into a private scratch buffer
+	 * (tmp) and decoded there, never in place. decode_rs8 mutates both
+	 * data and parity bytes in its input, and @raw may be the b_data of
+	 * a buffer that other paths read. The decode_rs8 upstream race on
+	 * rs_control->buffers[] is resolved by the per-CPU rs_control
+	 * allocation in edac.c.
 	 */
 	tmp = beamfs_scratch_get(sb);
 	if (!tmp)
@@ -2485,16 +2502,15 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	/*
 	 * No lock_buffer here, and the reason is in the callers.
 	 *
-	 * Three of the five hold it already -- writeback_range,
-	 * zero_tail_block and the RMW path all lock the buffer before
-	 * decoding into it -- so taking it again deadlocks on the first
-	 * decode, which on this filesystem means the rootfs mount. That
-	 * was tried and the node never reached a login prompt.
+	 * Those that pass a buffer's b_data -- write_read_folio_range,
+	 * zero_tail_block and the symlink reader -- already hold its lock,
+	 * so taking it again deadlocks on the first decode, which on this
+	 * filesystem means the rootfs mount. That was tried and the node
+	 * never reached a login prompt.
 	 *
-	 * The two callers that do not hold it are read_folio_range and
-	 * fiemap, where a torn read is possible and shows up as a
-	 * spurious uncorrectable rather than as damage. Fixing that means
-	 * locking in those two callers, not here.
+	 * The others -- read_folio_range and beamfs_wb_read_old -- pass a
+	 * copy taken under the buffer lock, or a block read straight from
+	 * the device into a scratch page.
 	 */
 	memcpy(tmp, raw, BEAMFS_BLOCK_SIZE);
 
@@ -2502,7 +2518,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	 * A capsule is gathered, not walked.
 	 *
 	 * Interleaved, symbol i of codeword j is at byte i*16 + j rather
-	 * than j*239 + i, and the header sits inside the coded area. The
+	 * than j*255 + i, and the header sits inside the coded area. The
 	 * two layouts share no arithmetic: reading one with the other's
 	 * gathers the wrong symbols and decodes to noise with every
 	 * check passing. The feature bit is what keeps them apart.
@@ -2516,14 +2532,13 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 				       BEAMFS_DATA_INLINE_SUBBLOCKS,
 				       rs_results, "file data");
 	} else {
-		beamfs_rs_decode_region(
-			tmp, BEAMFS_SUBBLOCK_TOTAL,
-			tmp + BEAMFS_SUBBLOCK_DATA, BEAMFS_SUBBLOCK_TOTAL,
-			BEAMFS_SUBBLOCK_DATA, BEAMFS_DATA_INLINE_SUBBLOCKS,
-			rs_results,
-			rs_positions,
-			BEAMFS_RS_PARITY / 2,
-			"file data");
+		beamfs_rs_decode_region(tmp, BEAMFS_SUBBLOCK_TOTAL,
+					tmp + BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_SUBBLOCK_TOTAL,
+					BEAMFS_SUBBLOCK_DATA,
+					BEAMFS_DATA_INLINE_SUBBLOCKS,
+					rs_results, rs_positions,
+					BEAMFS_RS_PARITY / 2, "file data");
 	}
 
 	for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
@@ -2536,14 +2551,12 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			/*
 			 * Journal the uncorrectable event before raising the
 			 * error: forensic record takes priority over the alert.
-			 * See Documentation/format-v4.md section 6.5.
 			 *
 			 * rmw_path=true here means the uncorrectable was
-			 * detected during a write transit; the imminent encode
-			 * will rewrite the codeword from the in-RAM scratch
-			 * buffer, so the on-disk damage is overwritten next
-			 * cycle. The journal entry preserves the forensic
-			 * record of the event regardless.
+			 * detected during a write transit. The caller fails the
+			 * read-modify-write on the -EIO below, so the damaged
+			 * block is not re-encoded over; the journal entry
+			 * preserves the forensic record of the event.
 			 */
 			beamfs_log_rs_event_flagged(sb, (u64)phys,
 				NULL, 0,
@@ -2593,15 +2606,15 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	}
 
 	/*
-	 * DATA_CSUM verification (format-v6). decode_rs8 can return success
-	 * while having converged to a wrong valid codeword (silent
-	 * miscorrection, known-limitations 3.11). Recompute the payload
-	 * checksum and reject on mismatch. The descriptor lives in the tail
-	 * pad, which decode does not touch, so it is read from tmp. A NONE
-	 * type accepts unconditionally (opt-in / lazy upgrade). On mismatch,
+	 * DATA_CSUM verification. decode_rs8 can return success while having
+	 * converged to a wrong valid codeword (silent miscorrection).
+	 * Recompute the payload checksum and reject on mismatch. The
+	 * descriptor is read from tmp: in a capsule it sits inside the coded
+	 * area and has just been decoded with the rest; in the alternating
+	 * layout it sits in the tail pad, which decode does not touch. Any
+	 * type other than CRC32 fails closed (see below). On mismatch,
 	 * journal an UNCORRECTABLE event and fail closed before any slice
-	 * copy, as the per-subblock uncorrectable path does. Observability
-	 * mechanism of Theorem v2.2a extended to data regions (v2.2b).
+	 * copy, as the per-subblock uncorrectable path does.
 	 */
 	if (sbi->s_data_csum) {
 		u32 doff  = beamfs_desc_off(sb);
@@ -2610,18 +2623,18 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		u32 got   = beamfs_inline_payload_crc(sb, tmp);
 
 		/*
-		 * csum_type gates the whole check, and the descriptor is
-		 * outside every RS codeword, so it is neither corrected nor
-		 * detected by the code. Accepting any type other than CRC32 as
-		 * "no checksum present" therefore let a single flip on offset
-		 * 4080 disable verification for that block, silently. Measured
-		 * 2026-08-17 at 128 flips on a 64-block file: 20 RS symbols
-		 * corrected, no uncorrectable, no csum mismatch logged, and
-		 * 15296 wrong bits returned to userspace across two blocks --
-		 * exactly the silent accept that format-v6 section 3.3 claimed
-		 * the layout could not produce. That argument holds for the
-		 * csum value (a corrupted CRC can only over-reject) but not for
-		 * the type byte.
+		 * csum_type gates the whole check. In the alternating layout
+		 * the descriptor is outside every RS codeword, so it is
+		 * neither corrected nor detected by the code. Accepting any
+		 * type other than CRC32 as "no checksum present" therefore let
+		 * a single flip on offset 4080 disable verification for that
+		 * block, silently. Measured 2026-08-17 at 128 flips on a
+		 * 64-block file: 20 RS symbols corrected, no uncorrectable, no
+		 * csum mismatch logged, and 15296 wrong bits returned to
+		 * userspace across two blocks -- the silent accept a descriptor
+		 * outside the codewords was meant to rule out. That holds for
+		 * the csum value (a corrupted CRC can only over-reject) but not
+		 * for the type byte.
 		 *
 		 * On a DATA_CSUM volume every data block is stamped at write
 		 * time, so any other type is a corrupted descriptor, not an
@@ -2629,12 +2642,13 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 		 */
 		if (ctype != BEAMFS_CSUM_CRC32) {
 			/*
-			 * UNCORRECTABLE is reserved: beamfs_log_rs_event_flagged
-			 * sets it itself for the positions == NULL, n_positions == 0
-			 * call shape used here (format-v4.md section 6.5). Passing it
-			 * in extra_flags trips the WARN_ON_ONCE reserved-mask guard at
-			 * super.c:523 and the journal entry is dropped, which is what
-			 * made the master node report RS_FAILED on 2026-08-24.
+			 * UNCORRECTABLE is reserved:
+			 * beamfs_log_rs_event_flagged sets it itself for
+			 * the positions == NULL, n_positions == 0 call shape
+			 * used here. Passing it in extra_flags trips the
+			 * WARN_ON_ONCE reserved-mask guard there; that
+			 * mistake is what made the master node report
+			 * RS_FAILED on 2026-08-24.
 			 */
 			u32 xflags = 0;
 
@@ -2690,12 +2704,13 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 
 		if (want_id != got_id) {
 			/*
-			 * UNCORRECTABLE is reserved: beamfs_log_rs_event_flagged
-			 * sets it itself for the positions == NULL, n_positions == 0
-			 * call shape used here (format-v4.md section 6.5). Passing it
-			 * in extra_flags trips the WARN_ON_ONCE reserved-mask guard at
-			 * super.c:523 and the journal entry is dropped, which is what
-			 * made the master node report RS_FAILED on 2026-08-24.
+			 * UNCORRECTABLE is reserved:
+			 * beamfs_log_rs_event_flagged sets it itself for
+			 * the positions == NULL, n_positions == 0 call shape
+			 * used here. Passing it in extra_flags trips the
+			 * WARN_ON_ONCE reserved-mask guard there; that
+			 * mistake is what made the master node report
+			 * RS_FAILED on 2026-08-24.
 			 */
 			u32 xflags = 0;
 
@@ -2719,9 +2734,9 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 
 	/*
 	 * Slice gather: copy [slice_offset, slice_offset + slice_length)
-	 * of the user-byte view (16 segments of 239 bytes, parity stripped)
-	 * into dst_buf. Walk the relevant subblocks and copy the
-	 * intersecting portion of each into the destination.
+	 * of the payload into dst_buf. The alternating layout holds it as
+	 * 16 segments of 239 bytes with the parity between them: walk the
+	 * relevant subblocks and copy the intersecting portion of each.
 	 */
 	{
 		u32 slice_end = slice_offset + slice_length;
@@ -2765,19 +2780,18 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 	}
 
 	/*
-	 * Durable autonomic repair: TEMPORARILY DISABLED.
+	 * No write-back of the correction from here.
 	 *
-	 * Previously this path wrote corrected bytes back to disk via
-	 * mark_buffer_dirty + sync_dirty_buffer. With the decode-into-
-	 * tmp fix above, bh->b_data is no longer the decoded buffer
-	 * (tmp is). Re-enabling repair requires either:
+	 * The corrected bytes are in tmp; @raw, and the medium, still hold
+	 * what was read. Writing the block back from this path would need
+	 * either:
 	 *  (a) an exclusive lock on phys around the read-modify-write
 	 *      window, OR
 	 *  (b) a CoW write path that allocates a fresh phys and
 	 *      updates the indirect pointer.
-	 * Deferred to follow-up. RS correction is still detected and
-	 * journalled (see corrected=true path above), only the on-disk
-	 * repair is skipped.
+	 * The correction is journalled above. The background scrubber
+	 * writes corrected blocks back (beamfs_scrub_check_block), and a
+	 * later write to the block re-encodes it whole.
 	 */
 	(void)corrected;
 
@@ -2810,87 +2824,18 @@ int beamfs_inline_decode_symlink(struct super_block *sb,
 						   dst, 0, len, false);
 }
 
-
-/* ------------------------------------------------------------------------- */
-/* beamfs_inline_folio_coverage -- compute INLINE disk block coverage of a   */
-/*                                  VFS folio.                               */
-/*                                                                           */
-/* The fundamental impedance: VFS folio carries PAGE_SIZE (4096) user bytes  */
-/* per index, INLINE disk block carries BEAMFS_DATA_INLINE_BYTES (3824) user */
-/* bytes. Therefore a folio at index N spans user-byte range                 */
-/*   [N * PAGE_SIZE, (N+1) * PAGE_SIZE)                                      */
-/* and intersects 1, 2, or 3 consecutive INLINE disk blocks. Tri-block       */
-/* coverage occurs when k_first > 2*INLINE_BYTES - PAGE_SIZE (= 3552), at    */
-/* folio indices N where (N * PAGE_SIZE) mod INLINE_BYTES > 3552. With       */
-/* INLINE_BYTES=3824 and PAGE_SIZE=4096, this is periodic with period 14    */
-/* (folios N=14, 28, 42, ...).                                              */
-/*                                                                           */
-/* Outputs:                                                                  */
-/*   *out_b_first         disk block index covering folio_start_byte         */
-/*   *out_k_first         byte offset within b_first where folio begins      */
-/*   *out_b_last          disk block index covering folio_end_byte - 1       */
-/*                        (== b_first or b_first + 1)                        */
-/*   *out_len_in_b_last   bytes within b_last that the folio covers          */
-/*   *out_folio_user_bytes total user bytes in this folio (1..PAGE_SIZE)     */
-/*                                                                           */
-/* Invariants on success:                                                    */
-/*   out_b_first <= out_b_last <= out_b_first + 2                            */
-/*   1 <= out_len_in_b_last <= BEAMFS_DATA_INLINE_BYTES                      */
-/*   out_k_first < BEAMFS_DATA_INLINE_BYTES                                  */
-/*   if b_last == b_first: out_folio_user_bytes == out_len_in_b_last         */
-/*   else if b_last == b_first + 1: out_folio_user_bytes ==                  */
-/*           (BEAMFS_DATA_INLINE_BYTES - k_first) + out_len_in_b_last        */
-/*   else (b_last == b_first + 2): out_folio_user_bytes ==                   */
-/*           (BEAMFS_DATA_INLINE_BYTES - k_first) + BEAMFS_DATA_INLINE_BYTES */
-/*           + out_len_in_b_last                                             */
-/*                                                                           */
-/* Returns 0 on success, -ERANGE if folio_index is at or beyond i_size       */
-/* (caller should zero-fill and end_read in that case, per VFS).             */
-/*                                                                           */
-/* Pure integer arithmetic. No locks, no allocations. Validated out-of-band  */
-/* on 15 boundary cases (see commit message and INLINE-MULTIBLOCK-DESIGN.md  */
-/* section 1.4).                                                             */
-/* ------------------------------------------------------------------------- */
-/* ------------------------------------------------------------------------- */
-/* read_folio (v2 INLINE) -- per-block RS(255,239) FEC, multi-block scope.   */
-/*                                                                           */
-/* Convention C (sliding window, VFS-conformant): folio at index N maps to   */
-/* user-byte range [N * PAGE_SIZE, (N+1) * PAGE_SIZE), and beamfs translates */
-/* this to one or two INLINE disk blocks at runtime via folio_coverage.      */
-/*                                                                           */
-/* Steps:                                                                    */
-/*   1) WARN if folio is not single-page (mapping_set_folio_order_range)     */
-/*   2) folio_coverage -> (b_first, k_first, b_last, len_in_b_last, fub)     */
-/*      ERANGE: folio beyond i_size -> zero-fill, end_read, return 0         */
-/*   3) for each disk block b in [b_first, b_last]:                          */
-/*       a) compute slice (offset within block, length to copy into folio)   */
-/*       b) lookup_phys for b                                                */
-/*       c) HOLE  -> memset zero the slice in the folio                      */
-/*          else  -> decode_block_into_buf with the slice                    */
-/*   4) zero-pad folio bytes [folio_user_bytes, BEAMFS_BLOCK_SIZE)           */
-/*   5) flush_dcache + folio_end_read                                        */
-/*                                                                           */
-/* HOLE handling is per-block: a multi-block folio with only one HOLE block  */
-/* gets the corresponding slice zeroed and the other slice decoded normally. */
-/* This is the sparse-file case (lseek + write past i_size).                 */
-/*                                                                           */
-/* MIL-STD-883 SEE coverage: validates beamfs resistance to RadFI            */
-/* single-bit and multi-byte payload corruption injected at submit_bio,      */
-/* across multi-block files (the v2.x WOW-factor target).                    */
-/* ------------------------------------------------------------------------- */
-
 /* ------------------------------------------------------------------------- */
 /* iomap read path                                                           */
 /*                                                                           */
-/* The INLINE format interleaves data and parity inside every 4096-byte      */
-/* block: 16 RS(255,239) subblocks of [239 data][16 parity]. 3824 logical    */
-/* bytes therefore occupy 4096 physical bytes, and file offset is not disk   */
-/* offset plus a constant -- which is what iomap_sector() assumes.           */
+/* Every 4096-byte block carries its RS parity alongside its payload: 3808   */
+/* bytes of file data in a capsule, 3824 in the alternating layout. File     */
+/* offset is therefore not disk offset plus a constant -- which is what      */
+/* iomap_sector() assumes.                                                   */
 /*                                                                           */
-/* Two consequences shape this code. iomap_begin maps one INLINE block per   */
-/* iteration (length = BEAMFS_DATA_INLINE_BYTES) so the affine assumption    */
-/* holds within a mapping; iomap iterates over the rest. And the read is     */
-/* done by beamfs_inline_read_folio_range() rather than by                   */
+/* Two consequences shape this code. iomap_begin bounds a write or fiemap    */
+/* mapping by the block that backs pos, and iomap calls back for the rest;   */
+/* a read mapping keeps the full requested length (see iomap_begin). And     */
+/* the read is done by beamfs_inline_read_folio_range() rather than by       */
 /* iomap_bio_read_ops, because the bytes that reach the page cache are not   */
 /* the bytes on disk: they are what RS decoding produces from them.          */
 /* ------------------------------------------------------------------------- */
@@ -2911,14 +2856,13 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	iomap->addr = IOMAP_NULL_ADDR;
 
 	/*
-	 * Map the range the caller asked for, clamped to the end of the
-	 * INLINE block that backs it -- not a fixed 3824-byte window
-	 * starting at a block boundary. iomap tracks its position within
-	 * the folio against the mapping it was given, and readahead ends
-	 * a folio when offset_in_folio(folio, pos) reaches zero; handing
-	 * back a range that starts before the requested position leaves
-	 * that comparison never matching, and the iterator walks off a
-	 * folio it has already released.
+	 * Start the mapping at the position the caller asked for, not at
+	 * the start of the INLINE block that backs it. iomap tracks its
+	 * position within the folio against the mapping it was given, and
+	 * readahead ends a folio when offset_in_folio(folio, pos) reaches
+	 * zero; handing back a range that starts before the requested
+	 * position leaves that comparison never matching, and the iterator
+	 * walks off a folio it has already released.
 	 */
 	iomap->offset = pos;
 
@@ -2935,8 +2879,8 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 *
 	 * A write at pos == i_size is the ordinary case of extending a
 	 * file, and the block holding that position usually exists
-	 * already: at 3824 usable bytes per block, appending to a 32-byte
-	 * file writes into block 0, which has data in it.
+	 * already: at 3808 or 3824 usable bytes per block, appending to a
+	 * 32-byte file writes into block 0, which has data in it.
 	 *
 	 * Reporting IOMAP_HOLE there made iomap_block_needs_zeroing true
 	 * on the first term, so __iomap_write_begin took the zeroing
@@ -2948,8 +2892,8 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * touched.
 	 *
 	 * iomap works in i_blocksize units, 4096, while a block carries
-	 * 3824 bytes of payload, so its block boundaries are not ours and
-	 * a range it considers past EOF can hold live bytes. Answering
+	 * 3808 or 3824 bytes of payload, so its block boundaries are not ours
+	 * and a range it considers past EOF can hold live bytes. Answering
 	 * the question it actually asked -- what is mapped here -- rather
 	 * than a shortcut about EOF keeps the two views consistent.
 	 */
@@ -2991,7 +2935,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * shorter than the folio makes iomap_read_folio_iter release the
 	 * folio -- nothing attached an iomap_folio_state, folio and
 	 * block size both being 4096 -- and then dereference it on the
-	 * next round at folio_size(). That is the NULL documented below,
+	 * next round at folio_size(). That is the NULL documented above,
 	 * confirmed by disassembly, and a 3824-byte mapping is always
 	 * shorter than a 4096-byte folio.
 	 */
@@ -3091,8 +3035,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		 * was accepted, and one that needed a block was told ENOSPC by
 		 * the allocator, which answers 0 for a failed volume as for a
 		 * full one. generic/361 on aarch64, 2026-10-01: "pwrite: No
-		 * space left on device" on a 1 GiB volume holding 520 MiB
-		 * (known-limitations 3.42).
+		 * space left on device" on a 1 GiB volume holding 520 MiB.
 		 */
 		if (beamfs_failed(inode->i_sb))
 			return -EIO;
@@ -3124,9 +3067,9 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * 7 and 246 that way and left no trace in any buffer head,
 	 * because iomap does not use them.
 	 *
-	 * Checked here rather than at each of the seventeen places the
-	 * two lookups return a block: one gate the address must pass, and
-	 * one place to read when it does not.
+	 * Checked here rather than at each place the two lookups return a
+	 * block: one gate the address must pass, and one place to read when
+	 * it does not.
 	 */
 	if (ret == 0 &&
 	    !beamfs_phys_is_sane(inode->i_sb, inode, phys, "iomap_begin"))
@@ -3305,23 +3248,6 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 		}
 
 		/*
-		 * sb_bread, and it can loop.
-		 *
-		 * __bread_gfp adds __GFP_NOFAIL whatever mask it is
-		 * given -- fs/buffer.c line 1410, "prefer looping in the
-		 * allocator rather than here" -- so there is no mask that
-		 * makes this read fail cleanly. Passing __GFP_NORETRY was
-		 * tried and does nothing.
-		 *
-		 * generic/464 wedges here: page allocation stall under
-		 * bdev_getblk, called from a page fault with the folio
-		 * locked, on a machine whose page cache is full of this
-		 * filesystem's own blocks. The way out is not to reach
-		 * the buffer cache from the fault path at all, which is
-		 * what ext2 under iomap does and what this still has to
-		 * do.
-		 */
-		/*
 		 * Not sb_bread, and that is the whole point.
 		 *
 		 * __bread_gfp adds __GFP_NOFAIL whatever mask it is given,
@@ -3432,12 +3358,12 @@ static const struct iomap_read_ops beamfs_inline_read_ops = {
 /*
  * No .readahead. iomap_readahead_iter() moves to the next folio only when
  * offset_in_folio(cur_folio, iter->pos) reaches zero, so it assumes
- * mappings line up with folio boundaries. INLINE mappings end on 3824-byte
- * block boundaries and folios are 4096 bytes, so that comparison never
- * matches at the right moment: iomap_read_folio_iter() clears cur_folio
- * once the folio is full, the transition to the next folio does not fire,
- * and the following iteration dereferences NULL. Confirmed twice on
- * kernel 7.1.3.
+ * mappings line up with folio boundaries. INLINE mappings end on block
+ * payload boundaries, 3808 or 3824 bytes apart, and folios are 4096
+ * bytes, so that comparison never matches at the right moment:
+ * iomap_read_folio_iter() clears cur_folio once the folio is full, the
+ * transition to the next folio does not fire, and the following
+ * iteration dereferences NULL. Confirmed twice on kernel 7.1.3.
  *
  * readahead is optional in address_space_operations. Aligning the format
  * to folios would mean moving parity out of the data block, which is what
@@ -3447,8 +3373,8 @@ static const struct iomap_read_ops beamfs_inline_read_ops = {
  *
  * read_folio: iomap resolves which INLINE block backs each
  * file range, then calls beamfs_inline_read_folio_range() to produce the
- * bytes. The folio locking, uptodate accounting and readahead batching
- * are iomap's; what stays here is the RS decode.
+ * bytes. The folio locking and uptodate accounting are iomap's; what
+ * stays here is the RS decode.
  */
 static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 {
@@ -3460,29 +3386,6 @@ static int beamfs_inline_read_folio(struct file *file, struct folio *folio)
 	iomap_read_folio(&beamfs_inline_iomap_ops, &ctx, NULL);
 	return 0;
 }
-
-
-
-/* ------------------------------------------------------------------------- */
-/* readahead -- per-folio loop on top of read_folio.                         */
-/* ------------------------------------------------------------------------- */
-/* ------------------------------------------------------------------------- */
-/* write_begin (v2 INLINE, multi-block scope)                                */
-/*                                                                           */
-/* Provides a folio for the write to land into. The actual encoding to disk  */
-/* (RS encode + sync) happens in writepages.                                 */
-/*                                                                           */
-/* MULTI-BLOCK SCOPE: pos+len may span across a 4096-byte folio boundary    */
-/* into 1 or 2 underlying INLINE disk blocks (3824 user bytes per block).   */
-/* RMW via read_folio populates the folio with the existing data of the     */
-/* covered block(s) before the user write lands; writepages later RS-encodes*/
-/* and writes back the covered blocks. See INLINE-MULTIBLOCK-DESIGN.md S2.3.*/
-/*                                                                           */
-/* RMW handling:                                                             */
-/*   - If the folio is already uptodate, no read is needed (overwrite).      */
-/*   - Otherwise, look up the physical block. If allocated, read+decode      */
-/*     it via the existing read path. If HOLE, zero-fill the folio.          */
-/* ------------------------------------------------------------------------- */
 
 /* ------------------------------------------------------------------------- */
 /* iomap write path                                                          */
@@ -3582,7 +3485,6 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
 	.read_folio_range = beamfs_inline_write_read_folio_range,
 };
 
-
 /*
  * Writeback: encode into bounce pages, gather the pages into bios.
  *
@@ -3598,10 +3500,11 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
  * another's, and nothing is read back to be rewritten.
  *
  * beamfs cannot hand the folio's own pages to the device: a block
- * carries 3824 bytes of payload interleaved with 272 bytes of
- * Reed-Solomon parity, so every block has to be encoded into a bounce
- * page first. And because 3824 is not 4096, every folio ends inside a
- * block that the next folio continues.
+ * carries 3808 or 3824 bytes of payload alongside 256 bytes of
+ * Reed-Solomon parity and its checksum and identity fields, so every
+ * block has to be encoded into a bounce page first. And because the
+ * payload is not 4096, a folio ends inside a block that the next folio
+ * continues.
  *
  * What was here before did the encode through the block device's
  * buffer cache, one buffer_head per block, one bio per buffer_head,
@@ -3618,9 +3521,9 @@ static const struct iomap_write_ops beamfs_inline_write_ops = {
  * continues it has arrived: its payload waits in wb->pend, the next
  * folio fills the rest, and the block is encoded once and queued
  * once. Encoded pages come from a pool, not the buffer cache, so no
- * buffer lock is held across anything that can sleep -- the rule the
- * batch of 2026-09 broke and generic/076 turned into a four-party
- * deadlock. Blocks contiguous on the medium go into one bio of up to
+ * buffer lock is held across anything that can sleep -- the rule whose
+ * breach generic/076 turned into a four-party deadlock. Blocks
+ * contiguous on the medium go into one bio of up to
  * 32 pages, submitted when the run breaks, when it is full, or from
  * writeback_submit at the end of the pass. Each folio carries a
  * counter of the blocks that hold its bytes; the bio completion
@@ -4211,29 +4114,19 @@ static int beamfs_inline_writeback_submit(struct iomap_writepage_ctx *wpc,
 	return error;
 }
 
-
 static const struct iomap_writeback_ops beamfs_inline_writeback_ops = {
 	.writeback_range  = beamfs_inline_writeback_range,
 	.writeback_submit = beamfs_inline_writeback_submit,
 };
 
 /* ------------------------------------------------------------------------- */
-/* write_end (v2 INLINE)                                                     */
+/* writepages                                                                */
 /*                                                                           */
-/* Standard kernel pattern: flush dcache, mark folio uptodate + dirty,       */
-/* update i_size if the write extended the file, then release the folio.    */
-/* The actual RS encode + disk write happens later in writepages.            */
-/* ------------------------------------------------------------------------- */
-/* ------------------------------------------------------------------------- */
-/* writepages (v2 INLINE, multi-block scope)                                 */
-/*                                                                           */
-/* Iterate every dirty folio in the mapping via filemap_get_folios_tag.      */
-/* For each folio, dispatch to beamfs_inline_writeback_folio which performs  */
-/* the per-folio RMW across the 1-or-2 INLINE disk blocks the folio covers.  */
-/* Cross-block-boundary writes hit two blocks; aligned writes hit one.       */
-/* Block allocation (lookup_or_alloc_phys) is serialized by the per-inode    */
-/* i_alloc_mutex to keep the i_direct[]/i_indirect tree consistent under     */
-/* concurrent writeback of distinct folios on the same inode.                */
+/* iomap_writepages walks the dirty folios and hands each range to           */
+/* beamfs_inline_writeback_range, which maps and allocates under the         */
+/* per-inode i_alloc_mutex and encodes into bounce pages;                    */
+/* beamfs_inline_writeback_submit ends the pass. See the writeback comment   */
+/* above.                                                                    */
 /* ------------------------------------------------------------------------- */
 static int beamfs_inline_writepages(struct address_space *mapping,
 				    struct writeback_control *wbc)
@@ -4412,24 +4305,18 @@ const struct file_operations beamfs_inline_file_operations = {
 };
 
 /* ------------------------------------------------------------------------- */
-/* Truncate support (sub-step 6 INLINE-MULTIBLOCK)                           */
+/* Truncate support                                                          */
 /*                                                                           */
 /* The allocator reaches every level: lookup_or_alloc_phys has allocation    */
 /* sites for direct, indirect, double and triple indirect, so the write      */
 /* path is not capped at 524 blocks. Measured 2026-08-20 on a freshly        */
 /* formatted volume: a 64 MiB file, about 17500 blocks and well into double  */
 /* indirect, was written and read back intact at 24 MB/s with no             */
-/* EOPNOTSUPP. Capacity per file is BEAMFS_MAX_IBLOCK_TINDIRECT * 3824,      */
-/* roughly 512 GiB. See BEAMFS_DINDIRECT_PTRS / BEAMFS_TINDIRECT_PTRS in     */
-/* beamfs.h and the Documentation/format-v5.md section on indirect           */
-/* addressing.                                                               */
+/* EOPNOTSUPP. Capacity per file is BEAMFS_MAX_IBLOCK_TINDIRECT blocks of    */
+/* payload: about 479 GiB at 3824 bytes per block, 477 GiB at 3808.          */
 /*                                                                           */
-/* Truncate, however, still walks direct and single indirect only, so        */
-/* freeing a file larger than 524 blocks leaves the deeper levels            */
-/* allocated. That is a space leak rather than a correctness problem for     */
-/* reads, and closing it is the remaining part of sub-step 6. The 64BIT +    */
-/* EXTENTS feature flags remain orthogonal to multi-level indirect and       */
-/* target the post-v5.0 patch series.                                        */
+/* beamfs_inline_free_blocks_from walks the same four levels, so a           */
+/* truncate frees everything past the new end of the file.                   */
 /* ------------------------------------------------------------------------- */
 
 /*
@@ -4437,13 +4324,15 @@ const struct file_operations beamfs_inline_file_operations = {
  *                                  >= b_first_freed.
  *
  * Mirror of beamfs_free_data_blocks (super.c) restricted to a starting
- * logical block, used for truncate-down. Walks direct[b_first_freed..N-1]
- * then the single indirect block. If b_first_freed == 0 the indirect
- * block itself is freed; otherwise individual indirect slots are zeroed
- * and the indirect block is kept.
+ * logical block, used for truncate-down and by iomap_end to give back
+ * what a short write allocated. Walks direct[b_first_freed..N-1], then
+ * the single indirect block, then the double and triple indirect trees
+ * through beamfs_free_ind_range. If b_first_freed <= BEAMFS_DIRECT_BLOCKS
+ * the indirect block itself is freed; otherwise individual indirect slots
+ * are zeroed and the indirect block is kept.
  *
- * Caller holds inode_lock via notify_change. No allocation occurs here,
- * so i_alloc_mutex is not needed.
+ * Callers hold inode_lock and i_alloc_mutex: this rewrites the tree the
+ * allocator walks.
  */
 static void beamfs_inline_free_blocks_from(struct inode *inode,
 					   u64 b_first_freed)
@@ -4481,8 +4370,10 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		 * Verify before trusting the pointers. Under CRC this turns a
 		 * flipped pointer that lands in range and on an allocated block
 		 * -- the residual left open by the bounds check above -- into a
-		 * clean failure instead of someone else's data. Under RS it is
-		 * corrected in place and the read continues.
+		 * clean failure instead of someone else's data. Under RS a copy
+		 * is decoded and what it corrects is journalled, but the
+		 * pointers are read as the medium holds them: a correctable
+		 * flip is reported, not repaired.
 		 */
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
@@ -4600,17 +4491,17 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 }
 
 /*
- * beamfs_inline_zero_tail_block - zero user bytes [zero_offset .. 3824)
- *                                 in INLINE disk block b, via RMW + RS
- *                                 re-encode.
+ * beamfs_inline_zero_tail_block - zero user bytes [zero_offset .. end of
+ *                                 payload) in INLINE disk block b, via
+ *                                 RMW + RS re-encode.
  *
  * Used when truncate-down lands inside a block: the surviving block must
  * be valid (RS-encoded) with stale tail bytes zeroed. The block is
  * decoded into scratch, the tail is memset to zero, and the block is
- * re-encoded and synced. Mirrors writeback_folio's RMW pattern.
+ * re-encoded and synced.
  *
- * Caller holds inode_lock; we additionally take i_alloc_mutex to exclude
- * concurrent writeback on the same physical block.
+ * Caller holds inode_lock. i_alloc_mutex is taken around the lookup;
+ * the read-modify-write itself runs under the buffer lock.
  */
 static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 					 u32 zero_offset)
@@ -4655,9 +4546,10 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	if (!scratch)
 		return -ENOMEM;
 
-	/* zero_tail is part of the RMW write path (truncate-induced tail
+	/*
+	 * zero_tail is part of the RMW write path (truncate-induced tail
 	 * clear). rmw_path=true so any flip detected on disk is journalled
-	 * with RMW_NEUTRALISED, consistent with the writeback_folio path.
+	 * with RMW_NEUTRALISED, as writeback's read of a partial block is.
 	 */
 	bh = sb_bread(sb, phys);
 	if (!bh) {
@@ -4667,9 +4559,9 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		return -EIO;
 	}
 	/*
-	 * Lock bh for the full RMW transit (same rationale as
-	 * writeback_folio: serialise against concurrent writeback on the
-	 * same phys via the block-device page cache).
+	 * Lock bh for the full RMW transit: readers copy this block under
+	 * its lock, and writeback brings the same buffer up to date under it
+	 * (beamfs_wb_sync_alias), so none of them sees it half rewritten.
 	 */
 	lock_buffer(bh);
 
@@ -4749,8 +4641,9 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 			 */
 			truncate_setsize(inode, new_size);
 
-			/* Logical block index of the first block to be
-			 * fully freed: ceil(new_size / 3824).
+			/*
+			 * Logical block index of the first block to be
+			 * fully freed: ceil(new_size / payload).
 			 */
 			b_first_freed = (new_size +
 					 beamfs_block_payload(inode->i_sb) - 1)
@@ -4838,10 +4731,11 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
  * What this reports is one extent per block, and that is not a
  * limitation of the code. fiemap merges two extents when
  * addr + length == next addr; here addr advances by 4096 while length
- * is 3824, so the test never holds and never can. The mapping from
- * file offset to disk offset is not affine, which is the price of
- * putting each block's parity inside the block: 272 bytes of every
- * 4096 belong to the code that protects the other 3824.
+ * is at most the block's payload, 3808 or 3824 bytes, so the test never
+ * holds and never can. The mapping from file offset to disk offset is
+ * not affine, which is the price of putting each block's parity inside
+ * the block: 288 or 272 bytes of every 4096 hold the parity and the
+ * checks that protect the rest.
  *
  * So generic/473 still fails, and it fails for a reason worth stating
  * rather than hiding: a tool asking where a file lives now gets the

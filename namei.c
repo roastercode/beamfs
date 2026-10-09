@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * beamfs - Filename / directory entry operations
- * Author: Aurélien DESBRIERES <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
- * Implements: create, mkdir, unlink, rmdir, link, rename
+ * Implements: create, mkdir, unlink, rmdir, link, symlink, rename
  */
 
 #include <linux/fs.h>
@@ -158,9 +158,9 @@ int beamfs_write_inode_raw(struct inode *inode)
  *   block_idx < 12  -> fi->i_direct[block_idx]
  *   block_idx < 524 -> via fi->i_indirect, slot=(block_idx - 12)
  *
- * Newly allocated blocks (both data and indirect) are zero-initialized
- * before being installed. This is required for directory blocks (entry
- * scanners assume d_ino == 0 marks a free slot).
+ * Newly allocated blocks (both data and indirect) are zeroed before
+ * being installed. A new directory block also gets one free record,
+ * d_ino == 0, spanning its 3824-byte payload, then its parity.
  */
 int beamfs_dir_get_block(struct inode *dir, unsigned int block_idx,
 			 bool alloc, u64 *out_block)
@@ -502,9 +502,9 @@ place_it:
 		brelse(bh);
 
 		/*
-		 * The directory changed, so its times did too. Dropping
-		 * these in the rewrite made generic/003 report that mtime
-		 * and ctime stood still across a file creation.
+		 * The directory changed, so its times did too. Without
+		 * these, generic/003 reports that mtime and ctime stand
+		 * still across a file creation.
 		 */
 		inode_set_mtime_to_ts(dir, current_time(dir));
 		inode_set_ctime_to_ts(dir, current_time(dir));
@@ -573,15 +573,13 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 			    !memcmp(de->d_name, name->name, name->len)) {
 				/*
 				 * Fold the record into its predecessor when
-				 * there is one in the same subblock, so the
-				 * space comes back as a single free record
-				 * rather than a hole nothing can use.
+				 * that one is free and in the same subblock,
+				 * so the space comes back as a single free
+				 * record rather than a hole nothing can use.
 				 * Otherwise zero d_ino and leave the record,
 				 * which add_dirent will find.
-				 */
-				/*
-				 * Merge into the predecessor only when the
-				 * predecessor is itself free.
+				 *
+				 * Never into a live predecessor.
 				 *
 				 * Growing a live entry's d_rec_len to cover
 				 * the space just released makes the walk
@@ -624,8 +622,8 @@ static int beamfs_del_dirent(struct inode *dir, const struct qstr *name)
 
 				/*
 				 * Removing an entry changes the directory as
-				 * much as adding one does. Both lost these in
-				 * the rewrite for variable-length records.
+				 * much as adding one does, so mtime and ctime
+				 * move here too.
 				 */
 				inode_set_mtime_to_ts(dir, current_time(dir));
 				inode_set_ctime_to_ts(dir, current_time(dir));
@@ -1015,15 +1013,6 @@ static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
 /* ------------------------------------------------------------------ */
 
 /*
- * beamfs_symlink -- create a symbolic link in directory @dir.
- *
- * Fast symlink only (v1): target path is stored inline in the inode
- * by reusing the i_direct[] byte storage (96 bytes available). For
- * targets longer than 96 bytes, returns -ENAMETOOLONG. The rootfs
- * Linux deployment corpus has all symlinks < 96 bytes; slow symlink
- * (data-block path) is deferred to a follow-up.
- */
-/*
  * Put a long target in a data block and point i_direct[0] at it.
  *
  * The block is written through the same RS encoder as file data, so the
@@ -1098,6 +1087,14 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 	return 0;
 }
 
+/*
+ * beamfs_symlink -- create a symbolic link in directory @dir.
+ *
+ * A target shorter than i_direct[] (96 bytes) is stored inline, in the
+ * bytes of i_direct[]. A longer one, up to BEAMFS_DATA_INLINE_BYTES,
+ * goes in a data block whose number is in i_direct[0]; i_size tells the
+ * two apart. Anything longer, or an empty target, gets -ENAMETOOLONG.
+ */
 static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 			  struct dentry *dentry, const char *symname)
 {
@@ -1108,12 +1105,12 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 
 	len = strlen(symname);
 	/*
-	 * PATH_MAX is the ceiling the VFS enforces; anything under it is a
-	 * legitimate target and has to be storable. Ninety-six bytes was
-	 * not a design limit, it was the size of the field the short form
-	 * happens to reuse, and any absolute path of moderate depth
-	 * exceeds it -- generic/360 links to a 1019-byte path and got
-	 * ENAMETOOLONG.
+	 * PATH_MAX is the ceiling the VFS enforces. Ninety-six bytes was not
+	 * a design limit, it was the size of the field the short form
+	 * happens to reuse, and any absolute path of moderate depth exceeds
+	 * it -- generic/360 links to a 1019-byte path and got ENAMETOOLONG.
+	 * The limit is BEAMFS_DATA_INLINE_BYTES, 3824; a target between that
+	 * and PATH_MAX is still refused.
 	 */
 	if (len == 0 || len > BEAMFS_DATA_INLINE_BYTES)
 		return -ENAMETOOLONG;
@@ -1168,21 +1165,9 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 
 out_iput:
 	/*
-	 * The inode was allocated, written to disk with nlink=1, and
-	 * never linked. beamfs_evict_inode frees an inode only when
-	 * nlink has reached zero, so releasing it here without
-	 * decrementing leaves it allocated on the medium with no name --
-	 * space that nothing can reach and nothing will reclaim.
-	 *
-	 * generic/204 fills the inode table and shows the result: 1678
-	 * inodes, contiguous from 14707 to the end of the table, all
-	 * mode 0100644 nlink=1 size=0, every one of them a create that
-	 * failed after the inode was written.
-	 *
-	 * mkdir below already does this, twice, because a directory is
-	 * born with nlink=2. discard_new_inode is what the VFS provides
-	 * for an inode that was never published -- btrfs, ceph, ext2,
-	 * jfs, ntfs3 and udf all use it on this path.
+	 * As in beamfs_create: the inode was written with nlink=1 and
+	 * never linked, so the link is dropped before the inode is
+	 * discarded, or it stays allocated on the medium with no name.
 	 */
 	inode_dec_link_count(inode);
 	discard_new_inode(inode);
@@ -1192,9 +1177,9 @@ out_iput:
 /*
  * beamfs_get_link -- VFS i_op->get_link callback.
  *
- * Returns a pointer to the inline target stored in i_direct[]. The
- * buffer lifetime is tied to the in-memory inode; no allocation is
- * performed and no DELAYED_CALL needs to be set up.
+ * A short target is returned in place from i_direct[], which lives as
+ * long as the in-memory inode. A long one is read from its data block
+ * into a buffer the VFS frees through @done.
  */
 static const char *beamfs_get_link(struct dentry *dentry,
 				   struct inode *inode,
@@ -1327,10 +1312,6 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 }
 
 /* ------------------------------------------------------------------ */
-/* dir inode_operations - exported                                     */
-/* ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------ */
 /* rename - move/rename a directory entry                              */
 /* ------------------------------------------------------------------ */
 
@@ -1344,7 +1325,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 	int	      is_dir    = S_ISDIR(old_inode->i_mode);
 	int	      ret;
 
-	/* beamfs v1: no RENAME_EXCHANGE or RENAME_WHITEOUT */
+	/* No RENAME_EXCHANGE or RENAME_WHITEOUT. */
 	if (flags & ~RENAME_NOREPLACE)
 		return -EINVAL;
 
@@ -1353,7 +1334,8 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 
 	/*
 	 * If destination exists, unlink it first.
-	 * For directories: target must be empty (nlink == 2: . and ..)
+	 * For directories: target must be empty, which takes a walk of
+	 * its blocks (beamfs_dir_is_empty) -- nlink cannot tell.
 	 */
 	if (new_inode) {
 		if (is_dir) {
@@ -1510,6 +1492,10 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 
 	return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* dir inode_operations - exported                                     */
+/* ------------------------------------------------------------------ */
 
 const struct inode_operations beamfs_dir_inode_operations = {
 	.lookup  = beamfs_lookup,

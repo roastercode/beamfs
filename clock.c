@@ -2,7 +2,7 @@
 /*
  * beamfs -- clock anchor for the radiation event journal
  *
- * Author: Aurelien Desbrieres <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
  * Journal entries carry ktime_get_ns(): monotonic since boot, which
  * orders events exactly and dates none of them. That is the right
@@ -68,7 +68,8 @@ static u32 beamfs_clock_quality(void)
 	 * A machine that has never had its clock set cannot be
 	 * hardware-disciplined whatever the parameter says. Cheap
 	 * sanity, and it catches the common case of an embedded board
-	 * booting with no RTC and a mount option copied from elsewhere.
+	 * booting with no RTC and a clock_source setting copied from
+	 * elsewhere.
 	 */
 	if (q > BEAMFS_CLOCK_UNKNOWN &&
 	    ktime_get_real_seconds() < 1000000000LL)

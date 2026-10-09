@@ -5,9 +5,7 @@
  * generic/464 reports the damage through fsck, twenty seconds after the
  * fact, as a count of blocks the bitmap calls used and no inode
  * reaches. Working back from that count means reading a million trace
- * lines and guessing which of them mattered, which is how two weeks
- * went by with three patches that each measured worse than the code
- * they replaced.
+ * lines and guessing which of them mattered.
  *
  * The way out of chasing an intermittent defect is to stop chasing it:
  * check the invariant at every write, and the first violation arrives
@@ -20,9 +18,10 @@
  * record. A store that finds zero where a live pointer was recorded is
  * the defect, and it is reported at that instant.
  *
- * Cost: one hash lookup and one 16-byte entry per live pointer. Off
- * unless CONFIG_BEAMFS_DEBUG_TREE, and the calls compile away entirely
- * when it is off.
+ * Cost: one hash lookup per store, and one struct beamfs_tc_entry --
+ * 72 bytes on a 64-bit kernel -- per slot recorded. Off unless
+ * CONFIG_BEAMFS_DEBUG_TREE, and the calls compile away entirely when it
+ * is off.
  */
 
 #include <linux/hashtable.h>
@@ -273,8 +272,8 @@ void beamfs_tc_clear(struct super_block *sb, u64 parent, u32 slot)
  *
  * generic/464 writes with pwrite -b 65536 on a truncated file, so each
  * write rebuilds the whole tree; the lost slots come out at a fixed
- * stride of 17, which is exactly 65536 / 3824, the logical blocks one
- * write covers. Slots vanishing in groups at a fixed stride is what a
+ * stride of 17, which is 65536 / 3824 rounded down: the logical blocks
+ * one write covers. Slots vanishing in groups at a fixed stride is what a
  * whole block being zeroed looks like, not what a race on one slot
  * looks like.
  */

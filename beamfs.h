@@ -3,7 +3,7 @@
  * beamfs - resilient filesystem
  * Based on: Fuchs, Langer, Trinitis - ARCS 2015
  *
- * Author: roastercode - Aurelien DESBRIERES <aurelien@hackers.camp>
+ * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  */
 
 #ifndef _BEAMFS_H
@@ -44,11 +44,11 @@ struct beamfs_sb_info {
 	/*
 	 * The same entries keyed by child, for beamfs_free_block: it asks
 	 * "which slots name this block", and walking the whole table for
-	 * that, once per freed block under s_tc_lock, was 70 % of the CPU
+	 * that, once per freed block under s_tc_lock, was 70% of the CPU
 	 * of generic/074 (2026-09-23).
 	 */
 	DECLARE_HASHTABLE(s_tc_child, 14);
-	spinlock_t        s_tc_lock;
+	spinlock_t        s_tc_lock;  /* s_tc, s_tc_child, s_tc_entries */
 	unsigned int      s_tc_entries;
 	unsigned int      s_tc_violations;
 #endif
@@ -68,10 +68,10 @@ struct beamfs_sb_info {
 	 * beamfs_lookup.
 	 *
 	 * A mempool never returns NULL for GFP_NOFS and does not wait
-	 * while it holds a free element. Thirty-six kilobytes per mount
-	 * against a class of stall that only appears when the machine is
-	 * already in trouble -- which is exactly when a filesystem has to
-	 * keep working.
+	 * while it holds a free element. Thirty-two 4 KiB elements, 128 KiB
+	 * per mount, against a class of stall that only appears when the
+	 * machine is already in trouble -- which is exactly when a
+	 * filesystem has to keep working.
 	 */
 	mempool_t        *s_scratch_pool;
 	/*
@@ -120,8 +120,7 @@ struct beamfs_sb_info {
 	u32                       s_bitmap_blocks_count;
 
 	/*
-	 * Which bitmap blocks need their on-disk image rebuilt, and
-	 * whether the superblock does.
+	 * Which bitmap blocks need their on-disk image rebuilt.
 	 *
 	 * Rebuilding means walking 3824 bytes bit by bit out of the
 	 * in-memory bitmap and running sixteen RS encodes over the result.
@@ -135,6 +134,11 @@ struct beamfs_sb_info {
 	 * right when the buffer reaches the disk. Marking here and
 	 * rebuilding in sync_fs collapses thousands of rebuilds into one
 	 * per block that was actually touched.
+	 *
+	 * s_super_needs_encode is the superblock's equivalent, but the
+	 * superblock is not deferred: the flusher can write its buffer at
+	 * any time, so beamfs_dirty_super rebuilds it at once and the flag
+	 * stays clear.
 	 */
 	unsigned long            *s_bitmap_needs_encode;
 	bool                      s_super_needs_encode;
@@ -233,12 +237,14 @@ struct beamfs_sb_info {
 	 * failure.
 	 *
 	 * The thread walks allocated blocks at a bounded rate, decodes
-	 * each, and journals what it finds. It does not write back:
-	 * rewriting cold data turns a read into a read-modify-write with
-	 * a power-loss window, and the correction the decode produced is
-	 * already what a subsequent reader would get. Detection is the
-	 * point -- an operator who knows a volume is drifting can act
-	 * while the drift is still correctable.
+	 * each, and journals what it finds. A block that needed
+	 * correction is written back whole, under the buffer lock: only
+	 * while its owner still maps it at the same place, only if no
+	 * subblock was beyond correction and the buffer is unchanged
+	 * since the decode, and never on a read-only or frozen volume.
+	 * Each upset is correctable on its own; it is their sum that
+	 * loses data. Blocks reached through the wear map have no known
+	 * owner and are checked and reported, never written.
 	 */
 	struct task_struct       *s_scrub_thread;
 	unsigned int              s_scrub_interval_ms; /* between blocks; 0 = idle */
@@ -332,8 +338,12 @@ int  beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 			      unsigned int *corrected,
 			      struct inode *owner, u64 iblock);
 void beamfs_scrub_stop(struct super_block *sb);
+
+/* file_inline.c */
 int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			       u64 *phys_out);
+
+/* super.c -- the RS journal */
 /*
  * beamfs_log_rs_event -- record a Reed-Solomon correction event in the
  *                       persistent superblock journal.
@@ -343,7 +353,7 @@ int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
  *                sub-block sentinel (see BEAMFS_RS_BLOCK_NO_SB_MARKER)
  * @positions:    array of byte positions corrected within the codeword.
  *                MUST be non-NULL when n_positions >= 1, valid for
- *                n_positions entries. MAY be NULL when n_positions == 0
+ *                n_positions entries. MUST be NULL when n_positions == 0
  *                (uncorrectable event, see UNCORRECTABLE policy below).
  * @n_positions:  number of corrections; MUST be in [0, BEAMFS_RS_PARITY/2].
  *                When >= 1, equals the symbol count and is written
@@ -354,9 +364,10 @@ int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
  *                  for bitmap subblocks, BEAMFS_SB_RS_DATA_LEN for SB
  *                  subblocks). Required by the entropy estimator to
  *                  compute the bin index from each byte position.
- *                  MUST be non-zero even for uncorrectable events.
+ *                  MUST be in [1, BEAMFS_SUBBLOCK_DATA], even for
+ *                  uncorrectable events.
  *
- * Forensic policy (see Documentation/format-v4.md sections 6.4-6.6):
+ * Forensic policy:
  *   n_positions >= 2  -> entropy computed, ENTROPY_VALID flag set,
  *                        re_symbol_count = n_positions
  *   n_positions == 1  -> entropy zeroed, ENTROPY_VALID cleared,
@@ -375,9 +386,9 @@ int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
  * in re_entropy_q16_16 with BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID set
  * (only when n_positions >= 2; see Forensic policy above).
  *
- * Invariants enforced via WARN_ON_ONCE; failures degrade gracefully
- * (no entropy logged) but never panic. Safe to call from any context
- * (spinlock-protected internally).
+ * Invariants enforced via WARN_ON_ONCE: a call that breaks one is not
+ * journalled, and reserved bits in extra_flags are masked off; nothing
+ * panics. Takes s_lock with spin_lock(), so not for interrupt context.
  */
 /*
  * beamfs_log_rs_event_flagged -- variant of beamfs_log_rs_event that
@@ -390,10 +401,10 @@ int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
  * for the legacy behaviour (then beamfs_log_rs_event is the
  * idiomatic alias).
  *
- * extra_flags MUST only contain bits documented in the
- * BEAMFS_RS_EVENT_FLAG_* enumeration above. ENTROPY_VALID and
- * UNCORRECTABLE are reserved for the policy and MUST NOT appear
- * in extra_flags (WARN_ON_ONCE enforces).
+ * extra_flags MUST only contain BEAMFS_RS_EVENT_FLAG_* bits and the
+ * subblock field built by beamfs_rs_event_subblock_bits().
+ * ENTROPY_VALID and UNCORRECTABLE are reserved for the policy and MUST
+ * NOT appear in extra_flags (WARN_ON_ONCE enforces).
  */
 void beamfs_log_rs_event_flagged(struct super_block *sb,
 			u64 block_no,
@@ -415,10 +426,13 @@ extern const struct file_operations          beamfs_inline_file_operations;
 
 /* inode.c */
 struct inode *beamfs_iget(struct super_block *sb, unsigned long ino);
+/* namei.c */
 struct inode *beamfs_new_inode(struct inode *dir, umode_t mode);
 
 /* dir.c */
 extern const struct file_operations beamfs_dir_operations;
+
+/* namei.c */
 extern const struct inode_operations beamfs_dir_inode_operations;
 extern const struct inode_operations beamfs_symlink_inode_operations;
 
@@ -434,7 +448,7 @@ int beamfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 extern const struct inode_operations beamfs_file_inode_operations;
 extern const struct address_space_operations beamfs_aops;
 
-/* file_inline.c (v2 INLINE inode_operations: getattr + setattr/truncate) */
+/* file_inline.c -- getattr, setattr and fiemap for inline-path regular files */
 extern const struct inode_operations beamfs_inline_inode_operations;
 
 /* edac.c */
@@ -446,10 +460,10 @@ __u32 beamfs_crc32(const void *buf, size_t len);
  * beamfs_inode_crc -- checksum over everything the inode's parity
  * protects, which is the head and the pointers but not i_crc32 itself.
  *
- * Staged into a contiguous buffer, the way beamfs_crc32_sb does it: the
- * covered bytes are not contiguous on disk and computing over them in
- * two calls would need a seeded primitive that beamfs_crc32 does not
- * offer. 172 bytes on the stack, once per inode read or write.
+ * Staged into a contiguous buffer: the covered bytes are not contiguous
+ * on disk, and computing over them in two calls would need a seeded
+ * primitive that beamfs_crc32 does not offer. 168 bytes on the stack,
+ * once per inode read or write.
  */
 static inline __u32 beamfs_inode_crc(const struct beamfs_inode *raw)
 {
@@ -464,7 +478,7 @@ static inline __u32 beamfs_inode_crc(const struct beamfs_inode *raw)
 
 /*
  * beamfs_data_selfid -- 64-bit identity digest of (ino, iblock), stored in
- * the block tail pad when DATA_SELFID is active. Two independent CRC32s,
+ * the block descriptor when DATA_SELFID is active. Two independent CRC32s,
  * one per dimension, concatenated: reuses the single hashing primitive
  * already backing i_crc32, s_crc32 and DATA_CSUM rather than introducing a
  * second algorithm for an auditor to review. Collision probability 2^-64.
@@ -491,18 +505,20 @@ int beamfs_rs_encode(u8 *data, size_t len, u8 *parity);
  * @len:          number of data bytes (must match the encode call)
  * @parity:       parity bytes (BEAMFS_RS_PARITY)
  * @positions:    optional output, BEAMFS_RS_PARITY/2 = 8 entries; on a
- *                positive return holds the corrected byte positions
- *                (first n_corrected entries). May be NULL if the caller
- *                does not need the position list (no entropy logging).
+ *                positive return holds the corrected DATA byte
+ *                positions, in [0, len). Corrections that fell in the
+ *                parity are not listed. May be NULL if the caller does
+ *                not need the position list (no entropy logging).
  * @max_positions: capacity of @positions in entries; ignored if NULL.
  *
  * Returns:
  *   < 0  uncorrectable (-EBADMSG) or invalid input (-EINVAL)
  *   = 0  no errors detected
- *   > 0  number of symbol errors corrected in place
+ *   > 0  number of symbol errors corrected in place, data and parity
  *
- * Compute Shannon entropy: pass returned positions array to
- * beamfs_rs_compute_entropy_q16_16(positions, return_value, len).
+ * The return value is therefore not the number of entries in
+ * @positions when a parity symbol was among those corrected; the
+ * entropy estimator must only be given the data positions.
  */
 int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 		    int *positions, unsigned int max_positions,
@@ -517,7 +533,7 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
  *
  * Returns H in Q16.16, range [0, 3*65536). Deterministic, no FPU,
  * no runtime division except for bin index computation. Backed by a
- * compile-time LUT generated by tools/gen_entropy_lut.py.
+ * compile-time LUT, defined in edac.c.
  *
  * Pre: positions != NULL, 1 <= n_positions <= BEAMFS_RS_PARITY/2
  *      code_len_bytes >= n_positions
@@ -526,21 +542,6 @@ __u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
 				      unsigned int n_positions,
 				      size_t code_len_bytes);
 
-/*
- * Encode/decode N RS(255,239) shortened subblocks across a region.
- * data and parity may live in the same buffer (interleaved layout,
- * like the bitmap) or in two separate buffers (contiguous-parity
- * layout, like the superblock). The strides decouple the two cases.
- *
- * The decode helper additionally exposes per-subblock corrected
- * position lists for entropy logging. Each subblock writes up to
- * positions_stride entries into positions_buf at offset
- * i * positions_stride; the corresponding count is in results[i]
- * (= beamfs_rs_decode return value for that subblock).
- *
- * positions_buf may be NULL (and positions_stride == 0) if the caller
- * does not need entropy logging for any of the subblocks.
- */
 /*
  * How many bytes of a file one block holds.
  *
@@ -566,7 +567,7 @@ static inline u32 beamfs_block_payload(struct super_block *sb)
 
 /*
  * Lay a data block's payload down, and seal it, in the volume's
- * layout.
+ * layout. Defined in file_inline.c.
  *
  * Shared because a symlink's target is a data block written from
  * namei.c, and it followed the alternating layout on a capsule volume
@@ -587,6 +588,22 @@ int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf,
 			   size_t parity_stride, size_t data_len,
 			   unsigned int n_subblocks, int *results,
 			   const char *who);
+/*
+ * Encode/decode N RS(255,239) shortened subblocks across a region.
+ * data and parity may live in the same buffer (alternating layout,
+ * like the bitmap) or in two separate buffers (contiguous-parity
+ * layout, like the superblock). The strides decouple the two cases.
+ *
+ * The decode helper additionally exposes per-subblock corrected
+ * position lists for entropy logging. Each subblock writes up to
+ * positions_stride entries into positions_buf at offset
+ * i * positions_stride; results[i] holds beamfs_rs_decode's return
+ * for that subblock, which also counts corrections in the parity
+ * that the list leaves out.
+ *
+ * positions_buf may be NULL (and positions_stride == 0) if the caller
+ * does not need entropy logging for any of the subblocks.
+ */
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
 			   u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks);
@@ -601,8 +618,10 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 /* alloc.c */
 int  beamfs_setup_bitmap(struct super_block *sb);
 void beamfs_bitmap_encode_pending(struct super_block *sb);
+/* super.c */
 void beamfs_super_encode_pending(struct beamfs_sb_info *sbi);
 void beamfs_dirty_super_now(struct beamfs_sb_info *sbi);
+/* alloc.c */
 int  beamfs_write_bitmap_block(struct super_block *sb,
 			       unsigned long bit_global,
 			       struct inode *owner);
@@ -612,6 +631,7 @@ void beamfs_rsv_init(struct beamfs_inode_info *fi);
 void beamfs_rsv_discard(struct inode *inode);
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner);
 bool beamfs_block_is_allocated(struct super_block *sb, u64 block);
+/* super.c */
 /*
  * beamfs_free_ind_range -- free part or all of an indirection subtree.
  *
@@ -681,7 +701,6 @@ void  beamfs_scratch_put(struct super_block *sb, void *p);
  */
 void beamfs_fail(struct super_block *sb, const char *where, int err);
 
-
 /*
  * sb_bread, and mark the volume failed when it comes back empty.
  *
@@ -720,6 +739,7 @@ bool beamfs_dirent_valid(const struct beamfs_dir_entry *de, u32 off);
 void beamfs_dirent_encode(struct buffer_head *bh);
 int  beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 			  u8 *dst);
+/* file_inline.c */
 int  beamfs_inline_decode_symlink(struct super_block *sb,
 				  struct buffer_head *bh, u64 phys,
 				  struct inode *inode, u8 *dst, u32 len);
@@ -731,6 +751,7 @@ enum {
 	BEAMFS_ALERT_RATE,
 	BEAMFS_ALERT_CLASSES
 };
+
 void beamfs_alert_uncorrectable(struct super_block *sb, u64 phys);
 void beamfs_alert_margin(struct super_block *sb, u64 phys, unsigned int used);
 void beamfs_alert_check_rate(struct super_block *sb);
@@ -750,6 +771,7 @@ u64  beamfs_budget_next_worn(struct super_block *sb, u64 from, u8 threshold);
 void beamfs_debugfs_init(void);
 void beamfs_debugfs_exit(void);
 
+/* alloc.c -- inode numbers */
 u64  beamfs_alloc_inode_num(struct super_block *sb);
 void beamfs_free_inode_num(struct super_block *sb, u64 ino);
 

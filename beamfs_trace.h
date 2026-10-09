@@ -42,18 +42,6 @@ TRACE_EVENT(beamfs_slot_store,
 );
 
 /*
- * One parity slot written.
- *
- * A region block holds fourteen slots and several inodes' indirect
- * blocks land in the same one. generic/464 leaves slots describing a
- * block that is not the block on the medium -- subblocks 0..6 with
- * data and no parity, 7..15 with parity and no data, two states in one
- * slot -- and the question is which writer left what, and in which
- * order. @nz is how many of the indirect block's pointers were set
- * when the parity was taken, so a slot can be matched to the block it
- * was computed from.
- */
-/*
  * An indirect block read on the allocation path.
  *
  * generic/464 has two writers install a pointer into the same slot of
@@ -99,6 +87,19 @@ TRACE_EVENT(beamfs_ind_read,
 		  __entry->ino, __entry->blk, __entry->slot,
 		  __entry->slotval, __entry->uptodate, __entry->fresh)
 );
+
+/*
+ * One parity slot written.
+ *
+ * A region block holds fourteen slots under RS, and several inodes'
+ * indirect blocks land in the same one. generic/464 leaves slots
+ * describing a block that is not the block on the medium -- subblocks
+ * 0..6 with data and no parity, 7..15 with parity and no data, two
+ * states in one slot -- and the question is which writer left what,
+ * and in which order. @nz is how many of the indirect block's pointers
+ * were set when the parity was taken, so a slot can be matched to the
+ * block it was computed from.
+ */
 TRACE_EVENT(beamfs_parity_slot,
 	TP_PROTO(dev_t dev, unsigned long ino, u64 phys, u64 region, unsigned int slot,
 		 unsigned int nz),

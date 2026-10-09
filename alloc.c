@@ -3,21 +3,30 @@
  * beamfs - Block and inode allocator
  * Author: Aurelien DESBRIERES <aurelien@hackers.camp>
  *
- * Both block and inode allocators use in-memory bitmaps loaded at mount
+ * Both block and inode allocators use in-memory bitmaps built at mount
  * time. No I/O is performed under the spinlock.
  *
- * Layout assumption (from mkfs.beamfs):
- *   Block 0          : superblock
- *   Block 1..N       : inode table
- *   Block N+1        : root dir data
- *   Block N+2..end   : data blocks
+ * Layout: the superblock is block 0 and records where each region
+ * starts -- the inode table (s_inode_table_blk), the block bitmap
+ * (s_bitmap_blk), the indirect-parity and error-budget regions when the
+ * volume has them, and the data area (s_data_start_blk). The block
+ * bitmap covers the data area only, one bit per block from
+ * s_data_start; blocks below it are never allocated or freed here.
  *
  * Bitmap convention: bit set (1) = free, bit clear (0) = used.
  *
- * NOTE: on-disk bitmap blocks are planned for v4. Currently the bitmaps
- * are reconstructed at mount by scanning the inode table and from the
- * superblock free_blocks counter. A power-loss between alloc and writeback
- * can leave the superblock counter inconsistent; fsck.beamfs will fix this.
+ * The block bitmap is kept on disk: s_bitmap_blocks_count blocks from
+ * s_bitmap_blk, each holding BEAMFS_BITMAP_SUBBLOCKS (16) RS(255,239)
+ * codewords of 239 data bytes, 30592 bits per block. It is decoded at
+ * mount, a block that needed correction is written back at once, and
+ * every later change re-encodes the one codeword holding the changed
+ * bit. The inode bitmap has no on-disk form: it is rebuilt at mount
+ * from the inode table, where a zero i_mode marks a free slot.
+ *
+ * The free counts, s_free_blocks and s_free_inodes, are taken from the
+ * superblock at mount rather than recounted from the bitmaps, so a
+ * power loss between a bitmap write and the superblock write can leave
+ * them out of step with the bitmaps.
  */
 
 #include <linux/fs.h>
@@ -28,8 +37,6 @@
 #include "beamfs.h"
 #include "beamfs_trace.h"
 
-
-
 /* ------------------------------------------------------------------ */
 /* Block bitmap                                                        */
 /* ------------------------------------------------------------------ */
@@ -39,10 +46,11 @@
  *
  * Called from beamfs_fill_super() after the superblock is read.
  *
- * Block bitmap: loaded from the on-disk bitmap block (s_bitmap_blk).
- * Each 239-byte subblock is RS(255,239) FEC-protected. If a subblock
- * is corrected, the event is logged to the Electromagnetic Resilience Journal and
- * the corrected bitmap is written back immediately.
+ * Block bitmap: loaded from the s_bitmap_blocks_count on-disk bitmap
+ * blocks starting at s_bitmap_blk. Each 239-byte subblock is
+ * RS(255,239) FEC-protected. If a subblock is corrected, the event is
+ * logged to the RS journal and the corrected bitmap block is written
+ * back immediately.
  *
  * Inode bitmap: reconstructed by scanning the inode table for free slots
  * (i_mode == 0). This is O(total_inodes) but only at mount.
@@ -156,15 +164,14 @@ int beamfs_setup_bitmap(struct super_block *sb)
 			sbi->s_bitmap_blkhs[k] = bh;
 			bdata = (u8 *)bh->b_data;
 
-			beamfs_rs_decode_region(
-				bdata, BEAMFS_SUBBLOCK_TOTAL,
-				bdata + BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_TOTAL,
-				BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_BITMAP_SUBBLOCKS,
-				rs_results, rs_positions,
-				BEAMFS_RS_PARITY / 2,
-				"bitmap");
+			beamfs_rs_decode_region(bdata, BEAMFS_SUBBLOCK_TOTAL,
+						bdata + BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_SUBBLOCK_TOTAL,
+						BEAMFS_SUBBLOCK_DATA,
+						BEAMFS_BITMAP_SUBBLOCKS,
+						rs_results, rs_positions,
+						BEAMFS_RS_PARITY / 2,
+						"bitmap");
 
 			for (i = 0; i < BEAMFS_BITMAP_SUBBLOCKS; i++) {
 				int rc = rs_results[i];
@@ -290,40 +297,10 @@ int beamfs_setup_bitmap(struct super_block *sb)
 }
 
 /*
- * beamfs_write_bitmap_block - flush a SINGLE on-disk bitmap block to disk
- *                             with RS FEC, for the bitmap block that
- *                             contains @bit_global.
- *
- * Re-encoding all on-disk bitmap blocks on every allocator state change
- * was historically the source of fsync latency proportional to the
- * volume size (each beamfs_alloc_block under s_lock used to redo
- * memset+RS-encode+mark_buffer_dirty on every bitmap block, ~52 blocks
- * for a 1 GiB volume). Since each bitmap block is RS-protected
- * independently, only the block that contains the modified bit needs
- * to be re-encoded and re-marked dirty.
- *
- * Called under s_lock. @bit_global is the global bit index (0-based)
- * just modified in sbi->s_block_bitmap by the caller.
- */
-/*
- * Rebuild the on-disk image of every bitmap block whose bits moved.
- *
- * Called from sync_fs, immediately before the buffers are written, so
- * one rebuild covers however many allocations and frees happened since
- * the last sync -- 220000 of them for an 800 MiB write, previously one
- * rebuild each.
- *
- * s_block_bitmap is the authority and is read under test_bit, which is
- * atomic; the buffer lock serialises against a concurrent rebuild of
- * the same block.
- */
-/*
- * Rebuild one bitmap block's on-disk image. The buffer lock must be held.
- */
-/*
  * Rebuild one subblock of a bitmap block, or all of them.
  *
  * @sub: which codeword to rebuild, or BEAMFS_BITMAP_SUBBLOCKS for all.
+ * The buffer lock must be held.
  *
  * The whole-block version cost 30592 test_bit calls and sixteen RS
  * encodes for one bit changed. Filling 256 MiB means 70197 allocations,
@@ -338,8 +315,8 @@ int beamfs_setup_bitmap(struct super_block *sb)
  * the old loop asked about every bit individually.
  *
  * Per allocation this becomes one memcpy of 239 bytes and one RS
- * encode. The full-block path stays for mount, where the whole image
- * genuinely has to be built.
+ * encode. The full-block path stays for beamfs_bitmap_encode_pending,
+ * which rebuilds a whole block.
  */
 static void beamfs_bitmap_encode_sub_locked(struct beamfs_sb_info *sbi,
 					    u32 k, u32 sub,
@@ -406,12 +383,27 @@ static void beamfs_bitmap_encode_sub_locked(struct beamfs_sb_info *sbi,
 	}
 }
 
+/*
+ * Rebuild one bitmap block's on-disk image, all sixteen codewords. The
+ * buffer lock must be held.
+ */
 static void beamfs_bitmap_encode_one_locked(struct beamfs_sb_info *sbi, u32 k,
 					    struct buffer_head *bh)
 {
 	beamfs_bitmap_encode_sub_locked(sbi, k, BEAMFS_BITMAP_SUBBLOCKS, bh);
 }
 
+/*
+ * Rebuild the on-disk image of every bitmap block flagged in
+ * s_bitmap_needs_encode, each under its buffer lock.
+ *
+ * Called from sync_fs and put_super, before the bitmap buffers are
+ * written. beamfs_write_bitmap_block rebuilds the codeword it changes
+ * as it dirties the buffer, and clears the flag; see there for why that
+ * rebuild cannot wait for sync. s_block_bitmap is the authority and is
+ * copied without s_lock; the buffer lock serialises against a
+ * concurrent rebuild of the same block.
+ */
 void beamfs_bitmap_encode_pending(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
@@ -437,6 +429,22 @@ void beamfs_bitmap_encode_pending(struct super_block *sb)
 	}
 }
 
+/*
+ * beamfs_write_bitmap_block - bring the on-disk image of the bitmap
+ *                             block holding @bit_global up to date,
+ *                             and mark it dirty.
+ *
+ * @bit_global is the bit, counted from s_data_start, that the caller
+ * has just changed in sbi->s_block_bitmap. Each subblock of a bitmap
+ * block is an RS codeword of its own, so only the one holding that bit
+ * is re-encoded. With @owner, the buffer also goes on the owner's
+ * metadata list (see below).
+ *
+ * Called without s_lock: the buffer lock taken here can sleep.
+ * Returns 0, -EIO when the volume has failed or the buffer's last
+ * write failed, or -EINVAL when there is no bitmap block for
+ * @bit_global.
+ */
 int beamfs_write_bitmap_block(struct super_block *sb,
 			      unsigned long bit_global,
 			      struct inode *owner)
@@ -479,10 +487,10 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * volume empty. The bitmap in memory was right and the one on
 	 * disk was a lie.
 	 *
-	 * Three thousand eight hundred bytes walked and sixteen RS
-	 * encodes, on every allocation and every free. That is what
-	 * correctness costs here. Bringing it down means changing fewer
-	 * bits per rebuild, not letting the buffer reach the disk stale.
+	 * One codeword rebuilt -- a 239-byte copy and one RS encode --
+	 * on every allocation and every free. That is what correctness
+	 * costs here. Bringing it down means rebuilding less per change,
+	 * not letting the buffer reach the disk stale.
 	 */
 	lock_buffer(bh);
 	/*
@@ -837,10 +845,10 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 
 	spin_unlock(&sbi->s_lock);
 
-	/* Reconstruct on-disk bitmap block from current s_block_bitmap
-	 * RAM state. Done OUTSIDE s_lock because write_bitmap_block now
-	 * uses lock_buffer (sleepable). Reading s_block_bitmap via
-	 * test_bit is atomic, no lock needed for the reconstruction.
+	/*
+	 * Rebuild the on-disk bitmap block from s_block_bitmap. Outside
+	 * s_lock, because beamfs_write_bitmap_block takes the buffer lock,
+	 * which can sleep.
 	 */
 	beamfs_write_bitmap_block(sb, bit, owner);
 
@@ -849,9 +857,6 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 	return (u64)(sbi->s_data_start + bit);
 }
 
-/*
- * beamfs_free_block - return a data block to the free pool
- */
 /*
  * beamfs_block_is_allocated -- is @block currently in use?
  *
@@ -867,12 +872,6 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
  * The in-memory bitmap uses 1 for free, so an allocated block has its bit
  * clear. It is held for the lifetime of the mount and is RS-protected on
  * disk, so consulting it costs a bit test and no I/O.
- *
- * A prior version of this check (2026-08-22) found that mkfs.beamfs never
- * marked root_dir_blk allocated (fixed in yocto-beamfs c2bebac): every
- * root-fs image built with --from-dir failed to boot, because the first
- * pointer resolved at mount, i_direct[0] of the root inode, pointed at a
- * block the bitmap called free. Re-enabled after that fix.
  */
 bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 {
@@ -880,21 +879,16 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 	unsigned long bit;
 
 	/*
-	 * 2026-08-23: blocks below s_data_start (superblock, inode table,
-	 * bitmap, root dir, canary) are reserved and never covered by the
-	 * bitmap by construction -- see the layout comment at the top of
-	 * this file. Treating them as "not allocated" made every legitimate
-	 * pointer into that zone fail, starting with i_direct[0] of the
-	 * root inode: the very first block resolved at mount was rejected,
-	 * and no image built with --from-dir could boot. mkfs was patched
-	 * to mark root_dir_blk in the bitmap to work around this (yocto-beamfs
-	 * c2bebac) and that patch has been reverted (846c2bd): the root and
-	 * canary blocks are not supposed to be bitmap-covered, matching the
-	 * "silently skip reserved blocks" doctrine already applied in
-	 * beamfs_free_block below. The reserved zone is bounded above by
-	 * s_data_start and below by 0, both already enforced by the bounds
-	 * check at every read site (file_inline.c), so no separate check is
-	 * needed here for it.
+	 * Blocks below s_data_start -- the superblock, inode table,
+	 * bitmap, root directory and canary among them -- are reserved
+	 * and lie outside the bitmap, so it has no answer for them.
+	 * Calling them unallocated made every legitimate pointer into
+	 * that zone fail, starting with i_direct[0] of the root inode:
+	 * the very first block resolved at mount was rejected, and no
+	 * image built by mkfs.beamfs --from-dir could boot. They are
+	 * answered as allocated, and beamfs_free_block skips them the
+	 * same way. Whether a pointer may lead into that zone at all is
+	 * for the caller to decide.
 	 */
 	if (block < sbi->s_data_start)
 		return true;
@@ -907,6 +901,9 @@ bool beamfs_block_is_allocated(struct super_block *sb, u64 block)
 	return !test_bit(bit, sbi->s_block_bitmap);
 }
 
+/*
+ * beamfs_free_block - return a data block to the free pool
+ */
 void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 {
 	/*
@@ -981,7 +978,6 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 
 	spin_unlock(&sbi->s_lock);
 
-	/* See alloc_block: reconstruct on-disk bitmap outside lock. */
 	/*
 	 * A freed block's pointer may legitimately vanish, and a freed
 	 * indirect block's slots go with it. Tell the checker before the
@@ -990,6 +986,7 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 	 */
 	beamfs_tc_forget_child(sb, block);
 	beamfs_tc_forget_parent(sb, block);
+	/* See alloc_block: rebuild the on-disk bitmap outside s_lock. */
 	beamfs_write_bitmap_block(sb, bit, owner);
 }
 
