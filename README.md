@@ -6,6 +6,53 @@ decodes it, and a read beamfs cannot vouch for fails with `-EIO` instead
 of returning wrong bytes. It descends from FTRFS and targets mainline
 Linux.
 
+## Warning: known defects in beamfs up to 0.1.26
+
+A code review on 2026-10-09 found defects in beamfs 0.1.26 (commit
+`1bf151d`, the code the v3 report measures) and in every earlier
+version. They were established by reading the code; a test that
+reproduces each one is written with its fix. Until a release says
+otherwise, do not keep data you cannot afford to lose on beamfs, do not
+mount an image you did not create, and do not mount beamfs where
+untrusted users can write to it.
+
+Data loss:
+
+- Sparse files: when the first block under a 4 KiB page is a hole, a
+  read returns zeros for the whole page, including the data of the next
+  block, and a later partial write of that page stores those zeros.
+- Writes that start a new block inside a page that is not in the page
+  cache can zero the rest of that page, data of the neighbouring blocks
+  included (to be confirmed against the kernel's iomap).
+- With two beamfs volumes mounted, the per-CPU cache of decoded
+  indirect-parity regions can serve one volume's region to the other.
+- `st_blocks` is always 0, so tools that trust it (`tar --sparse`)
+  archive files as holes.
+- `mkfs.beamfs --data-csum` on the default (interleaved) layout: every
+  block rewritten by writeback or truncate, and every symlink target of
+  96 bytes or more, fails its check on the next read (`-EIO`). The v3
+  measurements did not use this option.
+
+Security:
+
+- A write does not clear the set-user-ID and set-group-ID bits.
+- The link count is not bounded: 65536 hard links, which an
+  unprivileged user can make, wrap it to zero on disk, and the inode is
+  later freed while names still point to it.
+- 16 bytes of uninitialised kernel memory are written into each data
+  block on the default layout.
+
+Kernel crashes:
+
+- The superblock geometry is not validated: a crafted or corrupted
+  image can crash the kernel at mount.
+- A mount that beamfs refuses after reading the root inode (data
+  protection scheme 5, unknown indirect-parity mode) crashes the kernel.
+
+The measurements of the v3 report stand as measured: none of the tests
+that ran detected these defects. The fixes and their tests will be in
+beamfs 0.2.0; this section will say what remains.
+
 ## State: beamfs v3
 
 The beamfs v3 technical report measures beamfs 0.1.26, commit `1bf151d`,
@@ -109,6 +156,8 @@ kernel.
 - [ ] v4, the items of section XI of the v3 report: indirect blocks with
       a whole parity slot and a generation, `DATA_CSUM` and `DATA_SELFID`
       by default, parity interleaving, a fixed injector, a beam campaign
+- [ ] beamfs 0.2.0: the fixes of the defects listed under Warning, each
+      with its test
 - [ ] beamfs RFC to linux-fsdevel
 
 ## Cite
