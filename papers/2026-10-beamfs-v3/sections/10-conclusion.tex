@@ -1,0 +1,38 @@
+\section{Conclusion}\label{sec:conclusion}
+
+\bfs 0.1.26 passed all \xfsXRan{} xfstests tests that ran on x86-64
+and \xfsAPass{} of the \xfsARan{} that ran on aarch64, out of
+\xfsTotal{}; xfstests declined the others, which are untested. Under
+emulated single-bit upsets on the read path, it never returned wrong
+data: it returned the correct bytes after every
+flip that reached a data block and refused the one read it could not
+vouch for. In the same
+conditions ext4 and ext3 returned wrong data without an error and btrfs
+refused. These results are bounded by their load, at most
+\kernMaxPerDecode{} erroneous symbols per codeword and per decode against
+eight correctable; the correction limit, bursts and miscorrection remain
+to be measured, with \texttt{DATA\_CSUM} enabled.
+
+Two findings matter beyond the numbers. The injector's record was wrong
+in a way the outcomes alone would never have shown; checking it against
+the kernel's own account of each correction found the error, and its
+cause in the kernel source. And the indirect-block parity, as built,
+detects without repairing, which leaves a pointer flipped onto another
+allocated block undetected on volumes without \texttt{DATA\_SELFID}.
+Both are stated here so that the next measurement, on a beam or on a
+corrected injector, starts from them.
+
+Is \bfs worth having? Where a second copy of the data fits, redundancy
+already returns correct data and \bfs is at most a complement to it.
+Where it does not, on one small medium, \bfs returned correct data or,
+once, refused, for 7\,\% of capacity, where ext4 and ext3 returned wrong
+data and btrfs could only refuse (\cref{sec:brings}). That is a narrow claim,
+bounded by the load measured here, and v4 is planned to widen it or to
+find where it stops (\cref{sec:v4}).
+
+\section*{Disclosure}
+The analysis scripts and the draft of this report were written with the
+assistance of Claude Opus 5.5 (model \texttt{claude-opus-5-5}, Anthropic). Every
+measurement was taken by the author's tooling on the author's machines,
+and every number in the text is generated from the run records as
+described in \apprepro.

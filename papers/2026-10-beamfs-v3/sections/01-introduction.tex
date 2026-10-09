@@ -1,0 +1,66 @@
+\section{Introduction}\label{sec:intro}
+
+A filesystem trusts the bytes a read brings back. Between the medium and
+the page cache those bytes cross a controller, a bus, DMA buffers and
+caches, any of which can flip a bit: soft errors in commercial silicon
+are a measured fact~\cite{baumann2005}, and they matter most where
+hardware is commercial and the environment is not. Memon et
+al.~\cite{memon2025tr,memon2025arxiv} irradiated commercial systems on
+chip running Linux with 20 to 58\,MeV protons and found that, on an
+i.MX~8M~Plus running ext4 on eMMC, filesystem faults and storage-driver
+errors accounted for 90\,\% of the observed failures, up to journal
+aborts and read-only remounts~\cite{memon2025arxiv}. Conventional
+filesystems either do not check file data (ext4, ext3) or check it and,
+holding a single copy, refuse the read (btrfs); they return the data the
+application wrote only from a second copy of
+it~\cite{btrfsautorepair,zfschecksums}.
+
+\bfs~\cite{beamfsimpl} is a Linux filesystem built to return it, or to
+refuse. Every data block is a \emph{capsule} of sixteen interleaved
+RS(255,239) codewords~\cite{reed1960,macwilliams1977}; every read decodes
+it; a block beyond correction fails the read with an error instead of
+handing back wrong bytes. \bfs descends from FTRFS~\cite{fuchs2015ftrfs}
+through an RFC posted in April 2026~\cite{ftrfsrfc} and two earlier
+reports~\cite{desbrieres2026ftrfs,desbrieres2026beamfsv2}.
+\Cref{sec:ftrfs} explains why it is a new filesystem rather than a
+revision of FTRFS.
+
+\paragraph*{What this report adds}
+\begin{enumerate}
+\item A measured \bfs 0.1.26: of the \xfsTotal{} tests of the xfstests
+  \texttt{auto} group, all \xfsXRan{} that ran on x86-64
+  passed, and \xfsAPass{} of the \xfsARan{} that ran on aarch64; the
+  tests xfstests declined, mostly for features \bfs does not implement,
+  are counted and classified, not passed (\cref{sec:xfstests}).
+\item A comparison with ext4, ext3, btrfs and squashfs under emulated
+  single-bit upsets on the read path, replicated over three runs, and a
+  four-node cluster campaign (\cref{sec:multifs,sec:cluster}).
+\item An audit of the injector. emufi 0.8.1~\cite{desbrieres2026emufi}
+  logs one of its two read hooks one bio early on this kernel. We locate
+  the cause in the kernel source, reconstruct the hook of every flip,
+  and check the reconstruction against the kernel's own correction log
+  (\cref{sec:injector}).
+\item A fail-closed event on an indirect block, explained from the code,
+  and the residual it exposes (\cref{sec:indirect}).
+\item A parallel with the proton campaign of Memon et al., including what
+  that work reports about the hardware it irradiated (\cref{sec:memon}).
+\item A positioning of \bfs against redundancy, with its costs and
+  where it is weaker today (\cref{sec:brings}), and the work the next
+  version takes on (\cref{sec:v4}).
+\item A reproducibility record in which every number of the text is
+  generated from GPG-signed run manifests and frozen by hash
+  (\apprepro).
+\end{enumerate}
+
+\paragraph*{What changed since v2}
+The v2 report~\cite{desbrieres2026beamfsv2} is superseded on five
+points. (i)~Data blocks are now interleaved capsules
+(\cref{sec:capsule}); v2 described the alternating layout. (ii)~v2 stated
+that a corrected block is written back to the medium on read; in
+0.1.26 the read path corrects into a private copy and does not write
+back, on-disk repair being left to the background scrubber
+(\cref{sec:readpath}). (iii)~The module is no longer 2\,198 lines: it is
+\moduleLines{} lines of C and headers at \texttt{\commitBeamfs}, beyond the
+5\,000-line audit target v2 quoted. (iv)~Injection moved from RadFI~\cite{desbrieres2026radfi} to
+emufi. (v)~Validation is the xfstests \texttt{auto} group, test by test,
+on two architectures.

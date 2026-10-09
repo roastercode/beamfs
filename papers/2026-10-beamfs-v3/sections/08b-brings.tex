@@ -1,0 +1,77 @@
+\section{What beamfs brings}\label{sec:brings}
+
+The measurements answer a narrow question. This section places the
+answer among the ways a system can get the right bytes back after a bit
+flips between the medium and the filesystem.
+
+\begin{table}[t]
+\centering
+\caption{Getting correct data back after a flipped bit in file data.
+``Measured'' means measured in this report; other rows are as
+documented.}
+\label{tab:position}
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}>{\raggedright\arraybackslash}p{2.0cm}
+  >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{1.45cm}@{}}
+\toprule
+filesystem & on a flipped bit in file data & extra space \\
+\midrule
+ext4, ext3 & wrong bytes returned, no error (measured) & none \\
+btrfs, data \texttt{single} & detected, read refused (measured) &
+  checksums \\
+btrfs, data \texttt{DUP} or RAID1 & detected, served and repaired from
+  the other copy~\cite{btrfsautorepair} & a full copy \\
+ZFS, \texttt{copies=2} & detected, repaired from the other
+  copy~\cite{zfschecksums} & a full copy~\cite{zfsprops} \\
+\bfs capsule & corrected on read up to 8 symbols per codeword, measured
+  up to \kernMaxPerDecode{}; refused when the decoder fails; beyond 8, a
+  wrong decode is possible without \texttt{DATA\_CSUM} & 288 bytes
+  per 4\,096 (7.0\,\%) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph*{The contribution}
+\bfs corrects file data inside the filesystem, on one medium, for 288
+bytes in 4\,096: 256 of parity, 16 of descriptor, 16 of generation.
+Redundancy also returns correct data (\cref{tab:position}), at the price
+of a second copy of every block, and for RAID1 of a second device. The
+two protect against different damage: a second copy survives anything
+that spares it, a capsule only damage within its correction capacity.
+They combine, since a \bfs volume can sit on a mirror. Where a second
+copy does not fit, on a single small medium in an embedded, edge or
+space system, correction inside the filesystem is what remains; that is
+the case \bfs is built for. This report argues that case from the
+design, not from a measurement against redundancy, which is planned
+(\cref{sec:v4}).
+
+Around that core, \bfs brings: correction on every read, not only once a
+checksum has failed; an error instead of bytes the decoder could not
+vouch for; a 64-entry correction journal in the superblock recording
+block, codeword and symbols corrected; a scrubber that decodes blocks no
+one reads and writes corrected ones back; interleaving, so that a burst
+in the coded bytes is spread over sixteen codewords
+(\cref{sec:capsule}). And it comes with a measurement chain others can
+repeat: signed manifests, frozen snapshots, and an audit that found a
+defect in its own injector (\cref{sec:injector}).
+
+\paragraph*{What it costs}
+288 bytes in 4\,096 of capacity. A Reed-Solomon encode on every write:
+v2 measured a median write-and-fsync latency 7.84 times that of ext4
+(2.73 times at the 99th percentile), under emulation and on an earlier
+layout~\cite{desbrieres2026beamfsv2}; the write path has changed since
+and v3 measures no performance. A sequential read fetches most blocks
+twice (\cref{sec:readpath}). \moduleLines{} lines of code outside the
+kernel tree, with buffer heads still under the metadata.
+
+\paragraph*{Where it is not better today}
+Pointers: in the default configuration a flipped indirect pointer that
+stays in range is not detected (\cref{sec:indirect-design}), where ext4
+with \texttt{metadata\_csum} checksums every extent block~\cite{ext4csum}
+and btrfs checksums data and metadata by default~\cite{btrfscsum}.
+Inodes: one codeword each, so nine consecutive bytes lose the inode and
+the file with it, which interleaving cannot help
+(\texttt{burst-resistance.md}). Parity: grouped per codeword, so nine
+bytes suffice there too (\cref{sec:capsule}). And the project's own
+notes say the default indirect-parity mode should not ship as default
+until indirect blocks carry a generation (\cref{sec:limits}, item~\ref{lim:indirect}).

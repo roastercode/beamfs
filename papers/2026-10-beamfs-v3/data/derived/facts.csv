@@ -1,0 +1,89 @@
+run,key,value,source
+run2,btrfs_csum_lines_node,2,forensics-beamfs-compute01/dmesg.log
+run2,commit_beamfs,1bf151d9f530b44d20837db62ccdeaa7a6c7c785,manifest-20261005T191045Z.json
+run2,commit_yocto,9d43172a221ce4bca4dff2e497299ad72d37f38c,manifest-20261005T191045Z.json
+run2,commit_bench,661e8aad34cc853a48364050e8a433ebef427075,manifest-20261005T191045Z.json
+run2,canonical_beamfs_sha256,1d60a1be893fa8eae92463082181d77be207393a3a7e18ffff7cc60183963e62,manifest-20261005T191045Z.json
+run2,chain_verdict,Matched,manifest-20261005T191045Z.json
+run2,overall_rc,1,manifest-20261005T191045Z.json
+run2,started_at,2026-10-05T18:18:07.043956463+00:00,manifest-20261005T191045Z.json
+run2,manifest_sha256,57f2335a9fe82288307b1214b0d6975919d4f13549f2d2e4c89cf5a96e8c6e00,manifest-20261005T191045Z.json
+run3,btrfs_csum_lines_node,2,forensics-beamfs-compute01/dmesg.log
+run3,commit_beamfs,1bf151d9f530b44d20837db62ccdeaa7a6c7c785,manifest-20261008T064257Z.json
+run3,commit_yocto,9d43172a221ce4bca4dff2e497299ad72d37f38c,manifest-20261008T064257Z.json
+run3,commit_bench,60155f3491755009ce591f1c13ce1c00f580220c,manifest-20261008T064257Z.json
+run3,canonical_beamfs_sha256,1d60a1be893fa8eae92463082181d77be207393a3a7e18ffff7cc60183963e62,manifest-20261008T064257Z.json
+run3,chain_verdict,Matched,manifest-20261008T064257Z.json
+run3,overall_rc,1,manifest-20261008T064257Z.json
+run3,started_at,2026-10-08T05:47:42.359465811+00:00,manifest-20261008T064257Z.json
+run3,manifest_sha256,506e0da692874722a70ec0e8196e6b91a63560478daf3837e5ae18340e711755,manifest-20261008T064257Z.json
+run4,btrfs_csum_lines_node,2,forensics-beamfs-compute01/dmesg.log
+run4,commit_beamfs,1bf151d9f530b44d20837db62ccdeaa7a6c7c785,manifest-20261008T081801Z.json
+run4,commit_yocto,9d43172a221ce4bca4dff2e497299ad72d37f38c,manifest-20261008T081801Z.json
+run4,commit_bench,607716e07fcca756c6efcadc9417aaddec024121,manifest-20261008T081801Z.json
+run4,canonical_beamfs_sha256,1d60a1be893fa8eae92463082181d77be207393a3a7e18ffff7cc60183963e62,manifest-20261008T081801Z.json
+run4,chain_verdict,Matched,manifest-20261008T081801Z.json
+run4,overall_rc,0,manifest-20261008T081801Z.json
+run4,started_at,2026-10-08T07:23:22.036741177+00:00,manifest-20261008T081801Z.json
+run4,manifest_sha256,15e9042d1e5dd57621162c31d756bfcbcf003772ae28f34329b5f16c8236e789,manifest-20261008T081801Z.json
+identity,image_x86,af9d860bbc94127cd842c2a1bd265265c160e3628a1882ea105b20fb6210e08e,identity/identity.txt
+identity,image_x86_path,/home/aurelien/yocto/poky/build-qemux86/tmp/deploy/images/qemux86-64/beamfs-research-image-qemux86-64.rootfs-20261002135328.rootfs.beamfs,identity/identity.txt
+identity,seal_x86_image,af9d860bbc94127cd842c2a1bd265265c160e3628a1882ea105b20fb6210e08e,identity/identity.txt
+identity,seal_x86_commits,1bf151d9f530b44d20837db62ccdeaa7a6c7c785 9d43172a221ce4bca4dff2e497299ad72d37f38c,identity/identity.txt
+identity,kernel_x86,837c86337113b56f4a1fc81221cdf617ec19c6bd0b53845af2a038668f6ae84f,identity/identity.txt
+identity,kernel_x86_path,/home/aurelien/yocto/poky/build-qemux86/tmp/deploy/images/qemux86-64/bzImage--7.3-rc5-r0-qemux86-64-20261002101443.bin,identity/identity.txt
+identity,kernel_x86_build,837c86337113b56f4a1fc81221cdf617ec19c6bd0b53845af2a038668f6ae84f,identity/identity.txt
+identity,config_x86,CONFIG_BEAMFS_FS=y; CONFIG_BEAMFS_DEBUG_TREE=y; # CONFIG_BEAMFS_ORDERED_META is not set,identity/identity.txt
+identity,preempt_x86,CONFIG_PREEMPT_BUILD=y; CONFIG_PREEMPT_LAZY=y; CONFIG_PREEMPT_COUNT=y; CONFIG_PREEMPTION=y; CONFIG_PREEMPT_DYNAMIC=y; CONFIG_PREEMPT_RCU=y; CONFIG_PREEMPTIRQ_TRACEPOINTS=y,identity/identity.txt
+identity,config_x86_sha256,78a3faf9e76084af360d2949a429551590b69a68f9f27115e2b584e04d8dfd23,identity/identity.txt
+identity,image_aarch64,1d60a1be893fa8eae92463082181d77be207393a3a7e18ffff7cc60183963e62,identity/identity.txt
+identity,image_aarch64_path,/home/aurelien/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/beamfs-research-image-qemuarm64.rootfs-20261002135547.rootfs.beamfs,identity/identity.txt
+identity,seal_aarch64_image,1d60a1be893fa8eae92463082181d77be207393a3a7e18ffff7cc60183963e62,identity/identity.txt
+identity,seal_aarch64_commits,1bf151d9f530b44d20837db62ccdeaa7a6c7c785 9d43172a221ce4bca4dff2e497299ad72d37f38c,identity/identity.txt
+identity,kernel_aarch64,a15840c81b0d6ec74fd80145b8b8da245216e1fa055a4debe2c8cb2fd21a096a,identity/identity.txt
+identity,kernel_aarch64_path,/home/aurelien/yocto/poky/build-qemu-arm64/tmp/deploy/images/qemuarm64/Image--7.3-rc5-r0-qemuarm64-20261002102249.bin,identity/identity.txt
+identity,kernel_aarch64_build,a15840c81b0d6ec74fd80145b8b8da245216e1fa055a4debe2c8cb2fd21a096a,identity/identity.txt
+identity,config_aarch64,CONFIG_BEAMFS_FS=y; # CONFIG_BEAMFS_DEBUG_TREE is not set; # CONFIG_BEAMFS_ORDERED_META is not set,identity/identity.txt
+identity,preempt_aarch64,CONFIG_PREEMPT_BUILD=y; CONFIG_PREEMPT=y; CONFIG_PREEMPT_COUNT=y; CONFIG_PREEMPTION=y; CONFIG_PREEMPT_RCU=y; CONFIG_PREEMPT_NOTIFIERS=y; CONFIG_PREEMPTIRQ_TRACEPOINTS=y,identity/identity.txt
+identity,config_aarch64_sha256,fde914da48ffafa44198f3a67a2ce1e93a3b1115606ae1f41a8546557d6895df,identity/identity.txt
+identity,manifest_sources,22,identity/identity.txt
+identity,src_commit,22 0 0,identity/identity.txt
+identity,src_layer,22 0 0,identity/identity.txt
+identity,trees,6,identity/identity.txt
+xfs_aarch64,sweep_476,FAIL ,sweep-1791190821.results
+xfs_x86,start_kernel_image,/home/aurelien/yocto/poky/build-qemux86/tmp/deploy/images/qemux86-64/bzImage 837c86337113b56f4a1fc81221cdf617ec19c6bd0b53845af2a038668f6ae84f,sweep-1791491243/meta.txt
+xfs_x86,start_uname,7.3.0-rc5 #1 SMP PREEMPT_DYNAMIC Sun Sep 27 20:55:01 UTC 2026,sweep-1791491243/meta.txt
+xfs_x86,start_tainted,0,sweep-1791491243/meta.txt
+xfs_x86,start_beamfs_loaded,0,sweep-1791491243/meta.txt
+xfs_x86,start_tool,mkfs.beamfs /usr/sbin/mkfs.beamfs 6843a47cb41ff07c378c8db038fd1560b33169ad72adae7a61dd7fa45b4467a1 mkfs.beamfs 0.1.5,sweep-1791491243/meta.txt
+xfs_x86,start_last_mount,beamfs: mounted v5 (blocks=262144 free=243701 inodes=16384 scheme=2 feat=0x0000000000000000/0x000000000007a000/0x0000000000000000),sweep-1791491243/meta.txt
+xfs_x86,start_at,1791491244,sweep-1791491243/meta.txt
+xfs_x86,start_uptime,224.50,sweep-1791491243/meta.txt
+xfs_x86,start_budget,14400,sweep-1791491243/meta.txt
+xfs_x86,end_tainted,0,sweep-1791491243/meta.txt
+xfs_x86,end_at,1791513689,sweep-1791491243/meta.txt
+xfs_x86,end_uptime,22669.54,sweep-1791491243/meta.txt
+xfs_x86,end_budget,14400,sweep-1791491243/meta.txt
+xfs_x86,end_recoveries,0 ,sweep-1791491243/meta.txt
+xfs_x86,tag,sweep-1791491243,data/raw/xfstests
+xfs_x86,meta_sha256,86d05bbd107cbf1f862470a0ad0e7cad54ebaf15bd0e6389848b4e3141726d76,sweep-1791491243/meta.txt
+xfs_x86,verdicts_sha256,f1f450f0d5dc30e37e3702b1f682ca107b511ad6a41e2f39fb595bee9e20907c,sweep-1791491243/verdicts.txt
+xfs_aarch64,check_outputs,733,xfstests-evidence/live
+xfs_x86,tool_mkfs.beamfs,mkfs.beamfs /usr/sbin/mkfs.beamfs 6843a47cb41ff07c378c8db038fd1560b33169ad72adae7a61dd7fa45b4467a1 mkfs.beamfs 0.1.5,sweep-1791491243/meta.txt
+xfs_x86,tool_fsck.beamfs,fsck.beamfs /usr/sbin/fsck.beamfs ba772535ea050fb7e5217fcb9fe97839b0e9b27ce10628c2ab124c7870432fb8 fsck.beamfs 0.1.8,sweep-1791491243/meta.txt
+xfs_x86,sweep_476_seconds,2653,sweep-1791491243/verdicts.txt
+xfs_x86,sweep_476_verdict,PASS ,sweep-1791491243/verdicts.txt
+xfs_x86,kernel_logs,734,sweep-1791491243/*.trace
+xfs_x86,kernel_tree_clean,734,sweep-1791491243/*.trace
+xfs_x86,kernel_hung,none,sweep-1791491243/*.trace
+xfs_superseded,sweep_476_seconds,1883,sweep-1791470226/verdicts.txt
+xfs_superseded,done,603,sweep-1791470226/verdicts.txt
+xfs_superseded,tag,sweep-1791470226,sweep-1791470226/verdicts.txt
+xfs_superseded,verdicts_sha256,d954c2092c1a1313b4a268eb965b55717ca1506bcea805a359ba529f55566541,sweep-1791470226/verdicts.txt
+xfs_aarch64,frozen_476_oor_files,xfstests-476/aarch64-sweep/generic-476-001/tree-detail.txt,xfstests-476/aarch64-sweep
+bx,x86_64_476_seconds,2317,sweep-1791196367.results
+bx,aarch64_476_seconds,11483,sweep-1791214142.results
+bx,x86_64_full_sha256,dec773163aa0edc008e95cf4eb8f30a77edaa29b976b44eb3fd782b6562b9a00,sweep-1790972412.results
+bx,aarch64_full_sha256,8b86f2562183fc36808a8ff500819d30240045dfaf0c2824aa6550878bd85b78,sweep-1791190821.results
+bx,x86_64_476_sha256,c0c985526f482af4b93e9374df5dbd08a79e5b4fdcb50dc1d5a62355ad5a7d39,sweep-1791196367.results
+bx,aarch64_476_sha256,9130579830953f817eed7814aa55e9784613e575b3790ccb4a62586275193b37,sweep-1791214142.results

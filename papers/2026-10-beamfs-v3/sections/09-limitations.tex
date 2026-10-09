@@ -1,0 +1,63 @@
+\section{Limitations}\label{sec:limits}
+
+Each item narrows what the results support.
+
+\begin{enumerate}
+\item \emph{Emulation, not physics.} Every upset is a bit flipped in a
+  read buffer by software. Nothing here is a radiation measurement, and
+  no result transfers to a beam without one.
+\item \emph{The correction limit is not exercised.} At most two
+  erroneous symbols reached a codeword in one decode, against eight
+  correctable. Multi-bit upsets, bursts, and the regime beyond eight
+  symbols, where a Reed-Solomon decoder can miscorrect silently
+  (\texttt{known-limitations.md}, 3.11), are untested. The measured
+  volumes did not carry \texttt{DATA\_CSUM}, which exists to catch
+  that case.
+\item \emph{Grouped parity.} Nine consecutive bytes in the parity of one
+  codeword defeat it (\cref{sec:capsule}); burst tolerance holds for the
+  3\,824 coded bytes only.
+\item\label{lim:indirect} \emph{Indirect blocks.} In Reed-Solomon mode the indirect parity
+  detects and journals but does not repair the buffer; pointers 478 to
+  511 have no parity; a pointer flipped within the data area onto an
+  allocated block is not detected without \texttt{DATA\_SELFID}
+  (\cref{sec:indirect-design}). The project's own notes advise against
+  Reed-Solomon as the default indirect-parity mode until a per-block
+  generation covers indirect blocks (\texttt{known-limitations.md},
+  3.13).
+\item \emph{The instrument.} emufi 0.8.1 logs one hook a bio early on
+  this kernel (\cref{sec:injector}). Below $10^{6}$\,ppm a lone flip's
+  block is known only to within one block. The effective target
+  included the block after each target block. emufi seeds its generator
+  at load, so an attack is reproducible in its parameters, not bit for
+  bit.
+\item \emph{Unequal doses.} Flips follow bios, and filesystems issue
+  different numbers of bios for the same read. Results are reported per
+  flip received, not at equal exposure.
+\item \emph{Coverage of the campaign.} Three runs; one target file per
+  attack; static workload. squashfs was never exercised. In runs 2 and 3
+  part of the cluster was not exercised (\cref{sec:setup}).
+\item \emph{Functional coverage.} xfstests ran its \texttt{auto} group
+  and declined \xfsXNotrun{} of its \xfsTotal{} tests on x86-64 and
+  \xfsANotrun{} on aarch64 (\cref{tab:xfs}); what they test is untested
+  here. The tree checker of the x86-64 kernel was not built into the
+  aarch64 kernel (\cref{sec:setup}).
+\item \emph{generic/476 on aarch64.} Within the sweep the harness
+  stopped it at its time budget while it was still writing. Its reading
+  of the volume images taken then, mounted and in use, found block
+  pointers beyond the end of the device; an image of a volume in use
+  cannot tell damage on disk from writes in flight, and the question is
+  left open. Run alone on the same image the test passed, and it passed
+  in the x86-64 sweep.
+\item \emph{Tool reporting.} The bench and the xfstests harness
+  misreported in ways listed in \cref{sec:selfaudit}; the results here
+  are read from the raw records, not from their summaries.
+\item \emph{Kernel log.} Correction lines are rate-limited: the
+  per-decode figures rest on the first ten lines of each attack.
+\item \emph{Platform.} Virtual machines on one host; virtual disks and
+  USB flash media with their own controllers and error correction
+  below the filesystem. Nothing was run on target hardware.
+\item \emph{Write path.} emufi's write hook was armed but recorded no
+  flip on \bfs; upsets on the write side are untested.
+\item \emph{Size.} At \moduleLines{} lines the module is beyond the
+  5\,000-line audit budget the project once set itself.
+\end{enumerate}

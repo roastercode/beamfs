@@ -1,0 +1,735 @@
+test,x86_64_verdict,x86_64_seconds,x86_64_reason,x86_64_group,x86_64_category,aarch64_verdict,aarch64_seconds,aarch64_reason,aarch64_group,aarch64_category
+generic/001,PASS,20,,,,PASS,270,,,
+generic/002,PASS,6,,,,PASS,92,,,
+generic/003,PASS,16,,,,PASS,121,,,
+generic/004,NOTRUN,4,O_TMPFILE is not supported,O_TMPFILE,feature,NOTRUN,61,O_TMPFILE is not supported,O_TMPFILE,feature
+generic/005,PASS,6,,,,PASS,90,,,
+generic/006,PASS,26,,,,PASS,268,,,
+generic/007,PASS,13,,,,PASS,173,,,
+generic/008,NOTRUN,4,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,61,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/009,NOTRUN,4,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,62,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/010,NOTRUN,4,/usr/xfstests/src/dbtest not built,tool absent from the image,environment,NOTRUN,61,/usr/xfstests/src/dbtest not built,tool absent from the image,environment
+generic/011,PASS,10,,,,PASS,138,,,
+generic/012,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,63,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/013,PASS,20,,,,PASS,235,,,
+generic/014,PASS,22,,,,PASS,188,,,
+generic/015,PASS,24,,,,PASS,198,,,
+generic/016,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,64,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/017,NOTRUN,4,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,65,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/018,NOTRUN,4,"defragmentation not supported for fstype ""beamfs""",defragmentation,feature,NOTRUN,73,"defragmentation not supported for fstype ""beamfs""",defragmentation,feature
+generic/020,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,65,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/021,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,65,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/022,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,65,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/023,PASS,7,,,,PASS,112,,,
+generic/024,PASS,6,,,,PASS,111,,,
+generic/025,NOTRUN,4,kernel doesn't support renameat2 syscall,renameat2 flags,feature,NOTRUN,65,kernel doesn't support renameat2 syscall,renameat2 flags,feature
+generic/026,NOTRUN,4,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,66,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/027,PASS,103,,,,PASS,2283,,,
+generic/028,PASS,11,,,,PASS,106,,,
+generic/029,PASS,6,,,,PASS,115,,,
+generic/030,PASS,9,,,,PASS,141,,,
+generic/031,NOTRUN,4,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,69,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/032,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,69,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/033,NOTRUN,4,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/034,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,72,This test requires dm flakey support,device-mapper target,environment
+generic/035,PASS,6,,,,PASS,106,,,
+generic/036,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/037,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,70,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/038,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/039,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,72,This test requires dm flakey support,device-mapper target,environment
+generic/040,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/041,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,72,This test requires dm flakey support,device-mapper target,environment
+generic/042,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/043,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,81,beamfs does not support shutdown,shutdown ioctl,feature
+generic/044,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,81,beamfs does not support shutdown,shutdown ioctl,feature
+generic/045,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/046,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/047,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/048,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/049,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/050,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/051,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/052,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/053,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,72,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/054,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,81,beamfs does not support shutdown,shutdown ioctl,feature
+generic/055,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,81,beamfs does not support shutdown,shutdown ioctl,feature
+generic/056,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/057,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,74,This test requires dm flakey support,device-mapper target,environment
+generic/058,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/059,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/060,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/061,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/062,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/063,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/064,NOTRUN,4,xfs_io finsert  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io finsert  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/065,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/066,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/067,PASS,6,,,,PASS,133,,,
+generic/068,NOTRUN,4,beamfs does not support freezing,freeze,feature,NOTRUN,73,beamfs does not support freezing,freeze,feature
+generic/069,PASS,15,,,,PASS,652,,,
+generic/070,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/071,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/072,NOTRUN,4,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/073,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/074,PASS,153,,,,PASS,4904,,,
+generic/075,PASS,19,,,,PASS,201,,,
+generic/076,PASS,9,,,,PASS,126,,,
+generic/077,NOTRUN,8,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,111,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/078,NOTRUN,5,kernel doesn't support renameat2 syscall,renameat2 flags,feature,NOTRUN,72,kernel doesn't support renameat2 syscall,renameat2 flags,feature
+generic/079,NOTRUN,5,file system doesn't support chattr +ia,inode flags,feature,NOTRUN,72,file system doesn't support chattr +ia,inode flags,feature
+generic/080,PASS,10,,,,PASS,112,,,
+generic/081,NOTRUN,5,This test requires dm snapshot support,device-mapper target,environment,NOTRUN,79,This test requires dm snapshot support,device-mapper target,environment
+generic/082,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,74,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/083,PASS,41,,,,PASS,253,,,
+generic/084,PASS,13,,,,PASS,128,,,
+generic/085,NOTRUN,5,beamfs does not support freezing,freeze,feature,NOTRUN,75,beamfs does not support freezing,freeze,feature
+generic/086,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/087,PASS,8,,,,PASS,116,,,
+generic/088,PASS,7,,,,PASS,114,,,
+generic/089,PASS,81,,,,PASS,885,,,
+generic/090,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,77,This test requires dm flakey support,device-mapper target,environment
+generic/091,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,75,O_DIRECT is not supported,O_DIRECT,feature
+generic/092,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,76,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/093,NOTRUN,5,attr namespace security not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,76,attr namespace security not supported by this filesystem type: beamfs,extended attributes,feature
+generic/094,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,76,O_DIRECT is not supported,O_DIRECT,feature
+generic/095,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,76,O_DIRECT is not supported,O_DIRECT,feature
+generic/096,NOTRUN,5,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,77,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/097,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,78,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/098,PASS,8,,,,PASS,131,,,
+generic/099,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,78,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/100,PASS,35,,,,PASS,746,,,
+generic/101,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,81,This test requires dm flakey support,device-mapper target,environment
+generic/102,PASS,651,,,,PASS,4295,,,
+generic/103,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/104,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/105,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,71,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/106,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/107,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,70,This test requires dm flakey support,device-mapper target,environment
+generic/108,NOTRUN,5,scsi_debug module not found,scsi_debug,environment,NOTRUN,73,scsi_debug module not found,scsi_debug,environment
+generic/109,PASS,14,,,,PASS,184,,,
+generic/110,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,72,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/111,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/112,PASS,21,,,,PASS,221,,,
+generic/113,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/114,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,72,O_DIRECT is not supported,O_DIRECT,feature
+generic/115,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,72,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/116,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/117,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/118,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/119,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/120,PASS,23,,,,PASS,136,,,
+generic/121,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,74,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/122,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,74,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/123,PASS,8,,,,PASS,117,,,
+generic/124,PASS,24,,,,PASS,255,,,
+generic/125,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,75,O_DIRECT is not supported,O_DIRECT,feature
+generic/126,PASS,8,,,,PASS,119,,,
+generic/127,PASS,510,,,,PASS,1705,,,
+generic/128,PASS,8,,,,PASS,123,,,
+generic/129,PASS,158,,,,PASS,997,,,
+generic/130,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/131,PASS,9,,,,PASS,99,,,
+generic/132,PASS,24,,,,PASS,298,,,
+generic/133,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,65,O_DIRECT is not supported,O_DIRECT,feature
+generic/134,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,66,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/135,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,65,O_DIRECT is not supported,O_DIRECT,feature
+generic/136,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,66,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/137,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/138,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/139,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/140,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/141,PASS,9,,,,PASS,107,,,
+generic/142,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/143,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,67,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/144,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/145,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/146,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/147,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/148,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/149,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/150,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/151,NOTRUN,6,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/152,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/153,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,68,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/154,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/155,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/156,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/157,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/158,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,70,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/159,NOTRUN,5,file system doesn't support chattr +i,inode flags,feature,NOTRUN,68,file system doesn't support chattr +i,inode flags,feature
+generic/160,NOTRUN,5,file system doesn't support chattr +i,inode flags,feature,NOTRUN,68,file system doesn't support chattr +i,inode flags,feature
+generic/161,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/162,NOTRUN,5,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,80,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/163,NOTRUN,6,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,80,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/164,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/165,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/166,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/167,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/168,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/169,PASS,9,,,,PASS,119,,,
+generic/170,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/171,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/172,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/173,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/174,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/175,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/176,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/177,NOTRUN,5,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/178,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/179,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/180,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/181,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/182,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,73,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/183,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/184,NOTRUN,5,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,72,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/185,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/186,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/187,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/188,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/189,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/190,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/191,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/192,PASS,14,,,,PASS,119,,,
+generic/193,PASS,9,,,,PASS,120,,,
+generic/194,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/195,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/196,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/197,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/198,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/199,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/200,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/201,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/202,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/203,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/204,PASS,1574,,,,PASS,11778,,,
+generic/205,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/206,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/207,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/208,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/209,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/210,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/211,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,72,O_DIRECT is not supported,O_DIRECT,feature
+generic/212,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/213,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/214,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/215,PASS,11,,,,PASS,115,,,
+generic/216,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/217,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/218,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/219,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,71,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/220,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/221,PASS,10,,,,PASS,110,,,
+generic/222,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/223,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/224,PASS,119,,,,PASS,1223,,,
+generic/225,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,66,O_DIRECT is not supported,O_DIRECT,feature
+generic/226,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,63,O_DIRECT is not supported,O_DIRECT,feature
+generic/227,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/228,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,64,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/229,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,74,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/230,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,64,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/231,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,64,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/232,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,64,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/233,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,64,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/234,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,65,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/235,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,66,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/236,PASS,10,,,,PASS,97,,,
+generic/237,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,66,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/238,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,75,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/239,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,66,O_DIRECT is not supported,O_DIRECT,feature
+generic/240,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,66,O_DIRECT is not supported,O_DIRECT,feature
+generic/241,PASS,82,,,,PASS,176,,,
+generic/242,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/243,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/244,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,66,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/245,PASS,9,,,,PASS,100,,,
+generic/246,PASS,9,,,,PASS,100,,,
+generic/247,PASS,63,,,,PASS,494,,,
+generic/248,PASS,9,,,,PASS,97,,,
+generic/249,PASS,15,,,,PASS,144,,,
+generic/250,NOTRUN,6,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/251,NOTRUN,6,FITRIM not supported on /mnt/scratch,FITRIM,feature,NOTRUN,75,FITRIM not supported on /mnt/scratch,FITRIM,feature
+generic/252,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,68,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/253,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/254,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/255,NOTRUN,5,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,67,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/256,NOTRUN,5,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,67,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/257,PASS,9,,,,PASS,109,,,
+generic/258,PASS,9,,,,PASS,100,,,
+generic/259,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/260,NOTRUN,6,FITRIM not supported on /mnt/scratch,FITRIM,feature,NOTRUN,76,FITRIM not supported on /mnt/scratch,FITRIM,feature
+generic/261,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/262,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/263,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,69,O_DIRECT is not supported,O_DIRECT,feature
+generic/264,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/265,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/266,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/267,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/268,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/269,PASS,516,,,,PASS,2920,,,
+generic/270,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,67,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/271,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/272,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/273,NOTRUN,5,Scratch device too small,device size,environment,NOTRUN,67,Scratch device too small,device size,environment
+generic/274,NOTRUN,5,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,65,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/275,NOTRUN,5,Scratch device too small,device size,environment,NOTRUN,64,Scratch device too small,device size,environment
+generic/276,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/277,NOTRUN,5,file system doesn't support chattr +A,inode flags,feature,NOTRUN,66,file system doesn't support chattr +A,inode flags,feature
+generic/278,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/279,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/280,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,65,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/281,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/282,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,75,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/283,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/284,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,75,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/285,PASS,9,,,,PASS,95,,,
+generic/286,NOTRUN,6,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,66,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/287,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/288,NOTRUN,6,FITRIM not supported on /mnt/scratch,FITRIM,feature,NOTRUN,74,FITRIM not supported on /mnt/scratch,FITRIM,feature
+generic/289,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,75,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/290,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/291,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/292,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/293,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,76,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/294,NOTRUN,5,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,67,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/295,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/296,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/297,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/298,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/299,NOTRUN,6,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,68,O_DIRECT is not supported,O_DIRECT,feature
+generic/300,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,67,O_DIRECT is not supported,O_DIRECT,feature
+generic/301,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/302,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/303,NOTRUN,6,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,69,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/304,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,69,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/305,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/306,NOTRUN,5,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,69,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/307,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,69,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/308,PASS,9,,,,PASS,102,,,
+generic/309,PASS,10,,,,PASS,103,,,
+generic/310,PASS,86,,,,PASS,444,,,
+generic/311,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/312,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,69,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/313,PASS,13,,,,PASS,107,,,
+generic/314,PASS,9,,,,PASS,105,,,
+generic/315,NOTRUN,5,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/316,NOTRUN,5,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/317,NOTRUN,5,This test requires procfs uid_map support.,user namespaces,environment,PASS,116,,,
+generic/318,NOTRUN,6,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,71,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/319,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,70,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/320,NOTRUN,5,Scratch device too small,device size,environment,NOTRUN,70,Scratch device too small,device size,environment
+generic/321,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,72,This test requires dm flakey support,device-mapper target,environment
+generic/322,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/323,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/324,NOTRUN,5,"defragmentation not supported for fstype ""beamfs""",defragmentation,feature,NOTRUN,69,"defragmentation not supported for fstype ""beamfs""",defragmentation,feature
+generic/325,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/326,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/327,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/328,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/329,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/330,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/331,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/332,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/333,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/334,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/335,NOTRUN,6,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/336,NOTRUN,6,This test requires dm flakey support,device-mapper target,environment,NOTRUN,72,This test requires dm flakey support,device-mapper target,environment
+generic/337,NOTRUN,6,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,70,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/338,PASS,9,,,,PASS,113,,,
+generic/339,PASS,697,,,,PASS,5910,,,
+generic/340,PASS,27,,,,PASS,439,,,
+generic/341,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/342,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,69,This test requires dm flakey support,device-mapper target,environment
+generic/343,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,70,This test requires dm flakey support,device-mapper target,environment
+generic/344,PASS,87,,,,PASS,874,,,
+generic/345,PASS,47,,,,PASS,765,,,
+generic/346,PASS,67,,,,PASS,551,,,
+generic/347,NOTRUN,4,This test requires dm thin-pool support,device-mapper target,environment,NOTRUN,72,This test requires dm thin-pool support,device-mapper target,environment
+generic/348,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/352,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/353,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/354,PASS,48,,,,PASS,501,,,
+generic/355,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/356,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,79,swapfiles are not supported,swap files,feature
+generic/357,NOTRUN,4,swapfiles are not supported,swap files,feature,NOTRUN,79,swapfiles are not supported,swap files,feature
+generic/358,NOTRUN,4,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/359,NOTRUN,4,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/360,PASS,6,,,,PASS,107,,,
+generic/361,PASS,73,,,,PASS,454,,,
+generic/362,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,66,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/363,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,65,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/364,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,65,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/365,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,65,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/366,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,65,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/367,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,66,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/368,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,66,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/369,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,66,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/370,NOTRUN,4,this test requires richacl support on $SCRATCH_DEV,richacl,environment,NOTRUN,66,this test requires richacl support on $SCRATCH_DEV,richacl,environment
+generic/371,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,66,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/372,NOTRUN,4,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/373,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,77,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/374,NOTRUN,5,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,77,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/375,NOTRUN,4,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,67,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/376,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,70,This test requires dm flakey support,device-mapper target,environment
+generic/377,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,68,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/378,PASS,6,,,,PASS,104,,,
+generic/379,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/380,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/381,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/382,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/383,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/384,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/385,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,68,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/386,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,67,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/387,NOTRUN,4,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,79,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/388,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,78,beamfs does not support shutdown,shutdown ioctl,feature
+generic/389,NOTRUN,4,O_TMPFILE is not supported,O_TMPFILE,feature,NOTRUN,69,O_TMPFILE is not supported,O_TMPFILE,feature
+generic/390,NOTRUN,4,beamfs does not support freezing,freeze,feature,NOTRUN,69,beamfs does not support freezing,freeze,feature
+generic/391,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,69,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/392,NOTRUN,4,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,78,beamfs does not support shutdown,shutdown ioctl,feature
+generic/393,PASS,7,,,,PASS,117,,,
+generic/394,PASS,6,,,,PASS,103,,,
+generic/395,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/396,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/397,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/398,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/399,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/400,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,69,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/401,NOTRUN,4,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,70,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/402,NOTRUN,4,Kernel does not support timestamp limits,timestamp range warning,feature,NOTRUN,80,Kernel does not support timestamp limits,timestamp range warning,feature
+generic/403,NOTRUN,4,attr namespace trusted not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,71,attr namespace trusted not supported by this filesystem type: beamfs,extended attributes,feature
+generic/404,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/405,NOTRUN,4,This test requires dm thin-pool support,device-mapper target,environment,NOTRUN,74,This test requires dm thin-pool support,device-mapper target,environment
+generic/406,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/407,NOTRUN,4,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,72,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/408,NOTRUN,4,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,73,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/409,PASS,16,,,,PASS,289,,,
+generic/410,PASS,26,,,,PASS,460,,,
+generic/411,PASS,7,,,,PASS,132,,,
+generic/412,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/413,NOTRUN,4,mount /dev/vdc with dax failed,DAX,environment,NOTRUN,81,mount /dev/vdh with dax failed,DAX,environment
+generic/414,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/415,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/416,PASS,1740,,,,PASS,12801,,,
+generic/417,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,84,beamfs does not support shutdown,shutdown ioctl,feature
+generic/418,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/419,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/420,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/421,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,75,No encryption support for beamfs,encryption,feature
+generic/422,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/423,NOTRUN,4,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,71,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/424,NOTRUN,4,file system doesn't support any of /bin/chattr +a/+c/+d/+i,inode flags,feature,NOTRUN,72,file system doesn't support any of /bin/chattr +a/+c/+d/+i,inode flags,feature
+generic/425,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/426,NOTRUN,4,beamfs does not support NFS export,NFS export,feature,NOTRUN,73,beamfs does not support NFS export,NFS export,feature
+generic/427,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,72,O_DIRECT is not supported,O_DIRECT,feature
+generic/428,PASS,7,,,,PASS,110,,,
+generic/429,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,74,No encryption support for beamfs,encryption,feature
+generic/430,PASS,7,,,,PASS,110,,,
+generic/431,PASS,6,,,,PASS,110,,,
+generic/432,PASS,7,,,,PASS,112,,,
+generic/433,PASS,6,,,,PASS,110,,,
+generic/434,NOTRUN,4,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,73,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/435,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,76,No encryption support for beamfs,encryption,feature
+generic/436,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/437,PASS,7,,,,PASS,116,,,
+generic/438,PASS,7,,,,PASS,175,,,
+generic/439,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/440,NOTRUN,4,No encryption support for beamfs,encryption,feature,NOTRUN,74,No encryption support for beamfs,encryption,feature
+generic/441,PASS,8,,,,PASS,142,,,
+generic/443,PASS,7,,,,PASS,107,,,
+generic/444,NOTRUN,4,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,71,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/445,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/446,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/447,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/448,PASS,7,,,,PASS,107,,,
+generic/449,NOTRUN,4,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,71,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/450,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/451,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/452,PASS,7,,,,PASS,118,,,
+generic/453,PASS,8,,,,PASS,132,,,
+generic/454,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,71,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/455,NOTRUN,4,This test requires a valid $LOGWRITES_DEV,log device,environment,NOTRUN,74,This test requires a valid $LOGWRITES_DEV,log device,environment
+generic/456,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/457,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,84,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/458,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,81,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/459,NOTRUN,5,This test requires dm thin-pool support,device-mapper target,environment,NOTRUN,76,This test requires dm thin-pool support,device-mapper target,environment
+generic/460,NOTRUN,5,This test requires at least 1GB free on /mnt/scratch to run,device size,environment,NOTRUN,81,This test requires at least 1GB free on /mnt/scratch to run,device size,environment
+generic/461,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/462,NOTRUN,5,mount /dev/vdc with dax failed,DAX,environment,NOTRUN,81,mount /dev/vdh with dax failed,DAX,environment
+generic/463,NOTRUN,4,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,74,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/464,PASS,84,,,,PASS,522,,,
+generic/465,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,72,O_DIRECT is not supported,O_DIRECT,feature
+generic/466,PASS,7,,,,PASS,114,,,
+generic/467,NOTRUN,4,beamfs does not support NFS export,NFS export,feature,NOTRUN,73,beamfs does not support NFS export,NFS export,feature
+generic/468,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,83,beamfs does not support shutdown,shutdown ioctl,feature
+generic/469,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/470,NOTRUN,4,This test requires a valid $LOGWRITES_DEV,log device,environment,NOTRUN,73,This test requires a valid $LOGWRITES_DEV,log device,environment
+generic/471,PASS,50,,,,PASS,486,,,
+generic/472,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,82,swapfiles are not supported,swap files,feature
+generic/474,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,81,beamfs does not support shutdown,shutdown ioctl,feature
+generic/475,NOTRUN,5,beamfs does not support metadata journaling,metadata journaling,feature,NOTRUN,82,beamfs does not support metadata journaling,metadata journaling,feature
+generic/476,PASS,2653,,,,FAIL,14388,,,
+generic/477,NOTRUN,5,beamfs does not support NFS export,NFS export,feature,NOTRUN,69,beamfs does not support NFS export,NFS export,feature
+generic/478,PASS,21,,,,PASS,142,,,
+generic/479,NOTRUN,4,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,71,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/480,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,71,This test requires dm flakey support,device-mapper target,environment
+generic/481,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,75,This test requires dm flakey support,device-mapper target,environment
+generic/482,NOTRUN,5,This test requires a valid $LOGWRITES_DEV,log device,environment,NOTRUN,69,This test requires a valid $LOGWRITES_DEV,log device,environment
+generic/483,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,89,This test requires dm flakey support,device-mapper target,environment
+generic/484,PASS,7,,,,PASS,171,,,
+generic/485,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,104,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/486,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,108,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/487,NOTRUN,5,This test requires a valid $SCRATCH_LOGDEV,log device,environment,NOTRUN,87,This test requires a valid $SCRATCH_LOGDEV,log device,environment
+generic/488,PASS,10,,,,PASS,194,,,
+generic/489,NOTRUN,4,This test requires dm flakey support,device-mapper target,environment,NOTRUN,105,This test requires dm flakey support,device-mapper target,environment
+generic/490,PASS,7,,,,PASS,137,,,
+generic/491,NOTRUN,5,beamfs does not support freezing,freeze,feature,NOTRUN,111,beamfs does not support freezing,freeze,feature
+generic/492,NOTRUN,5,xfs_io label  failed (old kernel/wrong fs?),filesystem label,feature,NOTRUN,118,xfs_io label  failed (old kernel/wrong fs?),filesystem label,feature
+generic/493,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,121,swapfiles are not supported,swap files,feature
+generic/494,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,112,swapfiles are not supported,swap files,feature
+generic/495,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,105,swapfiles are not supported,swap files,feature
+generic/496,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,109,swapfiles are not supported,swap files,feature
+generic/497,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,98,swapfiles are not supported,swap files,feature
+generic/498,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,90,This test requires dm flakey support,device-mapper target,environment
+generic/499,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,94,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/500,NOTRUN,4,This test requires dm thin-pool support,device-mapper target,environment,NOTRUN,81,This test requires dm thin-pool support,device-mapper target,environment
+generic/501,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,108,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/502,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,93,This test requires dm flakey support,device-mapper target,environment
+generic/503,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,94,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/504,PASS,7,,,,PASS,123,,,
+generic/505,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,97,beamfs does not support shutdown,shutdown ioctl,feature
+generic/506,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,81,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/507,NOTRUN,5,file system doesn't support chattr +ASai,inode flags,feature,NOTRUN,79,file system doesn't support chattr +ASai,inode flags,feature
+generic/508,NOTRUN,4,lsattr not supported by test filesystem type: beamfs,inode flags,feature,NOTRUN,91,lsattr not supported by test filesystem type: beamfs,inode flags,feature
+generic/509,NOTRUN,4,O_TMPFILE is not supported,O_TMPFILE,feature,NOTRUN,91,O_TMPFILE is not supported,O_TMPFILE,feature
+generic/510,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,93,This test requires dm flakey support,device-mapper target,environment
+generic/511,NOTRUN,4,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,84,xfs_io falloc -k failed (old kernel/wrong fs?),fallocate modes,feature
+generic/512,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,90,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/513,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,103,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/514,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,104,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/515,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,106,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/516,NOTRUN,5,Dedupe not supported by test filesystem type: beamfs,deduplication,feature,NOTRUN,94,Dedupe not supported by test filesystem type: beamfs,deduplication,feature
+generic/517,NOTRUN,5,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,105,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/518,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,99,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/519,NOTRUN,5,FIBMAP not supported by this filesystem,FIBMAP,feature,NOTRUN,91,FIBMAP not supported by this filesystem,FIBMAP,feature
+generic/520,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,93,This test requires dm flakey support,device-mapper target,environment
+generic/523,NOTRUN,4,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,84,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/524,PASS,66,,,,PASS,763,,,
+generic/525,NOTRUN,5,filesystem does not support huge file size,large files,feature,NOTRUN,104,filesystem does not support huge file size,large files,feature
+generic/526,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,95,This test requires dm flakey support,device-mapper target,environment
+generic/527,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,94,This test requires dm flakey support,device-mapper target,environment
+generic/528,NOTRUN,5,inode creation time not supported by this filesystem,creation time,feature,NOTRUN,87,inode creation time not supported by this filesystem,creation time,feature
+generic/529,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,92,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/530,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,105,beamfs does not support shutdown,shutdown ioctl,feature
+generic/531,NOTRUN,5,O_TMPFILE is not supported,O_TMPFILE,feature,NOTRUN,92,O_TMPFILE is not supported,O_TMPFILE,feature
+generic/532,PASS,7,,,,PASS,131,,,
+generic/533,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,87,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/534,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,88,This test requires dm flakey support,device-mapper target,environment
+generic/535,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,90,This test requires dm flakey support,device-mapper target,environment
+generic/536,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,95,beamfs does not support shutdown,shutdown ioctl,feature
+generic/537,NOTRUN,5,beamfs does not support metadata journaling,metadata journaling,feature,NOTRUN,95,beamfs does not support metadata journaling,metadata journaling,feature
+generic/538,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,80,O_DIRECT is not supported,O_DIRECT,feature
+generic/539,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,77,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/540,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,78,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/541,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,88,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/542,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,111,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/543,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,97,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/544,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,107,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/545,NOTRUN,4,file system doesn't support chattr +i,inode flags,feature,NOTRUN,108,file system doesn't support chattr +i,inode flags,feature
+generic/546,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,110,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/547,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,100,This test requires dm flakey support,device-mapper target,environment
+generic/548,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,77,No encryption support for beamfs,encryption,feature
+generic/549,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,78,No encryption support for beamfs,encryption,feature
+generic/550,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,99,No encryption support for beamfs,encryption,feature
+generic/551,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,110,O_DIRECT is not supported,O_DIRECT,feature
+generic/552,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,113,O_DIRECT is not supported,O_DIRECT,feature
+generic/553,NOTRUN,5,xfs_io chattr +i failed (old kernel/wrong fs?),inode flags,feature,NOTRUN,114,xfs_io chattr +i failed (old kernel/wrong fs?),inode flags,feature
+generic/554,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,136,swapfiles are not supported,swap files,feature
+generic/555,NOTRUN,5,xfs_io chattr +ia failed (old kernel/wrong fs?),inode flags,feature,NOTRUN,82,xfs_io chattr +ia failed (old kernel/wrong fs?),inode flags,feature
+generic/556,NOTRUN,5,beamfs does not support casefold feature,case folding,feature,NOTRUN,86,beamfs does not support casefold feature,case folding,feature
+generic/557,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,89,This test requires dm flakey support,device-mapper target,environment
+generic/558,PASS,196,,,,PASS,2252,,,
+generic/559,NOTRUN,4,"duperemove utility required, skipped this test",tool absent from the image,environment,NOTRUN,75,"duperemove utility required, skipped this test",tool absent from the image,environment
+generic/560,NOTRUN,5,"duperemove utility required, skipped this test",tool absent from the image,environment,NOTRUN,99,"duperemove utility required, skipped this test",tool absent from the image,environment
+generic/561,NOTRUN,5,"duperemove utility required, skipped this test",tool absent from the image,environment,NOTRUN,77,"duperemove utility required, skipped this test",tool absent from the image,environment
+generic/562,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,105,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/563,NOTRUN,5,Test requires cgroup2 enabled,cgroup2,environment,NOTRUN,92,Test requires cgroup2 enabled,cgroup2,environment
+generic/564,NOTRUN,5,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature,NOTRUN,92,beamfs does not support mknod/mkfifo,"device nodes, FIFOs",feature
+generic/565,NOTRUN,5,beamfs does not support cross-device copy_file_range,cross-device copy_file_range,feature,NOTRUN,88,beamfs does not support cross-device copy_file_range,cross-device copy_file_range,feature
+generic/566,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,75,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/567,NOTRUN,4,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/568,NOTRUN,4,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,130,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/569,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/570,NOTRUN,4,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,82,O_DIRECT is not supported,O_DIRECT,feature
+generic/571,NOTRUN,5,Require fcntl setlease support,file leases,feature,NOTRUN,109,Require fcntl setlease support,file leases,feature
+generic/572,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,92,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/573,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,106,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/574,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,100,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/575,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,93,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/576,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,83,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/577,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,80,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/578,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,80,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/579,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,81,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/580,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,92,No encryption support for beamfs,encryption,feature
+generic/581,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,81,No encryption support for beamfs,encryption,feature
+generic/582,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,80,No encryption support for beamfs,encryption,feature
+generic/583,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,77,No encryption support for beamfs,encryption,feature
+generic/584,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,76,No encryption support for beamfs,encryption,feature
+generic/585,NOTRUN,5,kernel doesn't support renameat2 syscall,renameat2 flags,feature,NOTRUN,71,kernel doesn't support renameat2 syscall,renameat2 flags,feature
+generic/586,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/587,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,71,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/588,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/589,PASS,17,,,,PASS,299,,,
+generic/590,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,72,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/591,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/592,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,72,No encryption support for beamfs,encryption,feature
+generic/593,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/594,NOTRUN,4,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,70,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/595,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,73,No encryption support for beamfs,encryption,feature
+generic/596,NOTRUN,5,"accton utility required, skipped this test",tool absent from the image,environment,NOTRUN,69,"accton utility required, skipped this test",tool absent from the image,environment
+generic/597,NOTRUN,5,fsgqa2 group not defined.,test user or group,environment,NOTRUN,72,fsgqa2 group not defined.,test user or group,environment
+generic/598,NOTRUN,5,fsgqa2 group not defined.,test user or group,environment,NOTRUN,72,fsgqa2 group not defined.,test user or group,environment
+generic/599,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,80,beamfs does not support shutdown,shutdown ioctl,feature
+generic/600,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,70,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/601,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,70,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/602,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,74,No encryption support for beamfs,encryption,feature
+generic/603,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,71,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/604,PASS,10,,,,PASS,165,,,
+generic/605,NOTRUN,5,mount /dev/vdc with dax=always failed,DAX,environment,NOTRUN,79,mount /dev/vdh with dax=always failed,DAX,environment
+generic/606,NOTRUN,5,mount /dev/vdc with dax=always failed,DAX,environment,NOTRUN,78,mount /dev/vdh with dax=always failed,DAX,environment
+generic/607,NOTRUN,5,xfs_io chattr +x failed (old kernel/wrong fs?),inode flags,feature,NOTRUN,70,xfs_io chattr +x failed (old kernel/wrong fs?),inode flags,feature
+generic/608,NOTRUN,5,mount /dev/vdc with dax=always failed,DAX,environment,NOTRUN,77,mount /dev/vdh with dax=always failed,DAX,environment
+generic/609,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/610,NOTRUN,5,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,70,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/611,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,70,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/612,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,73,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/613,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,74,No encryption support for beamfs,encryption,feature
+generic/614,NOTRUN,5,test requires delayed allocation buffered writes,delayed allocation,feature,NOTRUN,80,test requires delayed allocation buffered writes,delayed allocation,feature
+generic/615,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,70,O_DIRECT is not supported,O_DIRECT,feature
+generic/616,NOTRUN,5,kernel does not support IO_URING,io_uring,environment,NOTRUN,70,kernel does not support IO_URING,io_uring,environment
+generic/617,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,71,O_DIRECT is not supported,O_DIRECT,feature
+generic/618,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,71,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/619,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,71,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/620,NOTRUN,5,scratch dev too small,device size,environment,NOTRUN,71,scratch dev too small,device size,environment
+generic/621,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,74,No encryption support for beamfs,encryption,feature
+generic/622,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,82,beamfs does not support shutdown,shutdown ioctl,feature
+generic/623,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,83,beamfs does not support shutdown,shutdown ioctl,feature
+generic/624,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,89,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/625,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,77,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/626,NOTRUN,5,kernel doesn't support renameat2 syscall,renameat2 flags,feature,NOTRUN,89,kernel doesn't support renameat2 syscall,renameat2 flags,feature
+generic/627,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,108,O_DIRECT is not supported,O_DIRECT,feature
+generic/628,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,121,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/629,NOTRUN,5,xfs_io chattr +s failed (old kernel/wrong fs?),inode flags,feature,NOTRUN,108,xfs_io chattr +s failed (old kernel/wrong fs?),inode flags,feature
+generic/630,NOTRUN,5,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,99,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/631,NOTRUN,5,attr namespace trusted not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,91,attr namespace trusted not supported by this filesystem type: beamfs,extended attributes,feature
+generic/632,NOTRUN,5,/usr/xfstests/src/detached_mounts_propagation not built,tool absent from the image,environment,NOTRUN,85,/usr/xfstests/src/detached_mounts_propagation not built,tool absent from the image,environment
+generic/633,PASS,8,,,,PASS,121,,,
+generic/634,PASS,8,,,,PASS,140,,,
+generic/635,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,93,beamfs does not support shutdown,shutdown ioctl,feature
+generic/636,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,92,swapfiles are not supported,swap files,feature
+generic/637,PASS,8,,,,PASS,128,,,
+generic/638,PASS,7,,,,PASS,118,,,
+generic/639,PASS,7,,,,PASS,118,,,
+generic/640,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,80,This test requires dm flakey support,device-mapper target,environment
+generic/641,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,92,swapfiles are not supported,swap files,feature
+generic/642,PASS,252,,,,PASS,1645,,,
+generic/643,NOTRUN,5,swapfiles are not supported,swap files,feature,NOTRUN,82,swapfiles are not supported,swap files,feature
+generic/644,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,71,vfstest not support by beamfs,idmapped mounts,feature
+generic/645,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,70,vfstest not support by beamfs,idmapped mounts,feature
+generic/646,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,82,beamfs does not support shutdown,shutdown ioctl,feature
+generic/647,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,72,O_DIRECT is not supported,O_DIRECT,feature
+generic/648,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,84,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/649,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,74,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/650,PASS,80,,,,PASS,1248,,,
+generic/651,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,84,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/652,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,84,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/653,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/654,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/655,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/656,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,71,vfstest not support by beamfs,idmapped mounts,feature
+generic/657,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/658,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/659,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/660,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/661,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/662,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/663,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/664,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/665,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/666,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/667,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/668,NOTRUN,6,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/669,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/670,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/671,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/672,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/673,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,84,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/674,NOTRUN,5,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature,NOTRUN,83,Dedupe not supported by scratch filesystem type: beamfs,deduplication,feature
+generic/675,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,83,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/676,PASS,37,,,,PASS,368,,,
+generic/677,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,75,This test requires dm flakey support,device-mapper target,environment
+generic/678,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,73,O_DIRECT is not supported,O_DIRECT,feature
+generic/679,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/680,PASS,8,,,,PASS,113,,,
+generic/681,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,71,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/682,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,72,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/683,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/684,NOTRUN,5,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io fpunch  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/685,NOTRUN,5,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io fzero  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/686,NOTRUN,5,xfs_io finsert  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io finsert  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/687,NOTRUN,5,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,74,xfs_io fcollapse  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/688,NOTRUN,5,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature,NOTRUN,73,xfs_io falloc  failed (old kernel/wrong fs?),fallocate modes,feature
+generic/689,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,72,vfstest not support by beamfs,idmapped mounts,feature
+generic/690,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,74,This test requires dm flakey support,device-mapper target,environment
+generic/691,NOTRUN,5,disk quotas not supported by this filesystem type: beamfs,quotas,feature,NOTRUN,72,disk quotas not supported by this filesystem type: beamfs,quotas,feature
+generic/692,NOTRUN,5,"fsverity utility required, skipped this test",tool absent from the image,environment,NOTRUN,73,"fsverity utility required, skipped this test",tool absent from the image,environment
+generic/693,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,75,No encryption support for beamfs,encryption,feature
+generic/694,NOTRUN,5,This test requires at least 4GB free on /mnt/test to run,device size,environment,NOTRUN,72,This test requires at least 4GB free on /mnt/test to run,device size,environment
+generic/695,NOTRUN,5,This test requires dm flakey support,device-mapper target,environment,NOTRUN,73,This test requires dm flakey support,device-mapper target,environment
+generic/696,PASS,8,,,,PASS,126,,,
+generic/697,NOTRUN,5,ACLs not supported by this filesystem type: beamfs,ACLs,feature,NOTRUN,72,ACLs not supported by this filesystem type: beamfs,ACLs,feature
+generic/698,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,73,vfstest not support by beamfs,idmapped mounts,feature
+generic/699,NOTRUN,5,vfstest not support by beamfs,idmapped mounts,feature,NOTRUN,74,vfstest not support by beamfs,idmapped mounts,feature
+generic/700,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,72,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/701,NOTRUN,5,This test requires at least 5GB free on /mnt/test to run,device size,environment,NOTRUN,72,This test requires at least 5GB free on /mnt/test to run,device size,environment
+generic/702,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,82,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/703,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,73,O_DIRECT is not supported,O_DIRECT,feature
+generic/704,NOTRUN,5,scsi_debug module not found,scsi_debug,environment,NOTRUN,71,scsi_debug module not found,scsi_debug,environment
+generic/705,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,82,beamfs does not support shutdown,shutdown ioctl,feature
+generic/706,PASS,8,,,,PASS,110,,,
+generic/707,PASS,211,,,,PASS,4050,,,
+generic/708,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,75,O_DIRECT is not supported,O_DIRECT,feature
+generic/709,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,75,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/710,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,75,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/711,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,74,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/712,NOTRUN,6,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,74,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/713,NOTRUN,5,xfs_io swapext -v exchrange -s 64k -l 64k not supported on beamfs,exchange-range,feature,NOTRUN,74,xfs_io swapext -v exchrange -s 64k -l 64k not supported on beamfs,exchange-range,feature
+generic/714,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,95,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/715,NOTRUN,5,xfs_io swapext -v exchrange -s 64k -l 64k not supported on beamfs,exchange-range,feature,NOTRUN,73,xfs_io swapext -v exchrange -s 64k -l 64k not supported on beamfs,exchange-range,feature
+generic/716,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,72,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/717,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,73,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/718,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,78,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/719,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,88,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/720,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,82,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/721,NOTRUN,5,xfs_io startupdate  support is missing,exchange-range,feature,NOTRUN,79,xfs_io startupdate  support is missing,exchange-range,feature
+generic/722,NOTRUN,5,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature,NOTRUN,91,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature
+generic/723,NOTRUN,5,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature,NOTRUN,88,xfs_io swapext -v exchrange not supported on beamfs,exchange-range,feature
+generic/724,NOTRUN,5,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature,NOTRUN,99,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature
+generic/725,NOTRUN,5,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature,NOTRUN,88,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature
+generic/726,NOTRUN,5,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature,NOTRUN,111,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature
+generic/727,NOTRUN,5,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature,NOTRUN,84,xfs_io swapext -v exchrange -a not supported on beamfs,exchange-range,feature
+generic/728,NOTRUN,5,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature,NOTRUN,104,attr namespace user not supported by this filesystem type: beamfs,extended attributes,feature
+generic/729,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,86,O_DIRECT is not supported,O_DIRECT,feature
+generic/730,NOTRUN,5,scsi_debug module not found,scsi_debug,environment,NOTRUN,86,scsi_debug module not found,scsi_debug,environment
+generic/731,NOTRUN,5,scsi_debug module not found,scsi_debug,environment,NOTRUN,92,scsi_debug module not found,scsi_debug,environment
+generic/732,PASS,8,,,,PASS,151,,,
+generic/733,NOTRUN,5,Reflink not supported by scratch filesystem type: beamfs,reflink,feature,NOTRUN,106,Reflink not supported by scratch filesystem type: beamfs,reflink,feature
+generic/734,NOTRUN,5,Reflink not supported by test filesystem type: beamfs,reflink,feature,NOTRUN,108,Reflink not supported by test filesystem type: beamfs,reflink,feature
+generic/735,NOTRUN,5,O_DIRECT is not supported,O_DIRECT,feature,NOTRUN,95,O_DIRECT is not supported,O_DIRECT,feature
+generic/736,PASS,57,,,,PASS,670,,,
+generic/737,NOTRUN,5,beamfs does not support shutdown,shutdown ioctl,feature,NOTRUN,104,beamfs does not support shutdown,shutdown ioctl,feature
+generic/738,NOTRUN,5,beamfs does not support freezing,freeze,feature,NOTRUN,89,beamfs does not support freezing,freeze,feature
+generic/739,NOTRUN,5,No encryption support for beamfs,encryption,feature,NOTRUN,89,No encryption support for beamfs,encryption,feature
+shared/002,NOTRUN,5,not suitable for this filesystem type: beamfs,other filesystems only,scope,NOTRUN,91,not suitable for this filesystem type: beamfs,other filesystems only,scope
+shared/032,NOTRUN,5,not suitable for this filesystem type: beamfs,other filesystems only,scope,NOTRUN,97,not suitable for this filesystem type: beamfs,other filesystems only,scope
+shared/298,NOTRUN,5,not suitable for this filesystem type: beamfs,other filesystems only,scope,NOTRUN,86,not suitable for this filesystem type: beamfs,other filesystems only,scope

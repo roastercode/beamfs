@@ -1,0 +1,92 @@
+\section{Experimental setup}\label{sec:setup}
+
+\paragraph*{Software under test}
+\bfs 0.1.26, commit \texttt{\commitBeamfs}, built into one Yocto image
+per architecture (layer \texttt{yocto-beamfs} at \texttt{\commitYocto})
+with Linux 7.3-rc5 (\texttt{72d3fcf8})~\cite{linux73rc5}, the version
+both build configurations pin. \bfs is built into the kernel on both
+(\texttt{CONFIG\_BEAMFS\_FS=y}); the module file the images also carry
+is never loaded. The two kernels differ in one \bfs option and in their
+preemption model. The x86-64 kernel enables
+\texttt{CONFIG\_BEAMFS\_DEBUG\_TREE}, which records every pointer stored
+in an indirect block, checks each later store to the same slot against
+the record, decodes a copy of every parity-region block it has just
+encoded, and warns on a violation; these are diagnostics that change
+nothing on disk, but cost time and can fail a test through the warning.
+The aarch64 kernel does not enable it. The images, the kernels and the
+module sources are identified by SHA-256 (\apprepro): every source file
+of the module has the same hash in the commit, in the layer, in the run
+manifests and in the \srcTrees{} source trees the two builds compiled.
+The aarch64 image, \hash{\imageSha}, is checked on every node before each
+bench run. The guests boot from \bfs: their root filesystem is a \bfs
+volume.
+
+\paragraph*{Machines}
+One host (spartian, Gentoo Linux, Intel Core i7-12700F) runs four
+aarch64 guests emulated by QEMU without hardware acceleration (machine
+\texttt{virt}, Cortex-A57, four vCPUs and 2\,GiB each:
+\texttt{beamfs-master}, \texttt{compute01} to \texttt{compute03}) and one
+x86-64 guest under KVM (four vCPUs, 8\,GiB). In the cluster campaign each aarch64 node attacks a \bfs
+volume on its own virtual disk. The filesystem comparison runs on
+\texttt{compute01}, each filesystem on its own USB flash drive,
+five drives on the host, each passed to the guest as a virtio block
+device.
+
+\paragraph*{Workload}
+For each filesystem and each probability, the bench formats the device
+(for \bfs, \texttt{mkfs.beamfs -s inline -O per\_inode\_rs}: feature
+bits \texttt{incompat}~\featIncompat), writes three directories of three 256\,KiB random files with a SHA-256
+list per directory (twelve files), and records the extents of the target
+file \texttt{dir-B/file-B2.bin}. An attack reads the target once with the
+injector off, as a reference; arms the injector; syncs, unmounts, drops
+the caches and mounts again; reads the target and two other files;
+disarms the injector. The outcome is decided from the read alone:
+\emph{intact} if the bytes read back hash to the recorded value after at
+least one flip, \emph{silent corruption} if they do not and the read
+succeeded, \emph{read refused} if the read failed, \emph{no flip} if
+nothing was injected. A verification then remounts the volume, injector
+off, and hashes all twelve files. The cluster campaign runs the same
+attack on each node against a file of its \texttt{/data} volume.
+The background scrubber of \bfs ran at its default pace throughout.
+
+\paragraph*{Injection}
+emufi 0.8.1 (\texttt{srcversion 5DCD6301EB353B0FADD6FE2}) hooks the
+block layer with kprobes and flips one bit, at a random position, in the
+first segment of a read bio whose sectors match a target filter, with a
+probability $p$ per hook invocation; $p$ takes the values $10^{3}$,
+$10^{5}$ and $10^{6}$ parts per million. The filter is a list of sector
+ranges. emufi refuses a list of more than eight ranges or 512 bytes and
+then filters on the interval spanning the file: in runs 2 and 3 the
+per-block extent list of \bfs exceeded that limit and the interval,
+which includes the file's indirect block, applied; from run 4 the bench
+merges contiguous extents and the exact list applied.
+\Cref{sec:injector} shows that two hooks act on each \bfs read bio.
+
+\paragraph*{Runs}
+Three complete bench runs on the same image, numbered as in the project
+log (run 1 stopped before measuring): run 2 (bench
+\texttt{\commitBenchTwo}), run 3 (\texttt{\commitBenchThree}) and run 4
+(\texttt{\commitBenchFour}). Each writes a GPG-signed manifest of the
+chain it measured (\apprepro). Runs 2 and 3 ended with exit
+status 1 because some cluster cases were not exercised: in run 2 none,
+the injector holding a stale range list from the filesystem comparison;
+in run 3 not \texttt{compute01}, whose list emufi refused. Run 4 ended
+with status \rcRunFour{}, all twelve cluster cases exercised.
+
+\paragraph*{Functional tests}
+xfstests~\cite{fstests} 2024.03.03 as packaged in the images, with three
+patches from the layer: \bfs added beside ext2 to the harness's
+dispatch on the filesystem type, the volume kept when check declares it
+inconsistent, and an upstream fix to generic/589 backported. The
+project's harness, beamfs-xfstests~\cite{bx}, runs each test of the
+selection in its own invocation of check, on a test volume made by
+\texttt{mkfs.beamfs -N 16384}: the \bfs defaults, feature bits
+\texttt{incompat}~\featXfstests, the bench's volumes without per-inode
+Reed-Solomon. The selection is what check runs when given none, the
+\texttt{auto} group: \xfsGenericAuto{} \texttt{generic} and
+\xfsSharedAuto{} \texttt{shared} tests, \xfsTotal{} in all, identical on
+both images. One sweep per architecture on the same commit, with a
+budget of 14\,400\,s per test, aarch64 under harness version 2.3.60 and
+x86-64 under 2.5.1, which also records the node, its kernel, its tools,
+the features of the volumes it formats, its budget and every recovery
+of the node; generic/476 was also run alone on each architecture.

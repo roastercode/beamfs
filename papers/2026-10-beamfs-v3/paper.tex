@@ -1,0 +1,127 @@
+% beamfs v3 technical report
+% Author: Aurelien DESBRIERES
+% License: CC-BY-4.0
+% Build: python3 scripts/tables.py && latexmk -lualatex paper.tex
+% Every number quoted in the text comes from generated/numbers.tex,
+% written by scripts/tables.py from data/derived/*.csv, itself written
+% by scripts/extract.py from the signed run records.
+
+\documentclass[10pt,conference,a4paper]{IEEEtran}
+
+% LuaLaTeX font stack (as v2)
+\usepackage{fontspec}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{unicode-math}
+% IEEEtran sets section titles in small caps: Latin Modern keeps them
+% in a separate family.
+\setmainfont{Latin Modern Roman}[SmallCapsFont={lmromancaps10-regular.otf}]
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+\setmathfont{Latin Modern Math}
+
+% Tables
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% Figures
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,shapes,arrows.meta,calc,decorations.pathreplacing}
+
+% Code
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+}
+
+% URLs and long hashes
+\usepackage{xurl}
+\usepackage{seqsplit}
+
+% Bibliography (as v2)
+\usepackage[backend=biber,style=ieee,sorting=none,maxbibnames=5,
+            doi=true,url=true,isbn=false]{biblatex}
+\addbibresource{refs.bib}
+
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black,
+  pdftitle={beamfs v3: an EM-resilient Linux filesystem under read-path fault injection, with an audit of the injector},
+  pdfauthor={Aurelien Desbrieres},
+  pdfsubject={Filesystem; electromagnetic resilience; Reed-Solomon; Linux kernel; fault injection},
+  pdfkeywords={beamfs, electromagnetic resilience, Reed-Solomon, filesystem, Linux kernel, emufi, xfstests, fault injection},
+}
+\usepackage[capitalize,noabbrev]{cleveref}
+
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{enumitem}
+\usepackage{placeins}
+\setlist{nosep,leftmargin=1.5em}
+
+\input{generated/numbers}
+% The filesystem's name, in roman like ext4 or btrfs: IEEEtran sets the
+% abstract in bold and captions in small caps, which Latin Modern Mono
+% does not have.
+\newcommand{\bfs}{beamfs\xspace}
+% \seqsplit needs the digits themselves, not the macro that holds them.
+\newcommand{\hash}[1]{\texttt{\expandafter\seqsplit\expandafter{#1}}}
+\newcommand{\apprepro}{\hyperref[sec:repro]{the appendix}}
+% A statement not yet confirmed on the station. scripts/check-paper.sh
+% refuses a release build while one remains.
+\newcommand{\verify}[1]{\textcolor{red}{#1}}
+
+% =====================================================================
+\title{\large\bfseries beamfs v3:\\
+       An EM-Resilient Linux Filesystem\\
+       under Read-Path Fault Injection,\\
+       with an Audit of the Injector\\
+       \small\itshape Technical Report, Version 3}
+
+\author{%
+  \IEEEauthorblockN{Aur\'elien Desbri\`eres, independent researcher}
+  \IEEEauthorblockA{\href{https://orcid.org/0009-0002-0912-9487}{ORCID:~0009-0002-0912-9487} \quad
+    \texttt{aurelien@hackers.camp}}
+}
+
+\begin{document}
+\raggedbottom
+\maketitle
+
+\begin{abstract}
+\input{sections/00-abstract}
+\end{abstract}
+
+\begin{IEEEkeywords}
+Electromagnetic resilience, filesystem, Reed-Solomon, Linux kernel,
+fault injection, emufi, xfstests, single-event upset, reproducibility
+\end{IEEEkeywords}
+
+\input{sections/01-introduction}
+\input{sections/02-ftrfs}
+\input{sections/03-design}
+\input{sections/04-scope}
+\input{sections/05-setup}
+\input{sections/06-injector}
+\input{sections/07-results}
+\input{sections/08-memon}
+\input{sections/08b-brings}
+\input{sections/09-limitations}
+\input{sections/09b-v4}
+\input{sections/10-conclusion}
+
+\printbibliography
+
+\onecolumn
+\small
+\input{sections/11-reproducibility}
+
+\end{document}

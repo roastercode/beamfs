@@ -1,0 +1,73 @@
+\section{From FTRFS to beamfs}\label{sec:ftrfs}
+
+FTRFS~\cite{fuchs2015ftrfs} proposed a filesystem for the on-board
+memory of spacecraft: checksums, forward error correction and memory
+protection over a small radiation-exposed store. Its Linux realisation,
+posted as an RFC in April 2026~\cite{ftrfsrfc} and described in the
+FTRFS v1 report~\cite{desbrieres2026ftrfs}, inherited the concept and
+its limits. Each limit below is conceptual, not a missing feature: it
+follows from the threat model or from the place error correction holds
+in the design, which is why \bfs is a new filesystem with its own
+on-disk format rather than a further FTRFS revision.
+\Cref{tab:ftrfs} sets them side by side.
+
+\paragraph*{Threat model}
+FTRFS assumes radiation-induced upsets arriving as independent events at
+a low constant rate, the Poisson regime of space radiation. It says
+nothing about correlated events, bursts, or a deliberate attacker. The
+soundness theorem of the first \bfs report was stated under that model;
+fault injection falsified it, and v2 withdrew it~\cite{desbrieres2026beamfsv2}.
+\bfs states two families of perturbation, claims one, and says which
+(\cref{sec:scope}).
+
+\paragraph*{Where correction sits}
+In FTRFS, Reed-Solomon protects metadata and a CRC guards each block;
+the decoder runs once a CRC has failed, and the RFC shipped the encoder
+only~\cite{ftrfsrfc}. File data, the part an application reads back,
+had no correction at all, and a CRC that is itself hit can mask or
+invent a failure. In \bfs every data block is encoded, and the decoder
+runs on every read whatever any checksum says (\cref{sec:readpath}).
+
+\paragraph*{Scale}
+The FTRFS allocation bitmap is one RS-protected block: 16 codewords of
+239 bytes, 30\,592 bits, so at most 30\,592 blocks (about 119\,MiB at
+4\,KiB). The \bfs superblock records up to 65\,535 bitmap blocks.
+
+\paragraph*{Kernel integration}
+The RFC had no \texttt{address\_space\_operations}, and its review
+recalled the strong aversion to merging new filesystems built on buffer
+heads~\cite{ftrfsrfc}. \bfs reads and writes file data through iomap
+(\texttt{iomap\_read\_folio}, \texttt{iomap\_readahead},
+\texttt{iomap\_file\_buffered\_write}), but metadata (indirect blocks,
+bitmap, scrubber) still goes through buffer heads. That objection is
+narrowed, not lifted.
+
+\paragraph*{Evidence}
+The RFC was tested by mounting a volume and listing an empty directory.
+\bfs is tested with the xfstests \texttt{auto} group on two
+architectures and under fault injection (\cref{sec:results}).
+
+\begin{table}[t]
+\centering
+\caption{FTRFS and beamfs on the points that separate them.}
+\label{tab:ftrfs}
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}>{\raggedright\arraybackslash}p{1.45cm}
+  >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+ & FTRFS (2015 concept, 2026 RFC) & \bfs 0.1.26 \\
+\midrule
+threat model & radiation only, independent upsets &
+  two families; B explicitly not claimed \\
+file data & CRC, no correction & 16 RS codewords per block \\
+decoder & after a CRC failure; encoder only in the RFC &
+  on every read \\
+bursts & not addressed & data interleaved: a burst must exceed
+  128 bytes; parity grouped: 9 bytes suffice (\cref{sec:capsule}) \\
+bitmap & one block, 30\,592 blocks max & up to 65\,535 bitmap blocks \\
+VFS & no aops; buffer heads & iomap for data; buffer heads for metadata \\
+evidence & mount and empty listing & xfstests, two architectures;
+  fault injection \\
+\bottomrule
+\end{tabularx}
+\end{table}

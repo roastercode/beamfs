@@ -1,0 +1,40 @@
+\begin{tabular}{@{}llrr@{}}
+\toprule
+ & & x86-64 & aarch64 \\
+\midrule
+passed & & 122 & 122 \\
+failed & & 0 & 1 \\
+declined by check & & 612 & 611 \\
+\midrule
+\multicolumn{4}{@{}l}{declined for} \\
+\quad reflink & feature & 172 & 172 \\
+\quad fallocate modes & feature & 66 & 66 \\
+\quad O\_DIRECT & feature & 50 & 50 \\
+\quad quotas & feature & 30 & 30 \\
+\quad shutdown ioctl & feature & 29 & 29 \\
+\quad encryption & feature & 26 & 26 \\
+\quad extended attributes & feature & 22 & 22 \\
+\quad exchange-range & feature & 19 & 19 \\
+\quad deduplication & feature & 14 & 14 \\
+\quad ACLs & feature & 13 & 13 \\
+\quad inode flags & feature & 12 & 12 \\
+\quad swap files & feature & 12 & 12 \\
+\quad device nodes, FIFOs & feature & 8 & 8 \\
+\quad idmapped mounts & feature & 6 & 6 \\
+\quad freeze & feature & 5 & 5 \\
+\quad O\_TMPFILE & feature & 4 & 4 \\
+\quad renameat2 flags & feature & 4 & 4 \\
+\quad 13 other features & feature & 19 & 19 \\
+\addlinespace[2pt]
+\quad device-mapper target & environment & 48 & 48 \\
+\quad tool absent from the image & environment & 16 & 16 \\
+\quad richacl & environment & 9 & 9 \\
+\quad device size & environment & 7 & 7 \\
+\quad DAX & environment & 5 & 5 \\
+\quad log device & environment & 4 & 4 \\
+\quad scsi\_debug & environment & 4 & 4 \\
+\quad 4 other needs & environment & 5 & 4 \\
+\addlinespace[2pt]
+\quad other filesystems only & scope & 3 & 3 \\
+\bottomrule
+\end{tabular}

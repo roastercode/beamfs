@@ -1,0 +1,35 @@
+\bfs is a Linux filesystem that stores every data block as a capsule of
+sixteen interleaved Reed-Solomon RS(255,239) codewords, decodes on every
+read, and refuses a read it cannot vouch for. This report measures
+\bfs 0.1.26 (commit \commitBeamfs) on Linux 7.3-rc5. Of the
+\xfsTotal{} tests of the xfstests auto group, all \xfsXRan{} that ran
+on x86-64 passed, and \xfsAPass{} of the \xfsARan{} that ran on
+aarch64; xfstests declined the others, most of them for features \bfs
+does not implement, and these are counted apart, not as passes. Under
+single-bit upsets injected into read bios by the emufi injector, on a
+four-node aarch64 cluster and on USB flash media, \bfs never returned
+wrong data: it returned the correct file in every exercised case but
+one, absorbing up to \mfBeamfsMaxFlips{} flips during one read of a
+256\,KiB file, and in that one refused the read, after a flip in an
+indirect pointer. In the same runs ext4 and ext3 returned silently corrupted
+data after \mfExtFourFlipsMax{} and \mfExtThreeFlipsMin{} to
+\mfExtThreeFlipsMax{} flips respectively, and btrfs refused the read.
+We audit the injector itself. On this kernel emufi 0.8.1 logs one of its
+two read hooks one bio before the block it flips; reconstructing the hook
+of every flip explains all \kernLines{} corrections the kernel reported
+and bounds the load at \kernMaxPerDecode{} erroneous symbols per codeword
+and per decode, against eight correctable. The campaign therefore
+exercises detection and correction end to end, not the correction limit.
+Redundancy (btrfs DUP data, ZFS with two copies) also returns
+correct data, for a full copy; \bfs does it on one medium for 7\,\% of
+capacity, while its indirect pointers, in the default configuration, are
+less protected than ext4's checksummed extent blocks. We set out what
+\bfs brings, what it costs, and what v4 takes on.
+Scope, after the project's normative statement: \bfs is designed against
+Family~A perturbations (stochastic electromagnetic single-bit and
+multi-bit upsets, aging silicon bit-rot, environmental radiation,
+rowhammer-class single-cell flips); Family~B perturbations (adversarial
+bursts exceeding 256 octets per sub-block, IEMI at scale, voltage-glitch
+attacks at scale) are not claimed. This report measures a subset of
+Family~A. Every number in it is generated from signed run records and
+cross-checked before typesetting.

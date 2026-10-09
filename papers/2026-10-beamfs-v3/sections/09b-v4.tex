@@ -1,0 +1,68 @@
+\section{Toward v4}\label{sec:v4}
+
+The next report has two jobs: close what this one found open, and
+measure what this one could not. Each item names its source, a project
+document at \texttt{\commitBeamfs} or a finding of this report.
+
+\paragraph*{Format and code}
+\begin{enumerate}
+\item \emph{Indirect blocks, whole and dated.} A parity slot of 18
+  codewords, 288 bytes, covering all 4\,096 bytes of the block behind a
+  new incompatible feature bit (\texttt{format-v6.md}, section~8); and a
+  per-block generation, so that a verify can tell stale parity from
+  damage and repair the block instead of only journalling the error
+  (\texttt{known-limitations.md}, 3.13). Until then, the CRC mode of
+  indirect parity refuses a block that fails its check, where the
+  Reed-Solomon mode journals a correctable error and serves the block as
+  read (\texttt{indparity.c}).
+\item \emph{\texttt{DATA\_CSUM} and \texttt{DATA\_SELFID} by default.}
+  The first catches a codeword decoded wrongly beyond eight errors
+  (\texttt{known-limitations.md}, 3.11); the second, a pointer that
+  reaches the wrong data block (\texttt{capsule.md}). Both exist, behind
+  \texttt{mkfs.beamfs --data-csum}, and were off on every measured
+  volume.
+\item \emph{Parity interleaving}, from this report: spread the parity
+  symbols as the data symbols are, so that nine bytes no longer suffice
+  anywhere in the block, and measure the cost. Reconcile the 129-byte
+  burst the geometry gives (\cref{sec:capsule}) with the 139 bytes
+  recorded from the kernel's codec (\texttt{capsule.md}).
+\item \emph{Inode replicas}, studied but not decided
+  (\texttt{burst-resistance.md}): the one structure interleaving cannot
+  protect.
+\item \emph{Read path}, from this report: stop fetching each block twice
+  on a sequential read, and restore on-read repair with exclusive access
+  to the block or by copy-on-write.
+\item \emph{Family~B}: the reserved \texttt{SHADOW\_PARITY} feature,
+  out-of-band parity placed by stride, is the format's path toward the
+  perturbations the scope of \cref{sec:scope} does not claim
+  (\texttt{data-protection-design.md}, \texttt{format-v5.md}).
+\item \emph{Security review}: stage~5 of the project roadmap, syzkaller
+  on the module's system-call surface, afl++ on \texttt{mkfs.beamfs}
+  and on mount-time parsing of corrupted images, a fault-injection
+  harness, and an adversarial review against Family~B
+  (\texttt{roadmap.md}).
+\end{enumerate}
+
+\paragraph*{Measurement}
+\begin{enumerate}
+\item \emph{Fix the injector} (\cref{sec:injector}), then inject what v3
+  did not: multi-bit upsets and bursts up to and beyond eight symbols
+  per codeword, with \texttt{DATA\_CSUM} on; flips on the write path;
+  in-range pointer flips on indirect blocks.
+\item \emph{Equal doses}: a fixed number of flips per filesystem rather
+  than a probability per bio.
+\item \emph{The right reference points}: btrfs with \texttt{DUP} data
+  and ZFS with \texttt{copies=2}, which also return correct data, at
+  their space cost.
+\item \emph{Performance} on target hardware, against ext4 and btrfs.
+\item \emph{The instruments' own records}, from this report: the defects
+  of \cref{sec:selfaudit} corrected in the bench, the kernel's \bfs
+  options recorded by the xfstests harness, the tests the environment
+  declined given what they need, a budget per test set from its known
+  duration, and the frozen aarch64 volume of generic/476 explained.
+\item \emph{A beam campaign} with the hardware record of
+  \cref{sec:memon}: unit provenance and pre-exposure characterisation,
+  dose per unit, a post-exposure test of every unit, a readback of the
+  storage against its pre-exposure image, and the exact parts in the
+  beam.
+\end{enumerate}

@@ -1,0 +1,204 @@
+\section{A parallel with proton irradiation}\label{sec:memon}
+
+Memon et al.~\cite{memon2025tr,memon2025arxiv} exposed three commercial
+compute modules running Linux to 20 to 58\,MeV protons at the AIC-144
+cyclotron of IFJ PAN, Krak\'ow: a Raspberry Pi Zero~2~W, an NXP
+i.MX~8M~Plus board (Yocto Linux 5.15.77, root filesystem ext4 on eMMC)
+and an OrangeCrab FPGA board running a VexRiscv soft core. They record
+133 Linux single-event functional interrupts across the three, and on
+the i.MX~8M~Plus attribute 56\,\% of failures to the filesystem and
+34\,\% to the storage driver, up to ext4 journal aborts and read-only
+remounts~\cite{memon2025arxiv}. The work follows failures of unmodified
+Linux on commercial modules down to the kernel subsystem, across three
+architectures, with failure cross-sections per platform and energy. That
+resolution is what makes it usable by a filesystem designer, and its
+finding that the storage path dominates on the i.MX~8M~Plus is the
+observation \bfs answers. Their result and ours meet at the storage
+path; \cref{tab:memon} sets the two methods side by side.
+
+\begin{table}[t]
+\centering
+\caption{Physical irradiation~\cite{memon2025arxiv} and this report.}
+\label{tab:memon}
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}>{\raggedright\arraybackslash}p{1.3cm}
+  >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+ & Memon et al. & this report \\
+\midrule
+cause & protons, 20 to 58\,MeV & emulated single-bit flips \\
+where & SoC die (and memory, see text) & read-bio buffers of chosen blocks \\
+effects & any: crashes, hangs, driver and filesystem errors &
+  wrong bytes delivered to the filesystem only \\
+filesystem & ext4 on eMMC & \bfs, ext4, ext3, btrfs, squashfs \\
+observable & failure class per run & outcome per read; kernel
+  corrections per decode \\
+dose & fluence per run & flips received per attack \\
+hardware & exposed; replaced by an unexposed unit after each fluence;
+  not reported retested & not exposed; medium verified unaltered after
+  every attack \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The two are complementary. A beam reproduces physics no emulator does:
+controller hangs, crashes, the faults their failure classes record. It
+is costly, and each unit absorbs dose. Emulation injects one mechanism,
+at chosen blocks, with a record of every flip, and leaves the hardware
+untouched; it cannot say what a beam does to a controller. \bfs
+addresses only the bytes a read returns: against a hung eMMC controller
+it can at best fail closed.
+
+\subsection{What a failure class says about the hardware}
+
+A beam acts on hardware; software only reports what follows. Telling
+the two apart is what lets a failure be read as a single-event effect on
+a sound device rather than as the symptom of a damaged one, so we read
+both texts on that point.
+
+Their protocol is careful about cumulative damage. Failures are observed
+through software-visible channels, the kernel log, the system journal
+and user-space signals, logged off the device, and root causes are
+attributed by kernel log forensics; each run ends at its first
+functional interrupt~\cite{memon2025arxiv}. Supply current and voltage
+are logged throughout. After each targeted fluence every device is
+replaced by an identical, previously unexposed copy, so that total
+ionising dose and displacement damage do not bias the
+analysis~\cite{memon2025arxiv}; the journal manuscript replaces devices
+after each test objective and mentions real-time detection of current
+latch-ups~\cite{memon2025tr}, while the arXiv text places single-event
+latch-up, micro-latch-up included, outside its scope. For one memory
+error the authors note that a prior clean run weakens the hypothesis of
+a permanent cell defect~\cite{memon2025arxiv}.
+
+What a failure class cannot say is what the beam did to the hardware. On
+the i.MX~8M~Plus a filesystem error has at least three physical
+readings, which the logs alone do not separate:
+\begin{enumerate}[label=(\roman*)]
+\item a transient upset in the system on chip, in a core, a cache, the
+  storage host controller or a DMA engine, that corrupts data or kernel
+  state in flight and leaves the hardware intact;
+\item data altered on the eMMC itself, by an upset in the eMMC if it was
+  in the beam, or by the system on chip writing corrupted data, which
+  survives a power cycle;
+\item a part degraded by its dose, through ionising dose, displacement
+  damage or a micro-latch-up, that no longer behaves as a fresh one.
+\end{enumerate}
+They call for different remedies, and only the first is a property of
+software running on sound hardware; the second and third are effects on
+hardware that software then reports. The checks that separate them are a readback of the storage
+against its pre-exposure image, a functional and electrical test of each
+unit after its exposure (supply current at rest against its pre-exposure
+value, a memory test), and the dose each unit received. Neither text
+reports them, and neither states where the units came from. Replacing
+units between fluences keeps damage from carrying into the next run; it
+does not show that a unit was intact at the end of its own run, and a
+cross-section computed over all the runs at one energy assumes every
+unit equivalent and unaltered throughout. The modules are commercial parts, not hardened
+ones, and their own tolerance is precisely what is left unmeasured: the
+campaign establishes how often these systems fail under protons, not how
+much the hardware itself withstands, nor, for a given failure, whether
+software met a transient upset or a damaged device.
+
+The beam geometry on the i.MX~8M~Plus is also stated three ways: the
+journal manuscript puts the system on chip and the LPDDR4 memory in the
+beam; the arXiv text puts only the system-on-chip die in the beam
+aperture, external memory and storage outside; its Table~1 lists the
+system on chip, the LPDDR4 and the eMMC as irradiated. Whether the eMMC
+and the memory were exposed changes which readings are possible for
+90\,\% of that board's failures.
+
+This matters to \bfs directly. It covers reading (i) when the upset
+corrupts the bytes a read returns, and reading (ii) when the altered
+bytes stay within its correction capacity; it can do nothing for
+corrupted kernel state or a degraded controller, where it can at best
+fail closed. Which reading dominates is therefore the first question a
+beam campaign on \bfs must answer, and the one this emulation sidesteps
+by construction: here the hardware is not exposed, and the medium was
+read back intact after every attack (\cref{sec:multifs}).
+
+These are reporting points, not evidence against the measurements, which
+we take as they are reported. A beam campaign on \bfs would need them
+settled from the start: unit provenance and pre-exposure
+characterisation, dose per unit, a post-exposure functional and
+electrical test of every unit, a readback of the storage against its
+pre-exposure image, and the exact parts in the beam.
+
+\subsection{The same questions, asked of this report}\label{sec:selfaudit}
+
+The checks we ask of a beam campaign apply to this report too, with the
+instruments in the place of the hardware. Each item says what was
+checked and what was found.
+
+\begin{enumerate}[label=(\alph*)]
+\item \emph{What was measured.} The units here are software, named by
+  their hashes: the \bfs commit, the Yocto layer, the root image and the
+  kernel of each architecture, and \srcTrees{} compiled source trees found
+  identical to the sources the signed manifests list (\apprepro). \bfs
+  is built into both kernels; the module file its recipe also installs
+  is never loaded. The tools are identified by SHA-256 against the
+  repository, not by the version they print (mkfs.beamfs prints
+  \xfsXMkfsVersion, fsck.beamfs \xfsXFsckVersion, the module is 0.1.26).
+  The two kernels differ in one \bfs option: the x86-64 kernel has
+  the tree checker \texttt{CONFIG\_BEAMFS\_DEBUG\_TREE}
+  (\cref{sec:setup}); the aarch64 kernel, on which every attack ran, does
+  not. The x86-64 xfstests sweep ran with more internal checks than the
+  attacks.
+\item \emph{State after exposure.} The attacks leave the medium
+  untouched by construction, and it was read back after every attack:
+  twelve files intact on every filesystem (\cref{sec:multifs}). For the
+  x86-64 sweep, the node ran without a restart: the harness recorded no
+  recovery, and the node's uptime grew by the length of the sweep. Its
+  kernel taint flags read \xfsXtaintStart{} at the start and the same at
+  the end, without the warning or the oops flag: no kernel warning and
+  no oops occurred. The harness clears the kernel log before each test
+  and keeps it after; none of the \xfsXkernLogs{} logs holds a warning or
+  an oops, and in \xfsXtreeLogs{} of them the tree checker reported no
+  lost pointer.
+\item \emph{Dose.} Every flip is in the injector's ring and is matched
+  against the kernel's own record of each correction
+  (\cref{sec:injector}); doses still differ between filesystems
+  (\cref{sec:limits}).
+\item \emph{What the instruments reported.} Our own tools misreported,
+  and each defect was found by reading a raw record against an
+  independent account of the same event.
+  \begin{itemize}
+  \item emufi logs a hook one bio early on this kernel, found against
+    the kernel's correction lines (\cref{sec:injector}).
+  \item The xfstests harness, before 2.4.0, saved a test that xfstests
+    declined as passed, because check counts it in its ``Passed all''
+    line; found against check's own output for each test. Before 2.3.61
+    the per-test output of a sweep was overwritten by the next one. 2.4.0
+    asked the node for a module source version that \bfs does not
+    expose, and recorded an empty field. All three are corrected in
+    2.5.0, and the x86-64 sweep was run again under 2.5.1; the counts of
+    \cref{tab:xfs} are read from check's output, not from the harness's
+    summary.
+  \item The first x86-64 sweep under 2.5.0 ran under the harness's
+    default budget of 1\,900\,s per test, below the \xfsXsoloSeconds\,s
+    generic/476 had taken alone on the same image, and the budget, not
+    \bfs, stopped the test after \xfsSupFullSeconds\,s. That budget was
+    ours to set, and the record did not name it. The sweep was stopped
+    after \xfsSupDone{} tests; the harness now records its budget and
+    every recovery of the node (2.5.1), and the sweep was run again
+    under 14\,400\,s, in which generic/476 passed.
+  \item The bench's record of each btrfs attack has no checksum line in
+    its slice of the kernel log; the cause of the refusal, a
+    \texttt{csum failed} warning on mirror~1, is read from the node's
+    own kernel log, where it appears in each run. The bench's topology
+    report calls \bfs a loaded module while it is built in. Correction
+    lines are rate-limited (\cref{sec:limits}).
+  \end{itemize}
+\item \emph{What the tools did not reach.} squashfs was never attacked:
+  its attack printed no target in any run. The write path received
+  no flip. xfstests declined \xfsXNotrun{} tests on x86-64 and
+  \xfsANotrun{} on aarch64 (\cref{sec:xfstests}); they are untested.
+\end{enumerate}
+
+Two of these defects would have changed a result had the raw records
+not been read: which block each flip hit, and the xfstests counts; a
+third, the budget, would have reported generic/476 as failed on x86-64.
+The
+others change no number in this report; they are listed so that they
+are corrected before the next campaign. All are in the tools; none is
+in the \bfs code measured here.

@@ -1,0 +1,42 @@
+\section{Scope: designed and measured}\label{sec:scope}
+
+The project's data-protection design requires every public artefact to
+state its scope in the following normative words, reproduced verbatim
+(\texttt{Documentation/data-protection-design.md}, section~7, at
+\texttt{\commitBeamfs}; v5.0 names the on-disk format):
+
+\begin{quote}\small
+beamfs v5.0 protects against Family A perturbations (stochastic
+electromagnetic single-bit and multi-bit upsets, aging silicon bit-rot,
+environmental radiation, rowhammer-class single-cell flips). Family B
+perturbations (adversarial bursts exceeding 256 octets per sub-block,
+IEMI at scale, voltage-glitch attacks at scale) are not claimed by v5.0.
+The on-disk format reserves the feature flag bit
+\nolinkurl{BEAMFS_FEATURE_INCOMPAT_SHADOW_PARITY} for a future v5.x
+revision that adds out-of-band parity with stride placement, targeting
+Family B coverage. Coexistence between the two schemes is supported by
+design.
+\end{quote}
+
+That statement is the design scope. The measured scope of this report is
+narrower, and every result below is to be read within it:
+\begin{itemize}
+\item \emph{one mechanism}: single-bit flips in the data of read bios,
+  after the device returned them. The medium is not altered: all
+  \flipsAnalysed{} flips recorded on \bfs are on read bios, and after
+  every attack, injector off, the twelve files of every filesystem read
+  back intact (\cref{sec:multifs});
+\item \emph{one load}: at most two flipped bits per read bio, hence at
+  most two erroneous symbols per codeword per decode
+  (\cref{sec:injector}); multi-bit upsets, bursts and the correction
+  limit of eight symbols are not exercised;
+\item \emph{one configuration}: on-disk format v5 with interleaving,
+  without \texttt{DATA\_CSUM} or \texttt{DATA\_SELFID}, indirect parity
+  in Reed-Solomon mode;
+\item \emph{one kind of target}: the blocks of one 256\,KiB file
+  (its data blocks, plus its indirect block in runs 2 and 3) and,
+  through the injector defect of \cref{sec:injector}, the block that
+  follows each of them.
+\end{itemize}
+Nothing here is a physical irradiation, and nothing here measures
+Family~B.

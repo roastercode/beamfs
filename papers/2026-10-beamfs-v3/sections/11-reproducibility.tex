@@ -1,0 +1,152 @@
+\section*{Appendix: reproducibility and claims register}
+\phantomsection\label{sec:repro}
+\addcontentsline{toc}{section}{Appendix: reproducibility and claims register}
+
+\paragraph*{Measured chain}
+\bfs commit \hash{\commitBeamfsFull}; Yocto layer \texttt{\commitYocto};
+Linux 7.3-rc5, commit \texttt{72d3fcf802c45d00b300f25b848a93c3a2bd7c7e};
+root images SHA-256: x86-64 \hash{\imageXSha}, aarch64 \hash{\imageSha};
+kernels SHA-256: x86-64 \texttt{bzImage} \hash{\kernelXSha}, aarch64
+\texttt{Image} \hash{\kernelASha}; \bfs built in on both
+(\texttt{CONFIG\_BEAMFS\_FS=y}), \texttt{CONFIG\_BEAMFS\_DEBUG\_TREE=y}
+on x86-64 only; \srcTrees{} compiled source trees identical to the
+sources the manifests list; on x86-01, mkfs.beamfs \hash{\xfsXMkfsSha}
+and fsck.beamfs \hash{\xfsXFsckSha}; emufi 0.8.1,
+\texttt{srcversion 5DCD6301EB353B0FADD6FE2}; bench commits
+\texttt{\commitBenchTwo}, \texttt{\commitBenchThree},
+\texttt{\commitBenchFour} for runs 2, 3, 4.
+
+\paragraph*{Signed manifests}
+Each run manifest is signed with the author's key
+\texttt{319A 8EAA 89C7 538A A955 0E8B C35E E212 519E 4857} (EdDSA) and
+verified before extraction.
+\begin{itemize}
+\item run 2, \texttt{\manifestNameTwo}: \hash{\manifestShaTwo}
+\item run 3, \texttt{\manifestNameThree}: \hash{\manifestShaThree}
+\item run 4, \texttt{\manifestNameFour}: \hash{\manifestShaFour}
+\end{itemize}
+
+\paragraph*{xfstests records}
+\begin{itemize}
+\item x86-64 sweep, harness 2.5.1, \texttt{\xfsXtag}: \texttt{meta.txt}
+  \hash{\xfsXmetaSha}, \texttt{verdicts.txt} \hash{\xfsXverdictsSha},
+  check's output for each test, and the kernel log of each test in the
+  harness's trace
+\item aarch64 sweep, harness 2.3.60, \texttt{\sweepAfullName}:
+  \hash{\sweepAfullSha}, and check's output for \xfsAcheckOutputs{} of
+  its tests (\texttt{data/raw/xfstests-evidence})
+\item x86-64 generic/476 alone, harness 2.3.60, \texttt{\sweepXsoloName}: \hash{\sweepXsoloSha}
+\item what the harness read in the aarch64 volumes it froze when it
+  stopped generic/476 (\texttt{data/raw/xfstests-476})
+\item aarch64 generic/476 alone, \texttt{\sweepAsoloName}: \hash{\sweepAsoloSha}
+\item superseded, not counted: x86-64 sweep, harness 2.3.60,
+  \texttt{\sweepXfullName} (\hash{\sweepXfullSha}), saved as 734 passes,
+  its per-test output overwritten; x86-64 sweep, harness 2.5.0,
+  \texttt{\xfsSupTag} (\texttt{verdicts.txt} \hash{\xfsSupVerdictsSha}),
+  stopped after \xfsSupDone{} tests (\texttt{data/raw/xfstests-superseded})
+\end{itemize}
+
+\paragraph*{Snapshot and scripts}
+The whole workspace, \texttt{data/raw} included, is deposited with
+this report, together with what the measurements ran on and what ran
+them: the two root images and kernels above; for each architecture,
+the kernel configuration, the image and license manifests, the Yocto
+configuration with the commit of every layer, and the libvirt
+definition of every node with its QEMU version; and the source trees,
+at the commits used, of the Yocto layer, which carries beamfs,
+\texttt{mkfs.beamfs}, \texttt{fsck.beamfs} and emufi~0.8.1 as built,
+of the xfstests harness, of the bench, beamfs-bench, at the three
+commits it ran from, and of the Gentoo ebuilds that install the
+harness and the bench. The run
+directories, manifests, bench database and verdict files were
+copied once into \texttt{data/raw} (\snapshotFiles{} files) and frozen by
+\texttt{data/raw/SHA256SUMS}, itself of SHA-256
+\hash{\snapshotSha}. Three scripts turn them into the paper:
+\texttt{scripts/extract.py} (\hash{\extractSha}) reads the raw records,
+cross-checks them and writes \texttt{data/derived}; it writes nothing if
+a check fails. \texttt{scripts/tables.py} (\hash{\tablesSha}) writes
+every number and table the text quotes. \texttt{scripts/figures.jl}
+(\hash{\figuresSha}) draws the figures. The commands, from the workspace
+root:
+\begin{lstlisting}
+cd data/raw && sha256sum -c SHA256SUMS && cd ../..
+for m in data/raw/runs/manifest-*.json; do gpg --verify "$m.asc" "$m"; done
+python3 -I scripts/extract.py
+python3 -I scripts/tables.py
+julia scripts/figures.jl
+latexmk -lualatex paper.tex
+\end{lstlisting}
+
+\paragraph*{Claims register}
+Each claim, the record it comes from, and the check that guards it.
+\begin{center}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.6cm}
+  >{\raggedright\arraybackslash}p{4.6cm} >{\raggedright\arraybackslash}X@{}}
+\toprule
+claim & source & check \\
+\midrule
+same \bfs commit, layer and image in runs 2 to 4 & three signed manifests &
+  GPG signature; equality across manifests (\texttt{tables.py}) \\
+same \bfs sources, images and kernels on both architectures & seals,
+  deploy directories, compiled trees (\texttt{identity.txt}) & image
+  equal to seal and to the manifests; trees identical
+  (\texttt{extract.py}) \\
+xfstests: \xfsXPass{} of \xfsXRan{} run on x86-64, \xfsAPass{} of
+  \xfsARan{} on aarch64, declined tests apart & check's output for each
+  test & every verdict read from it; on x86-64 equal to the harness's
+  (\texttt{extract.py}) \\
+most declined tests for features \bfs lacks & reason check gave per
+  test & every reason classified; feature share above half
+  (\texttt{tables.py}) \\
+generic/476: passes in the x86-64 sweep; stopped by the budget in the
+  aarch64 sweep, passes alone there & harness results and records &
+  verdicts; seconds within the budget (\texttt{extract.py},
+  \texttt{tables.py}) \\
+budget of the x86-64 sweep, 14\,400\,s; superseded sweep stopped within
+  1\,900\,s & \texttt{meta.txt} and \texttt{verdicts.txt} of each record &
+  \texttt{budget=} lines; shell's kill report (\texttt{extract.py},
+  \texttt{tables.py}) \\
+frozen aarch64 volumes of 476: pointers beyond the device & harness's
+  reading of the images & phrase present (\texttt{extract.py}) \\
+no warning or oops in the x86-64 sweep, no lost pointer & taint, uptime
+  and recoveries in \texttt{meta.txt}; kernel log of each test & taint
+  equal, warning and oops bits clear, no restart; no such line in any
+  log (\texttt{extract.py}, \texttt{tables.py}) \\
+btrfs refused on a checksum mismatch &
+  \nolinkurl{forensics-beamfs-compute01/dmesg.log} of each run &
+  \texttt{csum failed} lines present; none in the bench records
+  (\texttt{extract.py}) \\
+flips and outcome of every filesystem attack & \texttt{multifs-all-records.txt}
+  of each run & identical to the multifs directory copy; call, flip,
+  read status, integrity and bit counts equal to the bench database \\
+outcome of every cluster attack & \texttt{cluster-records.txt} &
+  outcome recomputed from the record equals the bench verdict \\
+flips of an attack are the last FLIP\_DELTA ring entries & flip ring in
+  each record & ring length equals the running sum of FLIP\_DELTA, every
+  attack \\
+two hooks per bio; pairs within \dtPairMaxMicro\,$\mu$s, others
+  $\geq$\dtOtherMinMilli\,ms & flip ring & no interval between; every
+  flip at $10^{6}$\,ppm attributed \\
+all \kernLines{} kernel correction lines explained & kernel log slice in
+  each record & matching on block and codeword, no line left \\
+at most \kernMaxPerDecode{} symbols per decode, \unionMax{} per codeword
+  per attack & kernel log; reconstructed flips & bound $\leq 8$
+  (\texttt{extract.py}) \\
+indirect block hit at slots \indSlots{}, none in use & reconstructed flips
+  & slot $<$ 57 counted (\texttt{tables.py}) \\
+run 3 pointer flip, slot 33, bit 54 & \nolinkurl{forensics-beamfs-master/dmesg.log}
+  of run 3 & line present four times (\texttt{check-paper.sh}) \\
+\texttt{incompat} \featIncompat{}, \texttt{ro\_compat} 0 & mount line in
+  each kernel log slice & equal in all six \bfs attacks (\texttt{tables.py}) \\
+medium unaltered & verification lines & twelve files intact after every
+  attack, all filesystems; all \bfs flips on reads \\
+module of \moduleLines{} lines & \texttt{git show} at \texttt{\commitBeamfs}
+  & recomputed at each build (\texttt{tables.py}) \\
+\texttt{bio\_advance} leaves the sector of a complete bio & kernel source
+  at \texttt{72d3fcf8} & function body checked (\texttt{check-paper.sh}) \\
+statements on Memon et al. & \cite{memon2025tr,memon2025arxiv}, read
+  2026-10-08 & quoted in the text \\
+\bottomrule
+\end{tabularx}
+\end{center}

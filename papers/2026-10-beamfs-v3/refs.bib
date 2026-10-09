@@ -1,0 +1,194 @@
+% =====================================================================
+% beamfs v3, bibliography
+% Every DOI below is resolved by scripts/check-paper.sh before release.
+% =====================================================================
+
+% Lineage
+@inproceedings{fuchs2015ftrfs,
+  author    = {Christian M. Fuchs and Martin Langer and Carsten Trinitis},
+  title     = {{FTRFS}: A Fault-Tolerant Radiation-Robust Filesystem for Space Use},
+  booktitle = {Architecture of Computing Systems ({ARCS} 2015)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = 9017,
+  pages     = {96--107},
+  publisher = {Springer},
+  year      = 2015,
+  doi       = {10.1007/978-3-319-16086-3_8},
+}
+
+@misc{desbrieres2026ftrfs,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{FTRFS}: Bringing Radiation-Robust Filesystem Principles to Contemporary {Linux}},
+  year   = 2026, month = apr,
+  note   = {Technical Report, Version 1},
+  doi    = {10.5281/zenodo.19824442},
+}
+
+@misc{ftrfsrfc,
+  author       = {Aur{\'e}lien Desbri{\`e}res},
+  title        = {[{RFC} {PATCH} 0/10] {FTRFS}, and replies},
+  howpublished = {linux-fsdevel mailing list},
+  year         = 2026, month = apr,
+  url          = {https://lore.kernel.org/linux-fsdevel/20260414120726.5713-1-aurelien@hackers.camp/T/},
+}
+
+@misc{desbrieres2026beamfsv2,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{BEAMFS} v2: A {Linux} Filesystem with Electromagnetic Resilience and {Reed-Solomon} Recovery},
+  year   = 2026, month = apr,
+  note   = {Technical Report, Version 2},
+  doi    = {10.5281/zenodo.19886192},
+}
+
+@misc{desbrieres2026radfi,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{RadFI} v1, Methodology Paper: An Algebraic Fault Injection Operator
+            for Empirical Filesystem Resilience Validation},
+  year   = 2026, month = apr,
+  doi    = {10.5281/zenodo.19885777},
+}
+
+@misc{bx,
+  author       = {Aur{\'e}lien Desbri{\`e}res},
+  title        = {{beamfs-xfstests}: an {xfstests} harness for {beamfs} on {Yocto} nodes},
+  howpublished = {Software, version 2.5.1, commit b22ecb4},
+  year         = 2026, month = oct,
+  url          = {https://github.com/roastercode/beamfs-xfstests},
+}
+
+@misc{desbrieres2026emufi,
+  author = {Aur{\'e}lien Desbri{\`e}res},
+  title  = {{EMUFI} v1: An ElectroMagnetic Upset Fault Injector for {Linux} Filesystem Resilience Testing},
+  year   = 2026, month = may,
+  note   = {Technical Report, Version 1},
+  doi    = {10.5281/zenodo.20041762},
+}
+
+% Proton irradiation of COTS SoCs running Linux
+@article{memon2025tr,
+  author  = {Saad Memon and Rafal Graczyk and Tomasz Rajkowski and Jan Swakon and
+             Damian Wrobel and Sebastian Kusyk and Seth Roffe and Mike Papadakis},
+  title   = {When {Linux} Meets Radiation: Analyzing Soft Errors in {Linux} on {COTS}
+             {SoCs} under Proton Irradiation},
+  journal = {IEEE Transactions on Reliability},
+  year    = 2025,
+  note    = {Published 2025-09-01; accepted manuscript at the NASA Technical
+             Reports Server, 20250004489},
+  url     = {https://ntrs.nasa.gov/citations/20250004489},
+  urldate = {2026-10-08},
+}
+
+@misc{memon2025arxiv,
+  author       = {Saad Memon and Rafal Graczyk and Tomasz Rajkowski and Jan Swakon and
+                  Damian Wrobel and Sebastian Kusyk and Seth Roffe and Mike Papadakis},
+  title        = {Where {Linux} Breaks Under Radiation: A Cross-Architecture Kernel-Level
+                  Characterization of Proton-Induced Failures in {COTS} {SoCs}},
+  howpublished = {arXiv:2503.03722},
+  year         = 2025,
+  note         = {First posted 2025-03-05 as ``When Radiation Meets Linux''},
+  url          = {https://arxiv.org/abs/2503.03722},
+  urldate      = {2026-10-08},
+}
+
+% Coding theory and kernel facilities
+@article{reed1960,
+  author  = {Irving S. Reed and Gustave Solomon},
+  title   = {Polynomial Codes Over Certain Finite Fields},
+  journal = {Journal of the Society for Industrial and Applied Mathematics},
+  volume  = 8, number = 2, pages = {300--304}, year = 1960,
+  doi     = {10.1137/0108018},
+}
+
+@book{macwilliams1977,
+  author    = {F. J. MacWilliams and N. J. A. Sloane},
+  title     = {The Theory of Error-Correcting Codes},
+  publisher = {North-Holland}, address = {Amsterdam}, year = 1977,
+}
+
+@misc{kernelrslib,
+  author       = {{Linux kernel contributors}},
+  title        = {{lib/reed\_solomon}: generic {Reed-Solomon} encoder and decoder},
+  howpublished = {Linux kernel source tree},
+  year         = 2026,
+  url          = {https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/lib/reed_solomon},
+}
+
+@misc{linux73rc5,
+  author       = {{Linux kernel contributors}},
+  title        = {Linux 7.3-rc5, commit 72d3fcf802c45d00b300f25b848a93c3a2bd7c7e},
+  howpublished = {torvalds/linux.git},
+  year         = 2026,
+  url          = {https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=72d3fcf802c45d00b300f25b848a93c3a2bd7c7e},
+}
+
+@misc{fstests,
+  author       = {{fstests contributors}},
+  title        = {fstests: filesystem regression test suite (xfstests)},
+  howpublished = {xfstests-dev.git},
+  year         = 2026,
+  url          = {https://git.kernel.org/pub/scm/fs/xfs/xfstests-dev.git},
+}
+
+% Soft errors
+@article{baumann2005,
+  author  = {Robert C. Baumann},
+  title   = {Radiation-induced soft errors in advanced semiconductor technologies},
+  journal = {IEEE Transactions on Device and Materials Reliability},
+  volume  = 5, number = 3, pages = {305--316}, year = 2005,
+  doi     = {10.1109/TDMR.2005.853449},
+}
+
+% Implementation
+@misc{beamfsimpl,
+  author       = {Aur{\'e}lien Desbri{\`e}res},
+  title        = {{beamfs} reference implementation, version 0.1.26},
+  howpublished = {\texttt{roastercode/beamfs}, commit \texttt{1bf151d9f530b44d20837db62ccdeaa7a6c7c785}},
+  year         = 2026,
+  url          = {https://github.com/roastercode/beamfs},
+}
+
+% Alternatives that return correct data through redundancy
+@misc{btrfsautorepair,
+  author       = {{btrfs developers}},
+  title        = {Auto-repair on read},
+  howpublished = {btrfs documentation},
+  year         = 2026,
+  url          = {https://btrfs.readthedocs.io/en/latest/Auto-repair.html},
+  urldate      = {2026-10-08},
+}
+
+@misc{ext4csum,
+  author       = {{Linux kernel contributors}},
+  title        = {ext4 Data Structures and Algorithms: Checksums},
+  howpublished = {Linux kernel documentation},
+  year         = 2026,
+  url          = {https://docs.kernel.org/filesystems/ext4/checksums.html},
+  urldate      = {2026-10-08},
+}
+
+@misc{zfsprops,
+  author       = {{OpenZFS developers}},
+  title        = {zfsprops(7): native and user-defined properties of {ZFS} datasets},
+  howpublished = {OpenZFS manual},
+  year         = 2026,
+  url          = {https://manpages.ubuntu.com/manpages/resolute/man7/zfsprops.7.html},
+  urldate      = {2026-10-08},
+}
+
+@misc{btrfscsum,
+  author       = {{btrfs developers}},
+  title        = {Checksumming},
+  howpublished = {btrfs documentation},
+  year         = 2026,
+  url          = {https://btrfs.readthedocs.io/en/latest/Checksumming.html},
+  urldate      = {2026-10-08},
+}
+
+@misc{zfschecksums,
+  author       = {{OpenZFS developers}},
+  title        = {Checksums and Their Use in {ZFS}},
+  howpublished = {OpenZFS documentation},
+  year         = 2026,
+  url          = {https://openzfs.readthedocs.io/en/latest/Basic%20Concepts/Checksums.html},
+  urldate      = {2026-10-08},
+}
