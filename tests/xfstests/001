@@ -1,0 +1,111 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 001
+#
+# A write that allocates a block must not zero the other blocks of its
+# page.
+#
+# A beamfs block holds 3808 bytes of file data, 3824 on a volume made
+# with --no-interleave, and a page holds 4096, so most pages hold the
+# end of one block and the start of the next. When the mapping of a
+# write says its block is new, iomap zeroes the page outside the bytes
+# written unless the page is up to date, and a page that has left the
+# page cache is not: the zeroing then reaches the data of the other
+# block.
+#
+# Two ways to a new block inside a page that holds data:
+#
+#  - an append that starts a block, once the page has left the cache;
+#  - a write into a block that a truncate freed, in a page that still
+#    holds data below the new end of file.
+#
+# Each writes, cycles the mount, writes again, cycles the mount and
+# reads the whole file back.
+#
+. ./common/preamble
+_begin_fstest auto quick rw
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+
+py=$(type -P python3)
+_require_command "$py" python3
+
+# Compare a file with what it should hold: SIZE bytes of 0xab, with
+# OFFSET:LENGTH:BYTE runs laid over them.
+_beamfs_expect()
+{
+	"$py" - "$@" <<'EOF'
+import sys
+
+path, size = sys.argv[1], int(sys.argv[2])
+want = bytearray(b'\xab' * size)
+for spec in sys.argv[3:]:
+    off, length, byte = (int(x, 0) for x in spec.split(':'))
+    want[off:off + length] = bytes([byte]) * length
+try:
+    with open(path, 'rb') as f:
+        got = f.read()
+except OSError as e:
+    print('read failed: %s' % e.strerror)
+    sys.exit(0)
+if got == bytes(want):
+    print('contents match')
+else:
+    n = min(len(got), len(want))
+    first = next((i for i in range(n) if got[i] != want[i]), n)
+    print('contents differ from byte %d: %d bytes read, %d expected'
+          % (first, len(got), len(want)))
+EOF
+}
+
+_run()
+{
+	local opts="$1"
+	local payload=$2
+	local f=$SCRATCH_MNT/file
+
+	echo "== mkfs.beamfs ${opts:-defaults}, $payload bytes a block"
+	_scratch_mkfs $opts >> $seqres.full 2>&1 ||
+		_fail "mkfs.beamfs $opts failed"
+	_scratch_mount
+
+	# Block 0 full to its last byte, then an append that starts
+	# block 1, in the page that holds block 0.
+	echo -n "append after a full block: "
+	$XFS_IO_PROG -f -c "pwrite -q -S 0xab 0 $payload" -c fsync $f
+	_scratch_cycle_mount
+	$XFS_IO_PROG -c "pwrite -q -S 0xcd $payload 32" -c fsync $f
+	_scratch_cycle_mount
+	_beamfs_expect $f $((payload + 32)) $payload:32:0xcd
+	od -A d -t x1 $f >> $seqres.full
+	rm -f $f
+
+	# Blocks 0 to 3, truncated inside block 1: block 2 is freed while
+	# page 1 keeps the end of block 1 below the new size. The write
+	# starts block 2, which begins in page 1.
+	echo -n "write into a block freed by truncate: "
+	$XFS_IO_PROG -f -c "pwrite -q -S 0xab 0 12000" -c fsync $f
+	$XFS_IO_PROG -c "truncate 7000" -c fsync $f
+	_scratch_cycle_mount
+	$XFS_IO_PROG -c "pwrite -q -S 0xcd $((2 * payload)) 16" -c fsync $f
+	_scratch_cycle_mount
+	_beamfs_expect $f $((2 * payload + 16)) \
+		7000:$((2 * payload - 7000)):0 $((2 * payload)):16:0xcd
+	od -A d -t x1 $f >> $seqres.full
+
+	_scratch_unmount
+}
+
+_run "" 3808
+_run "--no-interleave" 3824
+
+# success, all done
+status=0
+exit

@@ -1,0 +1,92 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 005
+#
+# A block written, rewritten in place, then cut by a truncate reads
+# back, in both block layouts, with and without data checksums.
+#
+# With --data-csum a data block carries a CRC32 of its payload and a
+# digest of its owner; on the default layout both sit inside the area
+# the block's Reed-Solomon parity covers, so the parity has to be
+# computed over the descriptor as written. Each step goes to the disk
+# and is read back after a remount.
+#
+. ./common/preamble
+_begin_fstest auto quick rw
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+
+py=$(type -P python3)
+_require_command "$py" python3
+
+# Compare a file with what it should hold: SIZE bytes of 0xab, with
+# OFFSET:LENGTH:BYTE runs laid over them.
+_beamfs_expect()
+{
+	"$py" - "$@" <<'EOF'
+import sys
+
+path, size = sys.argv[1], int(sys.argv[2])
+want = bytearray(b'\xab' * size)
+for spec in sys.argv[3:]:
+    off, length, byte = (int(x, 0) for x in spec.split(':'))
+    want[off:off + length] = bytes([byte]) * length
+try:
+    with open(path, 'rb') as f:
+        got = f.read()
+except OSError as e:
+    print('read failed: %s' % e.strerror)
+    sys.exit(0)
+if got == bytes(want):
+    print('contents match')
+else:
+    n = min(len(got), len(want))
+    first = next((i for i in range(n) if got[i] != want[i]), n)
+    print('contents differ from byte %d: %d bytes read, %d expected'
+          % (first, len(got), len(want)))
+EOF
+}
+
+_run()
+{
+	local opts="$1"
+	local f=$SCRATCH_MNT/file
+
+	echo "== mkfs.beamfs ${opts:-defaults}"
+	_scratch_mkfs $opts >> $seqres.full 2>&1 ||
+		_fail "mkfs.beamfs $opts failed"
+	_scratch_mount
+
+	$XFS_IO_PROG -f -c "pwrite -q -S 0xab 0 64k" -c fsync $f
+	_scratch_cycle_mount
+	echo -n "written: "
+	_beamfs_expect $f 65536
+
+	$XFS_IO_PROG -c "pwrite -q -S 0xcd 1000 100" -c fsync $f
+	_scratch_cycle_mount
+	echo -n "rewritten in place: "
+	_beamfs_expect $f 65536 1000:100:0xcd
+
+	$XFS_IO_PROG -c "truncate 10000" -c fsync $f
+	_scratch_cycle_mount
+	echo -n "truncated: "
+	_beamfs_expect $f 10000 1000:100:0xcd
+
+	_scratch_unmount
+}
+
+_run ""
+_run "--data-csum"
+_run "--no-interleave"
+_run "--no-interleave --data-csum"
+
+# success, all done
+status=0
+exit

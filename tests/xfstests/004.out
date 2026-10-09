@@ -1,0 +1,5 @@
+QA output created by 004
+before remount: dense file: st_blocks covers its size
+before remount: sparse file: st_blocks counts its data and not its holes
+after remount: dense file: st_blocks covers its size
+after remount: sparse file: st_blocks counts its data and not its holes

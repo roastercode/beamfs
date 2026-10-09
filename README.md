@@ -51,6 +51,13 @@ follow.
 
 - This changelog. The README carries its latest entries at the top, and
   the warning on the known defects of 0.1.26 is now one of them.
+- `tests/xfstests/`: tests in the xfstests format, which the Yocto
+  layer installs as `tests/beamfs` (`./check beamfs/001` runs the
+  first). Each checks one of the known defects of 0.1.26: 001 a new
+  block that zeroes the rest of its page, 002 the set-user-ID and
+  set-group-ID bits a write keeps, 003 a link count past 65535, 004
+  `st_blocks`, 005 `--data-csum` on rewritten and truncated blocks,
+  006 symbolic links of every length.
 
 #### Fixed
 

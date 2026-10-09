@@ -1,0 +1,7 @@
+QA output created by 001
+== mkfs.beamfs defaults, 3808 bytes a block
+append after a full block: contents match
+write into a block freed by truncate: contents match
+== mkfs.beamfs --no-interleave, 3824 bytes a block
+append after a full block: contents match
+write into a block freed by truncate: contents match

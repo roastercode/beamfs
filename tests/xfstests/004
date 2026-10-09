@@ -1,0 +1,59 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 004
+#
+# st_blocks counts the blocks a file holds.
+#
+# Tools that look for holes by comparing st_blocks with st_size
+# (tar --sparse, cp --sparse=auto, du) take a file whose st_blocks is
+# 0 for a single hole. A dense file has to show at least its size, a
+# sparse one its data and not its holes, before and after a remount.
+#
+. ./common/preamble
+_begin_fstest auto quick rw
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+
+_scratch_mkfs >> $seqres.full 2>&1
+_scratch_mount
+
+dense=$SCRATCH_MNT/dense
+sparse=$SCRATCH_MNT/sparse
+$XFS_IO_PROG -f -c "pwrite -q 0 1m" -c fsync $dense
+$XFS_IO_PROG -f -c "pwrite -q 10m 4k" -c fsync $sparse
+
+_report()
+{
+	local b s
+
+	stat -c '%n %s %b' $dense $sparse >> $seqres.full
+	b=$(stat -c %b $dense)
+	s=$(stat -c %s $dense)
+	if [ $((b * 512)) -ge $s ]; then
+		echo "$1: dense file: st_blocks covers its size"
+	else
+		echo "$1: dense file: st_blocks $b for $s bytes"
+	fi
+	b=$(stat -c %b $sparse)
+	s=$(stat -c %s $sparse)
+	if [ $b -gt 0 ] && [ $((b * 512)) -lt $s ]; then
+		echo "$1: sparse file: st_blocks counts its data and not its holes"
+	else
+		echo "$1: sparse file: st_blocks $b for $s bytes"
+	fi
+}
+
+_report "before remount"
+_scratch_cycle_mount
+_report "after remount"
+
+# success, all done
+status=0
+exit

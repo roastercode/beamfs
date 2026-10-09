@@ -1,0 +1,77 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 003
+#
+# The link count of an inode stays within what the inode stores.
+#
+# beamfs keeps i_nlink in 16 bits on disk. Without s_max_links the VFS
+# never refuses a link, and a count past 65535 is cut when the inode is
+# written: the names remain and the count read back after a remount is
+# not theirs. With s_max_links set, link(2) fails with EMLINK first.
+#
+. ./common/preamble
+_begin_fstest auto metadata
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+
+py=$(type -P python3)
+_require_command "$py" python3
+
+_scratch_mkfs >> $seqres.full 2>&1
+_scratch_mount
+
+# Up to 65536 links to one file, 1024 to a directory; say how the run
+# ended and whether the count matches the names.
+"$py" - $SCRATCH_MNT <<'EOF'
+import errno
+import os
+import sys
+
+mnt = sys.argv[1]
+target = os.path.join(mnt, 'target')
+open(target, 'w').close()
+made, err, d = 0, None, 0
+while made < 65536 and err is None:
+    dn = os.path.join(mnt, 'd%02d' % d)
+    os.mkdir(dn)
+    for i in range(1024):
+        if made == 65536:
+            break
+        try:
+            os.link(target, os.path.join(dn, 'l%04d' % i))
+        except OSError as e:
+            err = e.errno
+            break
+        made += 1
+    d += 1
+print('links refused with %s' % (errno.errorcode[err] if err else 'nothing'))
+n = os.stat(target).st_nlink
+print('link count matches the names' if n == made + 1 else
+      'link count %d for %d names' % (n, made + 1))
+EOF
+
+_scratch_cycle_mount
+
+"$py" - $SCRATCH_MNT <<'EOF'
+import os
+import sys
+
+mnt = sys.argv[1]
+names = 1 + sum(len(os.listdir(os.path.join(mnt, d)))
+                for d in os.listdir(mnt) if d.startswith('d'))
+n = os.stat(os.path.join(mnt, 'target')).st_nlink
+print('after remount: ' +
+      ('link count matches the names' if n == names else
+       'link count %d for %d names' % (n, names)))
+EOF
+
+# success, all done
+status=0
+exit

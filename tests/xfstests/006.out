@@ -1,0 +1,9 @@
+QA output created by 006
+== mkfs.beamfs defaults
+symlinks checked
+== mkfs.beamfs --data-csum
+symlinks checked
+== mkfs.beamfs --no-interleave
+symlinks checked
+== mkfs.beamfs --no-interleave --data-csum
+symlinks checked

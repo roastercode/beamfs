@@ -1,0 +1,115 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 006
+#
+# A symbolic link reads back and resolves as it was written, at every
+# length the filesystem accepts, in both block layouts, with and
+# without data checksums.
+#
+# A target shorter than 96 bytes is kept in the inode, a longer one in
+# a data block, which holds 3808 bytes on the default layout and 3824
+# with --no-interleave. Each target here is "./" repeated and then a
+# file name, so it resolves whatever its length and is followed as
+# well as read. A length above 3807 bytes may be refused with
+# ENAMETOOLONG, which goes to the full log; any other refusal, and
+# anything read back other than the target, is reported.
+#
+. ./common/preamble
+_begin_fstest auto quick metadata
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+
+py=$(type -P python3)
+_require_command "$py" python3
+
+# make: create the links, recording which exist in $tmp.made.
+# check: read and follow each of them.
+_links()
+{
+	"$py" - "$1" $SCRATCH_MNT $tmp.made <<'EOF'
+import errno
+import os
+import sys
+
+mode, mnt, state = sys.argv[1:4]
+LENGTHS = (1, 2, 3, 60, 95, 96, 97, 200, 1019, 3807, 3808, 3809, 3816,
+           3823, 3824, 3825, 4000, 4095)
+
+def target(n):
+    # n bytes resolving to f when n is odd, to ff when it is even.
+    if n % 2:
+        return './' * (n // 2) + 'f'
+    return './' * (n // 2 - 1) + 'ff'
+
+os.chdir(mnt)
+if mode == 'make':
+    for name in ('f', 'ff'):
+        open(name, 'w').close()
+    made = []
+    for n in LENGTHS:
+        try:
+            os.symlink(target(n), 'l%04d' % n)
+            made.append(n)
+        except OSError as e:
+            if e.errno == errno.ENAMETOOLONG and n > 3807:
+                print('length %d: refused, ENAMETOOLONG' % n,
+                      file=sys.stderr)
+            else:
+                print('length %d: symlink failed: %s' % (n, e.strerror))
+    with open(state, 'w') as s:
+        s.write(' '.join(str(n) for n in made))
+else:
+    with open(state) as s:
+        made = [int(x) for x in s.read().split()]
+    ino = {1: os.stat('f').st_ino, 0: os.stat('ff').st_ino}
+    for n in made:
+        name = 'l%04d' % n
+        try:
+            got = os.readlink(name)
+        except OSError as e:
+            print('length %d: readlink failed: %s' % (n, e.strerror))
+            continue
+        if got != target(n):
+            print('length %d: reads back %d bytes, not its target'
+                  % (n, len(got)))
+            continue
+        try:
+            st = os.stat(name)
+        except OSError as e:
+            print('length %d: does not resolve: %s' % (n, e.strerror))
+            continue
+        if st.st_ino != ino[n % 2]:
+            print('length %d: resolves to another file' % n)
+    print('symlinks checked')
+EOF
+}
+
+_run()
+{
+	local opts="$1"
+
+	echo "== mkfs.beamfs ${opts:-defaults}"
+	_scratch_mkfs $opts >> $seqres.full 2>&1 ||
+		_fail "mkfs.beamfs $opts failed"
+	_scratch_mount
+	_links make 2>> $seqres.full
+	_scratch_cycle_mount
+	_links check
+	_scratch_unmount
+}
+
+_run ""
+_run "--data-csum"
+_run "--no-interleave"
+_run "--no-interleave --data-csum"
+
+# success, all done
+status=0
+exit

@@ -1,0 +1,17 @@
+QA output created by 005
+== mkfs.beamfs defaults
+written: contents match
+rewritten in place: contents match
+truncated: contents match
+== mkfs.beamfs --data-csum
+written: contents match
+rewritten in place: contents match
+truncated: contents match
+== mkfs.beamfs --no-interleave
+written: contents match
+rewritten in place: contents match
+truncated: contents match
+== mkfs.beamfs --no-interleave --data-csum
+written: contents match
+rewritten in place: contents match
+truncated: contents match

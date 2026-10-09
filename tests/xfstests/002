@@ -1,0 +1,58 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Aurelien DESBRIERES.  All Rights Reserved.
+#
+# FS QA Test No. 002
+#
+# A write by a user without CAP_FSETID clears the set-user-ID bit, and
+# the set-group-ID bit when the group may execute the file or the
+# writer is not in the file's group; a write by root clears neither.
+#
+# file_remove_privs() does it for a filesystem that writes through
+# generic_file_write_iter(); one that calls iomap_file_buffered_write()
+# itself has to call it, or file_modified(), on its own. The writes
+# here are pwrite without O_TRUNC: a truncate clears the bits through
+# setattr, which generic/193 exercises.
+#
+. ./common/preamble
+_begin_fstest auto quick perms
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs beamfs
+_require_scratch
+_require_user
+
+_scratch_mkfs >> $seqres.full 2>&1
+_scratch_mount
+
+f=$SCRATCH_MNT/file
+
+# Create the file as root, give it MODE, write 16 bytes into it as WHO,
+# and say what mode it has then.
+_write_as()
+{
+	local mode=$1
+	local who=$2
+
+	rm -f $f
+	$XFS_IO_PROG -f -c "pwrite -q 0 16" $f
+	chmod $mode $f
+	if [ "$who" = root ]; then
+		$XFS_IO_PROG -c "pwrite -q 0 16" $f
+	else
+		_user_do "$XFS_IO_PROG -c 'pwrite -q 0 16' $f"
+	fi
+	echo "mode $mode, written by $who: $(stat -c %a $f)"
+}
+
+_write_as 6777 root
+_write_as 6777 user
+_write_as 2777 user
+_write_as 6666 user
+
+# success, all done
+status=0
+exit
