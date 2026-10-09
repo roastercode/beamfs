@@ -96,10 +96,11 @@ kernel.
 
 - [beamfs-xfstests](https://github.com/roastercode/beamfs-xfstests): the
   xfstests harness used for v3.
-- `yocto-beamfs` (the Yocto layer, which also carries emufi 0.8.1),
-  `beamfs-bench` (the bench) and `beamfs-overlay` (Gentoo ebuilds) are
-  not public; their source trees at the commits the v3 measurements used
-  are in the Zenodo record.
+- [beamfs-bench](https://github.com/roastercode/beamfs-bench): the bench
+  that ran the fault-injection campaign of v3.
+- `yocto-beamfs` (the Yocto layer, which also carries emufi 0.8.1) and
+  `beamfs-overlay` (Gentoo ebuilds) are not public; their source trees
+  at the commits the v3 measurements used are in the Zenodo record.
 
 ## Status
 
