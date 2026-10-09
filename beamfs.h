@@ -191,7 +191,8 @@ struct beamfs_sb_info {
 	 * come out as three contiguous runs instead of one interleaving.
 	 */
 	struct list_head          s_rsv_windows;
-	u32                       s_scheme;   /* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
+	/* enum BEAMFS_DATA_PROTECTION_*, cached from on-disk SB */
+	u32                       s_scheme;
 	u64                       s_feat_incompat; /* cached from on-disk SB at mount time */
 	bool                      s_data_csum;      /* DATA_CSUM active, cached at mount */
 	bool                      s_data_selfid;    /* DATA_SELFID active, cached at mount */
@@ -452,7 +453,7 @@ extern const struct address_space_operations beamfs_aops;
 extern const struct inode_operations beamfs_inline_inode_operations;
 
 /* edac.c */
-void beamfs_rs_init_tables(void);
+int beamfs_rs_init_tables(void);
 void beamfs_rs_exit_tables(void);
 __u32 beamfs_crc32(const void *buf, size_t len);
 

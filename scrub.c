@@ -243,6 +243,92 @@ static bool beamfs_scrub_leaf_current(struct inode *inode, u64 iblock,
 }
 
 /*
+ * Read @phys and copy the whole block into @orig. The buffer is
+ * returned held, or an ERR_PTR when it cannot be read.
+ */
+static struct buffer_head *beamfs_scrub_read_copy(struct super_block *sb,
+						  u64 phys, u8 *orig)
+{
+	struct buffer_head *bh = sb_bread(sb, phys);
+
+	if (!bh)
+		return ERR_PTR(-EIO);
+	/*
+	 * Decode into staging rather than in place: the
+	 * buffer_head is shared through the block device page
+	 * cache, and a scrub has no business modifying what a
+	 * concurrent reader sees.
+	 */
+	/*
+	 * Under the buffer lock, or the snapshot is of two blocks.
+	 *
+	 * Writers hold lock_buffer across memcpy plus
+	 * rs_encode_region -- the payload changes, then the
+	 * sixteen parity fields catch up. Copying without the
+	 * lock catches that halfway and hands the decoder a
+	 * payload from after the write with parity from before,
+	 * which is uncorrectable by construction.
+	 *
+	 * That is what the sweep kept reporting: block 1110
+	 * failing all sixteen codewords while fsck called the
+	 * same volume clean, and blocks 1062 and 1631 failing
+	 * only the subblocks that held data. Twenty such reports
+	 * appeared the moment new data blocks started being
+	 * encoded on allocation, because there were simply more
+	 * writes to collide with.
+	 *
+	 * The lock is held for a 4096-byte copy and nothing
+	 * else. The decode runs afterwards, on the copy.
+	 */
+	lock_buffer(bh);
+	/*
+	 * The whole block, parity included.
+	 *
+	 * decode_rs8 corrects data and parity in place -- it
+	 * writes to both buffers it is given. Copying only the
+	 * payload and pointing the decoder at bh->b_data for the
+	 * parity means every read rewrites the shared buffer's
+	 * parity bytes. A block read often enough degrades until
+	 * it will not decode at all, which is what the sweep
+	 * kept reporting on blocks fsck called clean, and why
+	 * the count grew as the volume got busier.
+	 *
+	 * The data path has done this correctly all along:
+	 * "Decode RS(255,239) subblocks into a private scratch
+	 * buffer, never into bh->b_data."
+	 */
+	memcpy(orig, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
+	unlock_buffer(bh);
+	return bh;
+}
+
+/*
+ * The snapshot beamfs_scrub_check_block decodes: @phys copied into
+ * @orig, under @owner's allocation mutex when there is an owner, and
+ * only while @owner still names @phys at @iblock (-ESTALE
+ * otherwise). The lock and the unlock are unconditional on each path,
+ * so that neither a reader nor a checker has to pair two "if (owner)".
+ */
+static struct buffer_head *beamfs_scrub_snapshot(struct super_block *sb,
+						 u64 phys, struct inode *owner,
+						 u64 iblock, u8 *orig)
+{
+	struct beamfs_inode_info *fi;
+	struct buffer_head *bh;
+
+	if (!owner)
+		return beamfs_scrub_read_copy(sb, phys, orig);
+	fi = BEAMFS_I(owner);
+	mutex_lock(&fi->i_alloc_mutex);
+	if (beamfs_scrub_leaf_current(owner, iblock, phys))
+		bh = beamfs_scrub_read_copy(sb, phys, orig);
+	else
+		bh = ERR_PTR(-ESTALE);
+	mutex_unlock(&fi->i_alloc_mutex);
+	return bh;
+}
+
+/*
  * beamfs_scrub_check_block -- decode one block, report what it found,
  * and repair it while it is still what the caller took it for.
  *
@@ -318,67 +404,10 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 	 * and the snapshot is taken inside it: the block cannot change
 	 * hands between the answer and the copy.
 	 */
-	if (owner) {
-		mutex_lock(&BEAMFS_I(owner)->i_alloc_mutex);
-		if (!beamfs_scrub_leaf_current(owner, iblock, phys)) {
-			mutex_unlock(&BEAMFS_I(owner)->i_alloc_mutex);
-			ret = -ESTALE;
-			goto out_free;
-		}
-	}
-	bh = sb_bread(sb, phys);
-	if (bh) {
-		/*
-		 * Decode into staging rather than in place: the
-		 * buffer_head is shared through the block device page
-		 * cache, and a scrub has no business modifying what a
-		 * concurrent reader sees.
-		 */
-		/*
-		 * Under the buffer lock, or the snapshot is of two blocks.
-		 *
-		 * Writers hold lock_buffer across memcpy plus
-		 * rs_encode_region -- the payload changes, then the
-		 * sixteen parity fields catch up. Copying without the
-		 * lock catches that halfway and hands the decoder a
-		 * payload from after the write with parity from before,
-		 * which is uncorrectable by construction.
-		 *
-		 * That is what the sweep kept reporting: block 1110
-		 * failing all sixteen codewords while fsck called the
-		 * same volume clean, and blocks 1062 and 1631 failing
-		 * only the subblocks that held data. Twenty such reports
-		 * appeared the moment new data blocks started being
-		 * encoded on allocation, because there were simply more
-		 * writes to collide with.
-		 *
-		 * The lock is held for a 4096-byte copy and nothing
-		 * else. The decode runs afterwards, on the copy.
-		 */
-		lock_buffer(bh);
-		/*
-		 * The whole block, parity included.
-		 *
-		 * decode_rs8 corrects data and parity in place -- it
-		 * writes to both buffers it is given. Copying only the
-		 * payload and pointing the decoder at bh->b_data for the
-		 * parity means every read rewrites the shared buffer's
-		 * parity bytes. A block read often enough degrades until
-		 * it will not decode at all, which is what the sweep
-		 * kept reporting on blocks fsck called clean, and why
-		 * the count grew as the volume got busier.
-		 *
-		 * The data path has done this correctly all along:
-		 * "Decode RS(255,239) subblocks into a private scratch
-		 * buffer, never into bh->b_data."
-		 */
-		memcpy(orig, (u8 *)bh->b_data, BEAMFS_BLOCK_SIZE);
-		unlock_buffer(bh);
-	}
-	if (owner)
-		mutex_unlock(&BEAMFS_I(owner)->i_alloc_mutex);
-	if (!bh) {
-		ret = -EIO;
+	bh = beamfs_scrub_snapshot(sb, phys, owner, iblock, orig);
+	if (IS_ERR(bh)) {
+		ret = PTR_ERR(bh);
+		bh = NULL;
 		goto out_free;
 	}
 	memcpy(staging, orig, BEAMFS_BLOCK_SIZE);
@@ -753,6 +782,7 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	struct beamfs_inode   *raw;
 	struct buffer_head    *bh;
 	unsigned long inodes_per_block, block, offset;
+	struct beamfs_inode snap;
 	unsigned int i;
 	umode_t mode;
 
@@ -822,14 +852,11 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 	 * rewritten underneath it is not something the scrubber has to
 	 * follow.
 	 */
-	{
-		struct beamfs_inode snap;
-
-		memcpy(&snap, raw, sizeof(snap));
-		brelse(bh);
-		bh = NULL;
-		raw = &snap;
-		mode = le16_to_cpu(snap.i_mode);
+	memcpy(&snap, raw, sizeof(snap));
+	brelse(bh);
+	bh = NULL;
+	raw = &snap;
+	mode = le16_to_cpu(snap.i_mode);
 
 	/*
 	 * Regular files only. A directory block has its own layout, and a
@@ -910,7 +937,6 @@ static void beamfs_scrub_one_inode(struct super_block *sb, unsigned long ino)
 						inode, i + 1,
 						beamfs_scrub_root_base(i + 1));
 		iput(inode);
-	}
 	}
 }
 

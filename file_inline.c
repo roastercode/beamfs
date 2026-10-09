@@ -42,6 +42,7 @@
 #include "beamfs.h"
 #include "beamfs_trace.h"
 #include <linux/iomap.h>
+#include <linux/refcount.h>
 
 /* ------------------------------------------------------------------------- */
 /* Forward declarations                                                      */
@@ -955,7 +956,6 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						   _e);
 		}
 		mark_buffer_dirty(dbh);
-		brelse(dbh);
 
 		/*
 		 * The direct array is a slot store like any other.
@@ -975,6 +975,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 
 		/* The block, before the pointer that names it. */
 		beamfs_order_before_pointer(dbh);
+		brelse(dbh);
 		fi->i_direct[iblock_logical] = cpu_to_le64(new_block);
 		mark_inode_dirty(inode);
 
@@ -1203,7 +1204,6 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						   _e);
 		}
 		mark_buffer_dirty(dbh);
-		brelse(dbh);
 
 		/*
 		 * Under the buffer lock, like ext2 splicing a branch.
@@ -1226,6 +1226,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			__func__);
 		/* The block, before the pointer that names it. */
 		beamfs_order_before_pointer(dbh);
+		brelse(dbh);
 		ptrs[indirect_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, ibh, inode);
 		unlock_buffer(ibh);
@@ -1677,7 +1678,6 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						   _e);
 		}
 		mark_buffer_dirty(dbh);
-		brelse(dbh);
 
 		/*
 		 * Under the buffer lock, like ext2 splicing a branch.
@@ -1700,6 +1700,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			__func__);
 		/* The block, before the pointer that names it. */
 		beamfs_order_before_pointer(dbh);
+		brelse(dbh);
 		ptrs[l2_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l1bh, inode);
 		unlock_buffer(l1bh);
@@ -2245,7 +2246,6 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 						   _e);
 		}
 		mark_buffer_dirty(dbh);
-		brelse(dbh);
 
 		/*
 		 * Under the buffer lock, like ext2 splicing a branch.
@@ -2268,6 +2268,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			__func__);
 		/* The block, before the pointer that names it. */
 		beamfs_order_before_pointer(dbh);
+		brelse(dbh);
 		ptrs[l3_slot] = cpu_to_le64(new_block);
 		beamfs_ind_parity_update(sb, l2bh, inode);
 		unlock_buffer(l2bh);
@@ -2847,7 +2848,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 {
 	loff_t i_size = i_size_read(inode);
 	u32 payload = beamfs_block_payload(inode->i_sb);
-	u64 b = (u64)pos / payload;
+	u64 b = div_u64((u64)pos, payload);
 	u64 phys = 0;
 	int ret;
 
@@ -2965,7 +2966,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 	 * and disassembly confirmed -- so it keeps the full length.
 	 */
 	if (flags & (IOMAP_REPORT | IOMAP_WRITE)) {
-		u64 in_block = (u64)pos % payload;
+		u64 in_block = (u64)pos - b * payload;
 
 		/*
 		 * payload, not BEAMFS_DATA_INLINE_BYTES.
@@ -3130,7 +3131,7 @@ static int beamfs_inline_iomap_end(struct inode *inode, loff_t pos,
 	 * never filled.
 	 */
 	reached = pos + written;
-	first_unused = ((u64)reached + payload - 1) / payload;
+	first_unused = DIV_ROUND_UP_ULL((u64)reached, payload);
 
 	if ((loff_t)(first_unused * payload) >= pos + length)
 		return 0;
@@ -3149,7 +3150,7 @@ static int beamfs_inline_iomap_end(struct inode *inode, loff_t pos,
 	 */
 	{
 		loff_t size = i_size_read(inode);
-		u64 first_past_eof = ((u64)size + payload - 1) / payload;
+		u64 first_past_eof = DIV_ROUND_UP_ULL((u64)size, payload);
 
 		if (first_unused < first_past_eof)
 			return 0;
@@ -3213,8 +3214,8 @@ static int beamfs_inline_read_folio_range(const struct iomap_iter *iter,
 
 	while (pos < end) {
 		u32    payload      = beamfs_block_payload(inode->i_sb);
-		u64    b            = pos / payload;
-		u32    slice_offset = (u32)(pos % payload);
+		u64    b            = div_u64(pos, payload);
+		u32    slice_offset = (u32)(pos - b * payload);
 		u32    slice_length = (u32)min_t(u64, end - pos,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, pos);
@@ -3424,8 +3425,8 @@ static int beamfs_inline_write_read_folio_range(const struct iomap_iter *iter,
 
 	while (p < end) {
 		u32    payload      = beamfs_block_payload(inode->i_sb);
-		u64    b            = p / payload;
-		u32    slice_offset = (u32)(p % payload);
+		u64    b            = div_u64(p, payload);
+		u32    slice_offset = (u32)(p - b * payload);
 		u32    slice_length = (u32)min_t(u64, end - p,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
@@ -3553,7 +3554,7 @@ struct beamfs_wb_folio {
 	struct inode *inode;
 	struct folio *folio;
 	size_t        len;
-	atomic_t      pending;
+	refcount_t    pending;
 	bool          abandoned;
 };
 
@@ -3597,7 +3598,7 @@ static void beamfs_wb_folio_done(struct beamfs_wb_folio *o)
 {
 	if (!o)
 		return;
-	if (atomic_dec_and_test(&o->pending)) {
+	if (refcount_dec_and_test(&o->pending)) {
 		if (!o->abandoned)
 			iomap_finish_folio_write(o->inode, o->folio, o->len);
 		kfree(o);
@@ -3904,7 +3905,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 		return -ENOMEM;
 
 	/* One block per slice: the first block, then whole blocks. */
-	nslices = (u32)((end - 1) / payload - pos / payload) + 1;
+	nslices = (u32)(div_u64(end - 1, payload) - div_u64(pos, payload)) + 1;
 
 	owner = kzalloc_obj(*owner, GFP_NOFS);
 	if (!owner)
@@ -3912,7 +3913,7 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	owner->inode = inode;
 	owner->folio = folio;
 	owner->len   = len;
-	atomic_set(&owner->pending, (int)nslices);
+	refcount_set(&owner->pending, (int)nslices);
 
 	scratch = beamfs_scratch_get(sb);
 	if (!scratch) {
@@ -3932,8 +3933,8 @@ static ssize_t beamfs_inline_writeback_range(struct iomap_writepage_ctx *wpc,
 	}
 
 	while (p < end) {
-		u64    b            = p / payload;
-		u32    slice_offset = (u32)(p % payload);
+		u64    b            = div_u64(p, payload);
+		u32    slice_offset = (u32)(p - b * payload);
 		u32    slice_length = (u32)min_t(u64, end - p,
 						 payload - slice_offset);
 		size_t folio_off    = offset_in_folio(folio, p);
@@ -4081,7 +4082,7 @@ out:
 		 */
 		owner->abandoned = true;
 		if (nslices > queued &&
-		    atomic_sub_and_test((int)(nslices - queued), &owner->pending))
+		    refcount_sub_and_test((int)(nslices - queued), &owner->pending))
 			kfree(owner);
 		if (!wb->error)
 			wb->error = ret;
@@ -4635,6 +4636,7 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 		if (new_size < old_size) {
 			u64 b_first_freed;
 			u32 tail_off;
+			u32 payload = beamfs_block_payload(inode->i_sb);
 
 			/* Drop pagecache beyond new_size before freeing
 			 * the underlying disk blocks.
@@ -4645,19 +4647,15 @@ static int beamfs_inline_setattr(struct mnt_idmap *idmap,
 			 * Logical block index of the first block to be
 			 * fully freed: ceil(new_size / payload).
 			 */
-			b_first_freed = (new_size +
-					 beamfs_block_payload(inode->i_sb) - 1)
-					/ beamfs_block_payload(inode->i_sb);
+			b_first_freed = DIV_ROUND_UP_ULL((u64)new_size, payload);
 
 			/* If new_size is not block-aligned, the surviving
 			 * last block has stale user bytes beyond new_size.
 			 * Zero them via RMW + RS re-encode.
 			 */
-			tail_off = (u32)(new_size %
-					 beamfs_block_payload(inode->i_sb));
+			div_u64_rem((u64)new_size, payload, &tail_off);
 			if (tail_off != 0 && new_size > 0) {
-				u64 b_last_kept = new_size /
-						  beamfs_block_payload(inode->i_sb);
+				u64 b_last_kept = div_u64((u64)new_size, payload);
 
 				ret = beamfs_inline_zero_tail_block(inode,
 								    b_last_kept,

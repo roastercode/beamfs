@@ -6,7 +6,7 @@
  * Reed-Solomon encoding/decoding uses the kernel's lib/reed_solomon
  * library (RS(255,239) over GF(2^8), primitive polynomial 0x187)
  * rather than a private codec: the library is already in the kernel,
- * well tested, and used by NAND MTD drivers, pstore's RAM backend and
+ * well tested, and used by NAND MTD drivers, the RAM oops logger and
  * dm-verity FEC.
  *
  * RS parameters, as passed to init_rs():
@@ -66,10 +66,13 @@ static u8 * __percpu *beamfs_rs_scratch_pcpu;
 /*
  * beamfs_rs_init_tables - initialize the RS codec
  * Called once from beamfs_init() before any mount.
+ *
+ * Returns 0, or -ENOMEM when the per-CPU codecs cannot be set up.
+ * A CPU left without a scratch buffer is not an error.
  */
-void beamfs_rs_init_tables(void)
+int beamfs_rs_init_tables(void)
 {
-	unsigned int cpu;
+	unsigned int cpu, missing = 0;
 	struct rs_control *ctrl;
 
 	/*
@@ -95,7 +98,7 @@ void beamfs_rs_init_tables(void)
 		free_percpu(beamfs_rs_scratch_pcpu);
 		beamfs_rs_scratch_pcpu = NULL;
 		pr_err("beamfs: failed to alloc per-CPU RS ctrl array\n");
-		return;
+		return -ENOMEM;
 	}
 
 	for_each_possible_cpu(cpu) {
@@ -104,20 +107,31 @@ void beamfs_rs_init_tables(void)
 			pr_err("beamfs: failed to init RS codec for CPU %u\n",
 			       cpu);
 			beamfs_rs_exit_tables();
-			return;
+			return -ENOMEM;
 		}
 		*per_cpu_ptr(beamfs_rs_ctrl_pcpu, cpu) = ctrl;
 		/*
-		 * A failure here is not fatal: the contiguous paths do
-		 * not use it, and the interleaved ones check.
+		 * Not fatal either way: the contiguous paths do not use
+		 * the scratch, and the interleaved ones check for it.
+		 * Without the per-CPU array there is nowhere to keep one.
 		 */
-		*per_cpu_ptr(beamfs_rs_scratch_pcpu, cpu) =
-			kmalloc(BEAMFS_SUBBLOCK_DATA, GFP_KERNEL);
+		if (beamfs_rs_scratch_pcpu) {
+			u8 *scratch = kmalloc(BEAMFS_SUBBLOCK_DATA, GFP_KERNEL);
+
+			if (!scratch)
+				missing++;
+			*per_cpu_ptr(beamfs_rs_scratch_pcpu, cpu) = scratch;
+		}
 	}
+
+	if (missing)
+		pr_warn("beamfs: no RS scratch on %u CPU(s); interleaved blocks will be refused there\n",
+			missing);
 
 	pr_debug("beamfs: RS codec initialized per-CPU (RS(%d,%d), %u CPUs)\n",
 		 BEAMFS_SUBBLOCK_TOTAL, BEAMFS_SUBBLOCK_DATA,
 		 num_possible_cpus());
+	return 0;
 }
 
 /*

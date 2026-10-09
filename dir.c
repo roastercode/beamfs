@@ -79,8 +79,7 @@ static int beamfs_readdir(struct file *file, struct dir_context *ctx)
 		 * out in 3824 -- every entry past the first block off by
 		 * sixteen bytes.
 		 */
-		start_block = (int)(p / BEAMFS_DATA_INLINE_BYTES);
-		start_off   = (u32)(p % BEAMFS_DATA_INLINE_BYTES);
+		start_block = (int)div_u64_rem(p, BEAMFS_DATA_INLINE_BYTES, &start_off);
 	}
 
 	payload = beamfs_scratch_get(sb);

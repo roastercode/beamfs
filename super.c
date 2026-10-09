@@ -1562,8 +1562,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_scratch_pool = mempool_create_kmalloc_pool(32,
 							  BEAMFS_BLOCK_SIZE);
 	if (!sbi->s_scratch_pool) {
-		kfree(sbi);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out_free_fsb;
 	}
 
 	/*
@@ -1579,16 +1579,13 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_sb_rs_staging = kvmalloc(BEAMFS_SB_RS_STAGING_BYTES,
 					GFP_KERNEL);
 	if (!sbi->s_sb_rs_staging) {
-		mempool_destroy(sbi->s_scratch_pool);
-		kfree(sbi);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out_free_fsb;
 	}
 	sbi->s_wb_pages = mempool_create_page_pool(64, 0);
 	if (!sbi->s_wb_pages) {
-		kvfree(sbi->s_sb_rs_staging);
-		mempool_destroy(sbi->s_scratch_pool);
-		kfree(sbi);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out_free_fsb;
 	}
 
 	sb->s_fs_info  = sbi;
@@ -1649,7 +1646,8 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 * unprotected; mkfs.beamfs refuses to format it since the same day.
 	 */
 	if (sbi->s_scheme == BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL) {
-		errorf(fc, "beamfs: scheme INODE_UNIVERSAL (5) keeps no parity for its indirect blocks; not mountable");
+		errorf(fc,
+		       "beamfs: scheme INODE_UNIVERSAL (5) keeps no parity for its indirect blocks; not mountable");
 		ret = -EINVAL;
 		goto out_free_fsb;
 	}
@@ -1866,7 +1864,9 @@ static int __init beamfs_init(void)
 	BUILD_BUG_ON(sizeof(struct beamfs_dir_entry) != 268);
 
 	/* Initialize GF(2^8) tables for RS FEC - once, before any mount */
-	beamfs_rs_init_tables();
+	ret = beamfs_rs_init_tables();
+	if (ret)
+		return ret;
 
 	beamfs_inode_cachep =
 		kmem_cache_create("beamfs_inode_cache",
@@ -1877,14 +1877,14 @@ static int __init beamfs_init(void)
 
 	if (!beamfs_inode_cachep) {
 		pr_err("beamfs: failed to create inode cache\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out_rs;
 	}
 
 	ret = register_filesystem(&beamfs_fs_type);
 	if (ret) {
 		pr_err("beamfs: failed to register filesystem: %d\n", ret);
-		kmem_cache_destroy(beamfs_inode_cachep);
-		return ret;
+		goto out_cache;
 	}
 
 	/*
@@ -1897,6 +1897,12 @@ static int __init beamfs_init(void)
 
 	pr_info("beamfs: module loaded (beamfs - resilient filesystem)\n");
 	return 0;
+
+out_cache:
+	kmem_cache_destroy(beamfs_inode_cachep);
+out_rs:
+	beamfs_rs_exit_tables();
+	return ret;
 }
 
 static void __exit beamfs_exit(void)

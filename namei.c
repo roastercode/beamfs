@@ -482,7 +482,7 @@ place_it:
 				memset(rest, 0, BEAMFS_DIRENT_HDR_LEN);
 				rest->d_rec_len = cpu_to_le16(rec - want);
 			} else {
-				keep = rec > want ? rec : want;
+				keep = max(rec, want);
 			}
 
 			memset(de, 0, BEAMFS_DIRENT_HDR_LEN);

@@ -111,8 +111,8 @@ bool beamfs_dirent_valid(const struct beamfs_dir_entry *de, u32 off)
 		return false;
 	if (off + rec > BEAMFS_DATA_INLINE_BYTES)
 		return false;
-	if (de->d_name_len > BEAMFS_MAX_FILENAME)
-		return false;
+	/* d_name_len is a u8: every length it can hold is allowed. */
+	BUILD_BUG_ON(BEAMFS_MAX_FILENAME < U8_MAX);
 	if (BEAMFS_DIRENT_HDR_LEN + de->d_name_len > rec)
 		return false;
 	return true;

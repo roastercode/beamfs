@@ -32,11 +32,43 @@ follow.
 - `u8` and `u16` rather than `uint8_t` and `uint16_t`, `!p` rather than
   `p == NULL`, and `le16_add_cpu`, as checkpatch --strict asks; no
   change in behaviour.
+- `refcount_t` rather than `atomic_t` for the slices of a folio still
+  under writeback, as coccicheck asks: a count that would go below zero
+  warns instead of wrapping.
+- The scrubber takes its snapshot of a block in a function of its own,
+  where the allocation mutex is taken and released unconditionally, and
+  a brace block that ran to the end of `beamfs_scrub_one_inode` is gone;
+  no change in behaviour.
+- A test that could never be true (an 8-bit name length compared with
+  255) becomes a build-time check, `max()` replaces a spelled-out
+  maximum, and two lines past 100 columns are reflowed; no change in
+  behaviour.
 
 #### Added
 
 - This changelog. The README carries its latest entries at the top, and
   the warning on the known defects of 0.1.26 is now one of them.
+
+#### Fixed
+
+- The module links on i386: 64-bit divisions go through `div_u64`,
+  `div_u64_rem` and `DIV_ROUND_UP_ULL` (before, `__udivdi3` and
+  `__divdi3` were left undefined).
+- With `CONFIG_BEAMFS_ORDERED_META=y`, a newly allocated data block was
+  written and waited on after its buffer had been released, in four
+  places; the buffer is now released afterwards. Without that option
+  nothing changes.
+- A mount that runs out of memory while setting up the scratch pool,
+  the superblock RS staging or the writeback page pool no longer leaks
+  the superblock buffer, its copy and the pending RS events.
+- When the per-CPU scratch array cannot be allocated at module load, a
+  case meant to be survivable, the codec setup no longer writes through
+  a NULL per-CPU pointer; each scratch allocation is tested, and the
+  CPUs left without one are reported once.
+- The module load fails with `-ENOMEM` when the Reed-Solomon codec
+  cannot be set up, instead of registering a filesystem whose every
+  encode and decode returns `-EINVAL`; a load that fails after the
+  codec is set up releases it.
 
 ### [0.1.26] - 2026-10-02
 
