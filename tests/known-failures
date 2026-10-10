@@ -10,5 +10,4 @@
 # beamfs-xfstests 2.5.2: sweep beamfs, record sweep-1791622355.
 beamfs/001 a write into a block a truncate freed zeroes the rest of its page (contents differ from byte 4096); tests/xfstests/001
 beamfs/004 st_blocks reads 0 after a remount, for a dense file as for a sparse one; tests/xfstests/004
-beamfs/005 with --data-csum a written block reads back as EIO (data_csum bad descriptor); tests/xfstests/005
 beamfs/006 symbolic links of 3809 to 3824 bytes read back 3808 bytes, and with --data-csum long ones fail their check; tests/xfstests/006

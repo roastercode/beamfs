@@ -91,6 +91,12 @@ follow.
   `link(2)`, `mkdir(2)` and `rename(2)` fail with `EMLINK`, where the
   count used to be cut when the inode was written
   (`tests/xfstests/003`).
+- With `--data-csum`, a block written back or cut by a truncate reads
+  back: its descriptor is stamped before the block's parity is
+  computed, where a capsule had it stamped after and the next read put
+  back what the page held. Without a descriptor to keep, its sixteen
+  bytes are zeroed instead of carrying kernel memory to the medium
+  (`tests/xfstests/005`).
 
 ### [0.1.26] - 2026-10-02
 

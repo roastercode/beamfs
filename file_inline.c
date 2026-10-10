@@ -2364,6 +2364,13 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 	u32 covered = beamfs_block_payload(sb);
 
 	memset(block + BEAMFS_DATA_INLINE_TOTAL, 0, BEAMFS_DATA_INLINE_PAD);
+	/*
+	 * The descriptor whole, whatever is stamped in it below: in a
+	 * capsule it is coded data, and left as the page held it, it
+	 * carried sixteen bytes of kernel memory to the medium.
+	 */
+	memset(block + doff, 0,
+	       BEAMFS_DATA_CSUM_DESC_BYTES + BEAMFS_DATA_SELFID_BYTES);
 	if (sbi->s_data_csum) {
 		u32 crc = beamfs_crc32(payload, covered);
 
@@ -3707,6 +3714,13 @@ static int beamfs_wb_queue(struct beamfs_wb *wb, struct inode *inode,
 	block = page_address(page);
 
 	beamfs_lay_data_payload(sb, block, payload);
+	/*
+	 * The descriptor before the parity. In a capsule it is coded
+	 * data: stamped after the seal, the next read corrected it back
+	 * to what the page held when the parity was computed.
+	 */
+	beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), block, payload,
+				     inode->i_ino, b);
 	ret = beamfs_seal_data_block(sb, block);
 	if (ret < 0) {
 		pr_err_ratelimited("beamfs/inline: writeback: rs_encode_region failed for block %llu: %d\n",
@@ -3714,8 +3728,6 @@ static int beamfs_wb_queue(struct beamfs_wb *wb, struct inode *inode,
 		mempool_free(page, BEAMFS_SB(sb)->s_wb_pages);
 		return ret;
 	}
-	beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), block, payload,
-				     inode->i_ino, b);
 
 	beamfs_wb_sync_alias(sb, phys, block);
 
@@ -4591,6 +4603,10 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 	       BEAMFS_DATA_INLINE_BYTES - zero_offset);
 
 	beamfs_lay_data_payload(sb, (u8 *)bh->b_data, scratch);
+	/* The descriptor before the parity, as in beamfs_wb_queue. */
+	beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
+				     (u8 *)bh->b_data, scratch,
+				     (unsigned long long)inode->i_ino, b);
 
 	ret = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
 	if (ret < 0) {
@@ -4601,10 +4617,6 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
 		beamfs_scratch_put(sb, scratch);
 		return ret;
 	}
-
-	beamfs_inline_stamp_tail_pad(BEAMFS_SB(inode->i_sb),
-				     (u8 *)bh->b_data, scratch,
-				     (unsigned long long)inode->i_ino, b);
 
 	mark_buffer_dirty(bh);
 	unlock_buffer(bh);
