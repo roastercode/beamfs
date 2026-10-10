@@ -846,6 +846,14 @@ u64 beamfs_alloc_block(struct super_block *sb, struct inode *owner)
 	spin_unlock(&sbi->s_lock);
 
 	/*
+	 * st_blocks, once beamfs_getattr has counted the tree. Before
+	 * that the count is wholly the tree's, and a free could take it
+	 * below zero.
+	 */
+	if (owner && BEAMFS_I(owner)->i_blocks_counted)
+		inode_add_bytes(owner, BEAMFS_BLOCK_SIZE);
+
+	/*
 	 * Rebuild the on-disk bitmap block from s_block_bitmap. Outside
 	 * s_lock, because beamfs_write_bitmap_block takes the buffer lock,
 	 * which can sleep.
@@ -977,6 +985,10 @@ void beamfs_free_block(struct super_block *sb, u64 block, struct inode *owner)
 	beamfs_dirty_super(sbi);
 
 	spin_unlock(&sbi->s_lock);
+
+	/* st_blocks: see beamfs_alloc_block. */
+	if (owner && BEAMFS_I(owner)->i_blocks_counted)
+		inode_sub_bytes(owner, BEAMFS_BLOCK_SIZE);
 
 	/*
 	 * A freed block's pointer may legitimately vanish, and a freed

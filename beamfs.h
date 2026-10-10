@@ -294,6 +294,13 @@ struct beamfs_inode_info {
 	__le64          i_dindirect;
 	__le64          i_tindirect;
 	__u32           i_flags;
+	/*
+	 * Whether i_blocks holds the count of the blocks the inode has on
+	 * the medium. The inode does not store it: beamfs_getattr takes it
+	 * from the tree the first time, beamfs_alloc_block and
+	 * beamfs_free_block keep it from then on.
+	 */
+	bool            i_blocks_counted;
 	struct mutex    i_alloc_mutex;  /* serialize lookup_or_alloc_phys */
 	/*
 	 * This inode's reservation window, [i_rsv_start, i_rsv_end), on
@@ -341,6 +348,7 @@ int  beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 void beamfs_scrub_stop(struct super_block *sb);
 
 /* file_inline.c */
+int  beamfs_count_blocks(struct inode *inode, u64 *count);
 int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			       u64 *phys_out);
 
@@ -427,6 +435,9 @@ extern const struct file_operations          beamfs_inline_file_operations;
 
 /* inode.c */
 struct inode *beamfs_iget(struct super_block *sb, unsigned long ino);
+int beamfs_getattr(struct mnt_idmap *idmap, const struct path *path,
+		   struct kstat *stat, u32 request_mask,
+		   unsigned int query_flags);
 /* namei.c */
 struct inode *beamfs_new_inode(struct inode *dir, umode_t mode);
 

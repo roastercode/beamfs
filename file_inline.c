@@ -154,6 +154,104 @@ static int beamfs_check_intermediate_block(struct super_block *sb,
 	return 0;
 }
 
+/*
+ * Count a block of pointers and what it points to, @depth levels down:
+ * 1 for a block of pointers to data, 2 and 3 for the double and triple
+ * trees. The pointers are copied out under the buffer lock, as the
+ * allocator installs them under it, and the children walked after.
+ */
+static int beamfs_count_tree(struct inode *inode, u64 blk,
+			     unsigned int depth, u64 *count)
+{
+	struct super_block *sb = inode->i_sb;
+	struct buffer_head *bh;
+	__le64 *ptrs;
+	u64 *kids = NULL;
+	unsigned int i, n = 0;
+	int ret;
+
+	ret = beamfs_check_intermediate_block(sb, blk, inode->i_ino, 0,
+					      "indirect");
+	if (ret)
+		return ret;
+	bh = sb_bread(sb, blk);
+	if (!bh)
+		return -EIO;
+	if (beamfs_ind_parity_verify(sb, bh)) {
+		brelse(bh);
+		return -EUCLEAN;
+	}
+	if (depth > 1) {
+		kids = kmalloc_array(BEAMFS_INDIRECT_PTRS, sizeof(*kids),
+				     GFP_NOFS);
+		if (!kids) {
+			brelse(bh);
+			return -ENOMEM;
+		}
+	}
+
+	(*count)++;
+	lock_buffer(bh);
+	ptrs = (__le64 *)bh->b_data;
+	for (i = 0; i < BEAMFS_INDIRECT_PTRS; i++) {
+		u64 p = le64_to_cpu(ptrs[i]);
+
+		if (!p)
+			continue;
+		if (kids)
+			kids[n++] = p;
+		else
+			(*count)++;
+	}
+	unlock_buffer(bh);
+	brelse(bh);
+
+	for (i = 0; i < n && !ret; i++)
+		ret = beamfs_count_tree(inode, kids[i], depth - 1, count);
+	kfree(kids);
+	return ret;
+}
+
+/*
+ * beamfs_count_blocks -- the blocks @inode holds on the medium, data and
+ * indirect alike, read from its tree. The inode does not store the
+ * count; beamfs_getattr takes it from here once. A short symlink target
+ * lives in i_direct[] as bytes, not pointers, and a long one is a block.
+ *
+ * Returns 0, or the error of a block of pointers that failed its check;
+ * *count then holds what was counted before it.
+ */
+int beamfs_count_blocks(struct inode *inode, u64 *count)
+{
+	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	u64 roots[3];
+	unsigned int i;
+	int ret = 0;
+
+	*count = 0;
+	if (S_ISLNK(inode->i_mode)) {
+		if (i_size_read(inode) >= (loff_t)sizeof(fi->i_direct) &&
+		    fi->i_direct[0])
+			*count = 1;
+		return 0;
+	}
+	if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode))
+		return 0;
+
+	for (i = 0; i < BEAMFS_DIRECT_BLOCKS; i++) {
+		if (fi->i_direct[i])
+			(*count)++;
+	}
+	roots[0] = le64_to_cpu(fi->i_indirect);
+	roots[1] = le64_to_cpu(fi->i_dindirect);
+	roots[2] = le64_to_cpu(fi->i_tindirect);
+	for (i = 0; i < ARRAY_SIZE(roots) && !ret; i++) {
+		if (roots[i])
+			ret = beamfs_count_tree(inode, roots[i], i + 1, count);
+	}
+	return ret;
+}
+
 int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 			      u64 *phys_out)
 {
@@ -4808,7 +4906,7 @@ static int beamfs_inline_fiemap(struct inode *inode,
 }
 
 const struct inode_operations beamfs_inline_inode_operations = {
-	.getattr        = simple_getattr,
+	.getattr        = beamfs_getattr,
 	.setattr        = beamfs_inline_setattr,
 	.fiemap         = beamfs_inline_fiemap,
 };

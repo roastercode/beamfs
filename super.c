@@ -42,6 +42,7 @@ static struct inode *beamfs_alloc_inode(struct super_block *sb)
 	fi->i_dindirect = 0;
 	fi->i_tindirect = 0;
 	fi->i_flags     = 0;
+	fi->i_blocks_counted = false;
 	mmb_init(&fi->i_metadata_bhs, &fi->vfs_inode.i_data);
 	mutex_init(&fi->i_alloc_mutex);
 	beamfs_rsv_init(fi);

@@ -1250,7 +1250,7 @@ static const char *beamfs_get_link(struct dentry *dentry,
 }
 
 const struct inode_operations beamfs_symlink_inode_operations = {
-	.getattr  = simple_getattr,
+	.getattr  = beamfs_getattr,
 	.get_link = beamfs_get_link,
 };
 
@@ -1513,4 +1513,5 @@ const struct inode_operations beamfs_dir_inode_operations = {
 	.link    = beamfs_link,
 	.symlink = beamfs_symlink,
 	.rename  = beamfs_rename,
+	.getattr = beamfs_getattr,
 };

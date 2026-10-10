@@ -106,6 +106,11 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   iomap as `IOMAP_F_NEW`, which made it zero the page outside the
   bytes written, data of the block before included
   (`tests/xfstests/001`).
+- `st_blocks` counts the blocks a file, a directory or a symbolic link
+  holds on the medium, data and indirect alike: taken from the tree on
+  the first `stat` and kept up to date by the allocator, where the
+  page cache was counted and a file read 0 after a mount
+  (`tests/xfstests/004`).
 
 ## [0.1.26] - 2026-10-02
 
