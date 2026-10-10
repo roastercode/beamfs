@@ -83,6 +83,9 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   cannot be set up, instead of registering a filesystem whose every
   encode and decode returns `-EINVAL`; a load that fails after the
   codec is set up releases it.
+- A write by a user without `CAP_FSETID` clears the set-user-ID and
+  set-group-ID bits, as `generic_file_write_iter` does: the write path
+  calls `kiocb_modified` (`tests/xfstests/002`).
 
 ## [0.1.26] - 2026-10-02
 

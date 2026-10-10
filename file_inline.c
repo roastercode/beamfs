@@ -4192,6 +4192,16 @@ static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 	if (ret <= 0)
 		goto out;
 
+	/*
+	 * The set-user-ID and set-group-ID bits, and the times, before
+	 * the data. generic_file_write_iter does this through
+	 * file_remove_privs; iomap_file_buffered_write sits below it and
+	 * leaves it to the caller, as XFS does in xfs_file_write_checks.
+	 */
+	ret = kiocb_modified(iocb);
+	if (ret)
+		goto out;
+
 	before = i_size_read(inode);
 
 	ret = iomap_file_buffered_write(iocb, from, &beamfs_inline_iomap_ops,
