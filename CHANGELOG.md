@@ -86,6 +86,10 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
 - A write by a user without `CAP_FSETID` clears the set-user-ID and
   set-group-ID bits, as `generic_file_write_iter` does: the write path
   calls `kiocb_modified` (`tests/xfstests/002`).
+- The link count stops at 65535, what the inode stores: past it
+  `link(2)`, `mkdir(2)` and `rename(2)` fail with `EMLINK`, where the
+  count used to be cut when the inode was written
+  (`tests/xfstests/003`).
 
 ## [0.1.26] - 2026-10-02
 

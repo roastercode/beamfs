@@ -1599,6 +1599,14 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 */
 	sb->s_maxbytes = (loff_t)BEAMFS_MAX_FILE_SIZE;
 
+	/*
+	 * i_nlink is 16 bits in struct beamfs_inode. Without this the VFS
+	 * never refuses a link and the count is cut when the inode is
+	 * written; with it link(2), mkdir(2) and rename(2) fail with
+	 * EMLINK first.
+	 */
+	sb->s_max_links = U16_MAX;
+
 	/* Read root inode (inode 1) */
 	root_inode = beamfs_iget(sb, 1);
 	if (IS_ERR(root_inode)) {
