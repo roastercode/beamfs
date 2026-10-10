@@ -57,6 +57,11 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   set-group-ID bits a write keeps, 003 a link count past 65535, 004
   `st_blocks`, 005 `--data-csum` on rewritten and truncated blocks,
   006 symbolic links of every length.
+- `tests/known-failures`: the tests that fail on a known defect of
+  0.1.26, each with its defect and its reproducer, as measured on
+  7.3-rc6. beamfs-xfstests reads it: a sweep is clean only when every
+  failure it finds is listed there and every test listed still fails,
+  so the line of a test goes with the fix of its defect.
 
 ### Fixed
 

@@ -1,0 +1,16 @@
+# Tests that fail on a known defect of beamfs, one per line: the test,
+# then its defect and the test that reproduces it; # starts a comment.
+#
+# beamfs-xfstests reads this file. A sweep is clean only when every
+# failure it finds is listed here (2.5.2 and later) and every test
+# listed here still fails (2.5.3 and later): the line of a test goes
+# with the commit that fixes its defect.
+#
+# Measured on 0.1.26 (35e336a), Linux 7.3-rc6, x86-01, with
+# beamfs-xfstests 2.5.2: sweep beamfs, record sweep-1791622355.
+beamfs/001 a write into a block a truncate freed zeroes the rest of its page (contents differ from byte 4096); tests/xfstests/001
+beamfs/002 a write by a user without CAP_FSETID keeps the set-user-ID and set-group-ID bits; tests/xfstests/002
+beamfs/003 link(2) is never refused and a count past 65535 is cut on disk (1 for 65537 names after a remount); tests/xfstests/003
+beamfs/004 st_blocks reads 0 after a remount, for a dense file as for a sparse one; tests/xfstests/004
+beamfs/005 with --data-csum a written block reads back as EIO (data_csum bad descriptor); tests/xfstests/005
+beamfs/006 symbolic links of 3809 to 3824 bytes read back 3808 bytes, and with --data-csum long ones fail their check; tests/xfstests/006
