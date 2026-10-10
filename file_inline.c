@@ -2858,6 +2858,21 @@ int beamfs_inline_decode_symlink(struct super_block *sb,
 /* the bytes on disk: they are what RS decoding produces from them.          */
 /* ------------------------------------------------------------------------- */
 
+/*
+ * A mapping iomap_begin allocated, for iomap_end to give back if the
+ * write stops short of it.
+ *
+ * Not IOMAP_F_NEW. To iomap that flag means the folio range is new:
+ * __iomap_write_begin zeroes it outside the bytes written instead of
+ * reading it (iomap_block_needs_zeroing). A folio here holds the end
+ * of one block and the start of the next, so a write starting a fresh
+ * block zeroed the data of the block before it in the same folio.
+ * Without the flag iomap reads the folio through
+ * beamfs_inline_write_read_folio_range, which finds the fresh block
+ * zeroed in the buffer cache.
+ */
+#define BEAMFS_IOMAP_F_FRESH	IOMAP_F_PRIVATE
+
 static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 				     loff_t length, unsigned int flags,
 				     struct iomap *iomap,
@@ -3064,7 +3079,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		mutex_unlock(&fi->i_alloc_mutex);
 
 		/*
-		 * IOMAP_F_NEW: this mapping did not exist before the call.
+		 * BEAMFS_IOMAP_F_FRESH: this mapping did not exist before the call.
 		 *
 		 * iomap_end may only give back what this call created. A
 		 * block the file already owned belongs to it whether or
@@ -3072,7 +3087,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
 		 * freeing that would lose data nobody asked to lose.
 		 */
 		if (ret == 0 && fresh)
-			iomap->flags |= IOMAP_F_NEW;
+			iomap->flags |= BEAMFS_IOMAP_F_FRESH;
 	} else {
 		ret = beamfs_inline_lookup_phys(inode, b, &phys);
 	}
@@ -3122,7 +3137,7 @@ static int beamfs_inline_iomap_begin(struct inode *inode, loff_t pos,
  * ends with ten such blocks in two runs, the longer of nine: one
  * write's worth.
  *
- * Only what this mapping created, which is what IOMAP_F_NEW says. A
+ * Only what this mapping created, which BEAMFS_IOMAP_F_FRESH says. A
  * block the file already owned belongs to it whether or not this write
  * reached it, and freeing that loses data nobody asked to lose.
  *
@@ -3137,7 +3152,7 @@ static int beamfs_inline_iomap_end(struct inode *inode, loff_t pos,
 	u64 first_unused;
 	loff_t reached;
 
-	if (!(flags & IOMAP_WRITE) || !(iomap->flags & IOMAP_F_NEW))
+	if (!(flags & IOMAP_WRITE) || !(iomap->flags & BEAMFS_IOMAP_F_FRESH))
 		return 0;
 	if (written < 0 || written >= length)
 		return 0;

@@ -8,5 +8,4 @@
 #
 # Measured on 0.1.26 (35e336a), Linux 7.3-rc6, x86-01, with
 # beamfs-xfstests 2.5.2: sweep beamfs, record sweep-1791622355.
-beamfs/001 a write into a block a truncate freed zeroes the rest of its page (contents differ from byte 4096); tests/xfstests/001
 beamfs/004 st_blocks reads 0 after a remount, for a dense file as for a sparse one; tests/xfstests/004

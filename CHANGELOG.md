@@ -101,6 +101,11 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   `ENAMETOOLONG`, where 3809 to 3824 bytes were cut to 3808. A long
   target carries its descriptor, so it passes its check with
   `--data-csum` (`tests/xfstests/006`).
+- A write that starts a block inside a page no longer zeroes the rest
+  of that page: a freshly allocated block is no longer reported to
+  iomap as `IOMAP_F_NEW`, which made it zero the page outside the
+  bytes written, data of the block before included
+  (`tests/xfstests/001`).
 
 ## [0.1.26] - 2026-10-02
 
