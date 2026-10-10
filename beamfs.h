@@ -298,7 +298,8 @@ struct beamfs_inode_info {
 	 * Whether i_blocks holds the count of the blocks the inode has on
 	 * the medium. The inode does not store it: beamfs_getattr takes it
 	 * from the tree the first time, beamfs_alloc_block and
-	 * beamfs_free_block keep it from then on.
+	 * beamfs_free_block keep it from then on. Set under i_alloc_mutex,
+	 * with a release; beamfs_getattr reads it without, with an acquire.
 	 */
 	bool            i_blocks_counted;
 	struct mutex    i_alloc_mutex;  /* serialize lookup_or_alloc_phys */

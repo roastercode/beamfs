@@ -109,9 +109,10 @@ follow.
   (`tests/xfstests/001`).
 - `st_blocks` counts the blocks a file, a directory or a symbolic link
   holds on the medium, data and indirect alike: taken from the tree on
-  the first `stat` and kept up to date by the allocator, where the
-  page cache was counted and a file read 0 after a mount
-  (`tests/xfstests/004`).
+  the first `stat`, under the inode's allocation mutex, which a
+  directory now grows under as a file does, and kept up to date by
+  the allocator, where the page cache was counted and a file read 0
+  after a mount (`tests/xfstests/004`).
 
 ### [0.1.26] - 2026-10-02
 

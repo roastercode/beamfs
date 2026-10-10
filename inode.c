@@ -327,15 +327,20 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
  *
  * st_blocks is the count of blocks the inode holds on the medium, data
  * and indirect alike. The inode does not store it, so it is taken from
- * the tree the first time it is asked for, with the inode lock and the
- * allocation mutex held so that the tree stands still, and
- * beamfs_alloc_block and beamfs_free_block keep it from there. Regular
- * files and symlinks used simple_getattr, which counts the pages in the
- * page cache: 0 for any file after a mount.
+ * the tree the first time it is asked for, and beamfs_alloc_block and
+ * beamfs_free_block keep it from there. Regular files and symlinks used
+ * simple_getattr, which counts the pages in the page cache: 0 for any
+ * file after a mount.
  *
- * A count stopped by a block of pointers that failed its check is
- * reported as it stands and taken again on the next call; the block
- * was reported where it failed.
+ * The count is taken under the allocation mutex alone, which every path
+ * that installs or frees a block of the inode holds, a directory's
+ * included. Not the inode lock: ->getattr is called without it, and a
+ * caller of vfs_getattr that holds it would wait on itself here.
+ *
+ * A count stopped by a block of pointers that failed its check is not
+ * kept, and is taken again on the next call; the block was reported
+ * where it failed. Until a count is kept, the mask statx returns leaves
+ * STATX_BLOCKS out rather than vouch for the number.
  */
 int beamfs_getattr(struct mnt_idmap *idmap, const struct path *path,
 		   struct kstat *stat, u32 request_mask,
@@ -343,22 +348,28 @@ int beamfs_getattr(struct mnt_idmap *idmap, const struct path *path,
 {
 	struct inode *inode = d_inode(path->dentry);
 	struct beamfs_inode_info *fi = BEAMFS_I(inode);
+	bool counted;
 
-	if ((request_mask & STATX_BLOCKS) && !READ_ONCE(fi->i_blocks_counted)) {
-		u64 n = 0;
-
-		inode_lock_shared(inode);
+	/* Pairs with the release below: the count is in before the flag. */
+	counted = smp_load_acquire(&fi->i_blocks_counted);
+	if ((request_mask & STATX_BLOCKS) && !counted) {
 		mutex_lock(&fi->i_alloc_mutex);
-		if (!fi->i_blocks_counted) {
+		counted = fi->i_blocks_counted;
+		if (!counted) {
+			u64 n = 0;
 			int err = beamfs_count_blocks(inode, &n);
 
 			inode_set_bytes(inode, (loff_t)n * BEAMFS_BLOCK_SIZE);
-			if (!err)
-				WRITE_ONCE(fi->i_blocks_counted, true);
+			if (!err) {
+				/* Pairs with the acquire above. */
+				smp_store_release(&fi->i_blocks_counted, true);
+				counted = true;
+			}
 		}
 		mutex_unlock(&fi->i_alloc_mutex);
-		inode_unlock_shared(inode);
 	}
 	generic_fillattr(idmap, request_mask, inode, stat);
+	if (!counted)
+		stat->result_mask &= ~STATX_BLOCKS;
 	return 0;
 }

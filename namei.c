@@ -380,8 +380,15 @@ static int beamfs_add_dirent(struct inode *dir, const struct qstr *name,
 			goto out;
 		}
 		if (!block_no) {
-			/* End of what exists: take one more block. */
+			/*
+			 * End of what exists: take one more block, under the
+			 * allocation mutex, as a file takes one. The walks
+			 * that hold that mutex alone, beamfs_getattr's count
+			 * and the scrubber's, then see the directory whole.
+			 */
+			mutex_lock(&BEAMFS_I(dir)->i_alloc_mutex);
 			rc = beamfs_dir_get_block(dir, i, true, &block_no);
+			mutex_unlock(&BEAMFS_I(dir)->i_alloc_mutex);
 			if (rc) {
 				ret = rc;
 				goto out;
