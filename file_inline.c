@@ -2390,6 +2390,16 @@ static void beamfs_inline_stamp_tail_pad(struct beamfs_sb_info *sbi,
 }
 
 /*
+ * Stamp a data block's descriptor, before its seal. Exposed for
+ * namei.c: the target of a long symlink is a data block written there.
+ */
+void beamfs_stamp_data_block(struct super_block *sb, u8 *block,
+			     const u8 *payload, u64 ino, u64 iblock)
+{
+	beamfs_inline_stamp_tail_pad(BEAMFS_SB(sb), block, payload, ino, iblock);
+}
+
+/*
  * beamfs_inline_payload_crc -- recompute the DATA_CSUM over the decoded
  * payload held in @codeword, in whichever layout it is written.
  *
@@ -2825,7 +2835,7 @@ int beamfs_inline_decode_symlink(struct super_block *sb,
 				 struct buffer_head *bh, u64 phys,
 				 struct inode *inode, u8 *dst, u32 len)
 {
-	if (len > BEAMFS_DATA_INLINE_BYTES)
+	if (len > beamfs_block_payload(sb))
 		return -EUCLEAN;
 
 	return beamfs_inline_decode_block_into_buf(sb, bh->b_data, phys, inode, 0,

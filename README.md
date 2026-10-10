@@ -97,6 +97,11 @@ follow.
   back what the page held. Without a descriptor to keep, its sixteen
   bytes are zeroed instead of carrying kernel memory to the medium
   (`tests/xfstests/005`).
+- A symbolic link target is at most what a data block holds, 3808
+  bytes in a capsule, and a longer one is refused with
+  `ENAMETOOLONG`, where 3809 to 3824 bytes were cut to 3808. A long
+  target carries its descriptor, so it passes its check with
+  `--data-csum` (`tests/xfstests/006`).
 
 ### [0.1.26] - 2026-10-02
 

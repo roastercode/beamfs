@@ -1063,6 +1063,12 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
 	 * and a parity area of zeros.
 	 */
 	beamfs_lay_data_payload(sb, (u8 *)bh->b_data, staging);
+	/*
+	 * The descriptor too, before the seal, as for any data block: on
+	 * a DATA_CSUM volume a target without one failed its check on
+	 * every read. Logical block 0, what the reader checks it against.
+	 */
+	beamfs_stamp_data_block(sb, (u8 *)bh->b_data, staging, inode->i_ino, 0);
 	{
 		int _e = beamfs_seal_data_block(sb, (u8 *)bh->b_data);
 
@@ -1090,7 +1096,7 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
  * beamfs_symlink -- create a symbolic link in directory @dir.
  *
  * A target shorter than i_direct[] (96 bytes) is stored inline, in the
- * bytes of i_direct[]. A longer one, up to BEAMFS_DATA_INLINE_BYTES,
+ * bytes of i_direct[]. A longer one, up to what a data block holds,
  * goes in a data block whose number is in i_direct[0]; i_size tells the
  * two apart. Anything longer, or an empty target, gets -ENAMETOOLONG.
  */
@@ -1108,10 +1114,12 @@ static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 	 * a design limit, it was the size of the field the short form
 	 * happens to reuse, and any absolute path of moderate depth exceeds
 	 * it -- generic/360 links to a 1019-byte path and got ENAMETOOLONG.
-	 * The limit is BEAMFS_DATA_INLINE_BYTES, 3824; a target between that
-	 * and PATH_MAX is still refused.
+	 * The limit is what a data block holds, beamfs_block_payload():
+	 * 3808 bytes in a capsule, 3824 in the alternating layout. Held to
+	 * BEAMFS_DATA_INLINE_BYTES, a capsule cut a target of 3809 to 3824
+	 * bytes to 3808. Longer, up to PATH_MAX, is still refused.
 	 */
-	if (len == 0 || len > BEAMFS_DATA_INLINE_BYTES)
+	if (len == 0 || len > beamfs_block_payload(dir->i_sb))
 		return -ENAMETOOLONG;
 
 	inode = beamfs_new_inode(dir, S_IFLNK | 0777);
@@ -1202,7 +1210,7 @@ static const char *beamfs_get_link(struct dentry *dentry,
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
-	if (len > BEAMFS_DATA_INLINE_BYTES)
+	if (len > beamfs_block_payload(sb))
 		return ERR_PTR(-EUCLEAN);
 
 	phys = le64_to_cpu(fi->i_direct[0]);

@@ -567,8 +567,8 @@ static inline u32 beamfs_block_payload(struct super_block *sb)
 }
 
 /*
- * Lay a data block's payload down, and seal it, in the volume's
- * layout. Defined in file_inline.c.
+ * Lay a data block's payload down, stamp its descriptor and seal it,
+ * in that order and in the volume's layout. Defined in file_inline.c.
  *
  * Shared because a symlink's target is a data block written from
  * namei.c, and it followed the alternating layout on a capsule volume
@@ -577,6 +577,8 @@ static inline u32 beamfs_block_payload(struct super_block *sb)
 void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
 			     const u8 *payload);
 int  beamfs_seal_data_block(struct super_block *sb, u8 *block);
+void beamfs_stamp_data_block(struct super_block *sb, u8 *block,
+			     const u8 *payload, u64 ino, u64 iblock);
 
 int beamfs_rs_encode_block(u8 *block);
 int beamfs_rs_decode_block(u8 *block, int *results, const char *who);
