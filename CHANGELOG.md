@@ -112,6 +112,11 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   directory now grows under as a file does, and kept up to date by
   the allocator, where the page cache was counted and a file read 0
   after a mount (`tests/xfstests/004`).
+- A full volume no longer prints `beamfs/inline: volume full, first
+  refusal at ...` as a kernel warning: `ENOSPC` is the caller's answer,
+  and the line, printed once per boot and per site, said nothing of
+  the volumes after the first (generic/027, generic/269 and
+  generic/476 under `beamfs-xfstests` 2.5.2 and later).
 
 ## [0.1.26] - 2026-10-02
 
