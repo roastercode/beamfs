@@ -1,0 +1,23 @@
+# Kernel messages a test provokes on purpose, one per line: the test,
+# the text the message contains between double quotes, then why the
+# test provokes it. A line that starts with # is a comment.
+#
+# beamfs-xfstests reads this file (2.5.4 and later). A message of the
+# kernel at warn or above while a test runs fails it, even when
+# xfstests passed it, unless this file names the test and the text.
+# The tree checker's LOST POINTER and a correction by beamfs are never
+# set aside, whatever this file says. A line without a text or without
+# a reason is refused.
+#
+# Seen on 0.1.26 (30c1747), Linux 7.3-rc6, x86-01, with
+# beamfs-xfstests 2.5.3: sweep of the auto group, record
+# sweep-1791696476.
+generic/067 "VFS: Can't find ext4 filesystem" mounts the scratch device with a wrong filesystem type, and ext4 says it finds none on a beamfs volume
+generic/067 "can't find an ext2 filesystem on dev" mounts the scratch device with a wrong filesystem type, and ext2 says it finds none on a beamfs volume
+generic/338 "Buffer I/O error on dev dm-0" puts dm-error under the mounted volume: its reads fail on purpose
+generic/338 "beamfs: volume failed in " beamfs answers the errors dm-error returns by failing the volume and refusing writes
+generic/361 "critical space allocation error, dev loop" runs a loop device over a sparse image on the scratch volume, whose writes fail with ENOSPC once that volume is full: the I/O error the test wants
+generic/361 "beamfs: volume failed in " beamfs answers the write errors of the loop device by failing the volume and refusing writes
+generic/441 "Buffer I/O error on dev dm-0" switches dm-error to errors under open files, then checks that fsync reports them
+generic/484 "Buffer I/O error on dev dm-0" flips the data device to dm-error, then checks that syncfs reports the error
+generic/633 "with NULL argv: empty string added" vfstest executes a file with an empty argv; fs/exec.c adds an empty string and says so

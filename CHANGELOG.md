@@ -62,6 +62,13 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   7.3-rc6. beamfs-xfstests reads it: a sweep is clean only when every
   failure it finds is listed there and every test listed still fails,
   so the line of a test goes with the fix of its defect.
+- `tests/expected-kernel-messages`: the kernel messages a test of the
+  suite provokes on purpose, each with its test, the text it contains
+  and why: dm-error under the volume (generic/338, 441, 484), a loop
+  device on a full volume (generic/361), mount trying ext4 and ext2 on
+  a beamfs volume (generic/067), exec with an empty argv
+  (generic/633). beamfs-xfstests 2.5.4 reads it: any other message at
+  warn or above during a test fails that test.
 
 ### Fixed
 
