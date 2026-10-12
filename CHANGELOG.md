@@ -65,7 +65,8 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
 - `tests/expected-kernel-messages`: the kernel messages a test of the
   suite provokes on purpose, each with its test, the text it contains
   and why: dm-error under the volume (generic/338, 441, 484), a loop
-  device on a full volume (generic/361), a mount without a type, which
+  device on a full volume and the count of the errors the block layer
+  held back (generic/361), a mount without a type, which
   tries every block filesystem the kernel knows on a beamfs volume
   (generic/067), exec with an empty argv (generic/633).
   beamfs-xfstests 2.5.4 reads it: any other message at warn or above

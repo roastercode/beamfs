@@ -13,7 +13,9 @@
 # Seen on 0.1.26, Linux 7.3-rc6, x86-01: the sweep of the auto group
 # sweep-1791696476 (30c1747, beamfs-xfstests 2.5.3) and the trial
 # sweep-1791793040 (1dbbbf8, beamfs-xfstests 2.5.4) logged the same
-# messages for these tests.
+# messages for these tests. The trial sweep-1791797340 (080d3fd) also
+# logged, for generic/361, the count of the errors the block layer
+# held back, which the two runs before did not reach.
 #
 # generic/067, mount_nonexistent_mnt, mounts the scratch device without
 # a type: libblkid does not know beamfs, so mount tries each block
@@ -29,6 +31,7 @@ generic/338 "Buffer I/O error on dev dm-" puts dm-error under the mounted volume
 generic/338 "beamfs: volume failed in " beamfs answers the errors dm-error returns by failing the volume and refusing writes
 generic/361 "critical space allocation error, dev loop" runs a loop device over a sparse image on the scratch volume, whose writes fail with ENOSPC once that volume is full: the I/O error the test wants
 generic/361 "Buffer I/O error on dev loop" the writes beamfs makes through the buffer cache to that full loop device fail, and the buffer layer reports each one lost
+generic/361 "blk_print_req_error: " the block layer prints the errors of that loop device ten at a time; past that it says, at warn, how many it held back
 generic/361 "beamfs: volume failed in " beamfs answers the write errors of the loop device by failing the volume and refusing writes
 generic/441 "Buffer I/O error on dev dm-" switches dm-error to errors under open files, then checks that fsync reports them
 generic/484 "Buffer I/O error on dev dm-" flips the data device to dm-error, then checks that syncfs reports the error
