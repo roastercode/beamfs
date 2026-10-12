@@ -117,6 +117,12 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   and the line, printed once per boot and per site, said nothing of
   the volumes after the first (generic/027, generic/269 and
   generic/476 under `beamfs-xfstests` 2.5.2 and later).
+- A `remount,ro` marks the volume clean, as an unmount does, and a
+  `remount,rw` marks it in use again: the next mount no longer
+  reports a volume put down properly as not cleanly unmounted
+  (generic/452). A `remount,rw` is refused on a volume that has
+  failed or that carries unknown `ro_compat` features, which the
+  first mount keeps read-only.
 
 ## [0.1.26] - 2026-10-02
 

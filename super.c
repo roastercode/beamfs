@@ -1808,10 +1808,64 @@ static int beamfs_get_tree(struct fs_context *fc)
  * sync_filesystem is what every other filesystem does here, ext2
  * included, and the VFS does not do it for us: the ro/rw transition is
  * the VFS's, the flush before it is ours.
+ *
+ * Then the state the next mount reads. A read-write mount sets
+ * BEAMFS_SB_FLAG_MOUNTED and a clean unmount clears it, but put_super
+ * writes nothing to a volume that is read-only by then: the way to
+ * read-only clears it here, after the flush, as ext2 marks its s_state
+ * valid there, or the next mount calls unclean a volume that was put
+ * down properly (generic/452). The way back sets it again, and is
+ * refused on a volume that has failed, or that carries ro_compat
+ * features this kernel does not know, which fill_super mounts
+ * read-only.
  */
 static int beamfs_reconfigure(struct fs_context *fc)
 {
-	return sync_filesystem(fc->root->d_sb);
+	struct super_block *sb = fc->root->d_sb;
+	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
+	bool to_ro = fc->sb_flags & SB_RDONLY;
+	u32 fl;
+	int ret;
+
+	ret = sync_filesystem(sb);
+	if (ret)
+		return ret;
+	if (!(fc->sb_flags_mask & SB_RDONLY) || to_ro == sb_rdonly(sb))
+		return 0;
+
+	if (!to_ro) {
+		u64 unknown = le64_to_cpu(sbi->s_beamfs_sb->s_feat_ro_compat) &
+			      ~BEAMFS_FEAT_RO_COMPAT_SUPP;
+
+		if (unknown) {
+			errorf(fc,
+			       "beamfs: unsupported ro_compat features 0x%016llx, the volume stays read-only",
+			       unknown);
+			return -EROFS;
+		}
+		if (beamfs_failed(sb)) {
+			errorf(fc, "beamfs: the volume has failed and stays read-only");
+			return -EROFS;
+		}
+	} else if (beamfs_failed(sb)) {
+		/* Left marked in use: a failed volume wants fsck.beamfs. */
+		return 0;
+	}
+
+	spin_lock(&sbi->s_lock);
+	fl = le32_to_cpu(sbi->s_beamfs_sb->s_flags);
+	if (to_ro)
+		fl &= ~BEAMFS_SB_FLAG_MOUNTED;
+	else
+		fl |= BEAMFS_SB_FLAG_MOUNTED;
+	sbi->s_beamfs_sb->s_flags = cpu_to_le32(fl);
+	beamfs_dirty_super(sbi);
+	spin_unlock(&sbi->s_lock);
+
+	if (sbi->s_sbh && sync_dirty_buffer(sbi->s_sbh))
+		pr_warn("beamfs: %s: the mounted flag did not reach the medium\n",
+			sb->s_id);
+	return 0;
 }
 
 static const struct fs_context_operations beamfs_context_ops = {
