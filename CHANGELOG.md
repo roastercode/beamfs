@@ -132,6 +132,23 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   (generic/452). A `remount,rw` is refused on a volume that has
   failed or that carries unknown `ro_compat` features, which the
   first mount keeps read-only.
+- fsck.beamfs 0.1.9 and mkfs.beamfs 0.1.6 build with every warning on
+  and treated as an error, whatever `CFLAGS` the caller passes: their
+  Makefiles add the list with `override`, where it was the default
+  value of `CFLAGS`, and the Yocto recipe of fsck.beamfs, which passes
+  its own, built the checker of the nodes without `-Werror`. The list
+  gains `-Wsign-conversion`, `-Wmissing-declarations`, `-Werror=format`
+  and, where the compiler has it, `-fanalyzer`; the conversions they
+  found are spelled out where C made them, with the same machine
+  code, except an inode's byte offset in fsck.beamfs, now computed
+  unsigned throughout to the same value. `make test` in
+  `tools/fsck.beamfs` builds the tests it runs, and the manual page
+  names the checker and its version.
+- `tools/sync-layer.sh` mirrors the formatter's Makefile into the Yocto
+  layer, as `Makefile.mkfs`, for the recipe to build with; renames the
+  formatter's recipe when `MKFS_BEAMFS_VERSION` moves, where it was
+  renamed by hand; and mirrors the checker's `tests/`, which it left
+  behind, so the layer kept a copy that went stale.
 
 ## [0.1.26] - 2026-10-02
 

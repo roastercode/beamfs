@@ -28,7 +28,7 @@
 #include <sys/sysmacros.h>
 #include <sys/random.h>
 
-#define MKFS_BEAMFS_VERSION "0.1.5"
+#define MKFS_BEAMFS_VERSION "0.1.6"
 #include <dirent.h>
 
 /*
@@ -132,7 +132,7 @@ static void crc32_init(void)
 {
 	uint32_t poly = 0xEDB88320;
 	for (int i = 0; i < 256; i++) {
-		uint32_t c = i;
+		uint32_t c = (uint32_t)i;
 		for (int j = 0; j < 8; j++)
 			c = (c & 1) ? (poly ^ (c >> 1)) : (c >> 1);
 		crc32_table[i] = c;
@@ -233,7 +233,7 @@ static void stamp_data_csum_at(uint8_t *block, const uint8_t *payload,
 	hi = crc32(le, 8);
 	id = ((uint64_t)hi << 32) | lo;
 	for (k = 0; k < 8; k++)
-		block[selfid_off + k] = (uint8_t)((id >> (8 * k)) & 0xFF);
+		block[selfid_off + (size_t)k] = (uint8_t)((id >> (8 * k)) & 0xFF);
 }
 
 /* On-disk structures (must match kernel beamfs.h) */
@@ -524,7 +524,7 @@ static void rs_encode_capsule(uint8_t *block)
 
 		for (i = 0; i < BEAMFS_SUBBLOCK_DATA; i++) {
 			uint8_t  sym = block[(size_t)i *
-					     BEAMFS_DATA_INLINE_SUBBLOCKS + k];
+					     BEAMFS_DATA_INLINE_SUBBLOCKS + (size_t)k];
 			uint16_t fb  = index_of[(sym ^ (uint8_t)par[0]) & nn];
 
 			if (fb != (uint16_t)nn) {
@@ -613,7 +613,7 @@ static void rs_encode_inode(uint8_t *inode_buf)
 
 	/* Write parity to bytes [BEAMFS_INODE_RS_DATA .. +16) */
 	for (j = 0; j < 16; j++)
-		inode_buf[BEAMFS_INODE_RS_DATA + j] = (uint8_t)par[j];
+		inode_buf[BEAMFS_INODE_RS_DATA + (size_t)j] = (uint8_t)par[j];
 }
 
 
@@ -2178,7 +2178,8 @@ int main(int argc, char *argv[])
 					write_block(fd, cur->dir_indirect_blk, cur->dir_indirect_buf);
 					write_ind_parity(fd, cur->dir_indirect_blk, cur->dir_indirect_buf,
 							 data_start_blk, ind_parity_blk,
-							 (uint32_t)ind_parity_count, ind_parity_mode);
+							 (uint32_t)ind_parity_count,
+							 (uint32_t)ind_parity_mode);
 				}
 
 				/* Update this dir's inode (i_nlink, i_size, i_direct, i_indirect)
@@ -2477,9 +2478,15 @@ int main(int argc, char *argv[])
 						uint64_t ens = (uint64_t)atoll(sde) * 1000000000ULL;
 						ci->i_atime = ens; ci->i_mtime = ens; ci->i_ctime = ens;
 					} else {
-						ci->i_atime = (uint64_t)cst.st_atim.tv_sec * 1000000000ULL + cst.st_atim.tv_nsec;
-						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec * 1000000000ULL + cst.st_mtim.tv_nsec;
-						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec * 1000000000ULL + cst.st_ctim.tv_nsec;
+						ci->i_atime = (uint64_t)cst.st_atim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_atim.tv_nsec;
+						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_mtim.tv_nsec;
+						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_ctim.tv_nsec;
 					}
 				}
 
@@ -2587,7 +2594,7 @@ int main(int argc, char *argv[])
 					uint64_t remaining = fsize - b * cap;
 					if (remaining < (uint64_t)want)
 						want = (ssize_t)remaining;
-					ssize_t got = read(src_fd, user_data, want);
+					ssize_t got = read(src_fd, user_data, (size_t)want);
 					if (got != want) {
 						fprintf(stderr, "mkfs.beamfs --from-dir: short read %s at block %lu\n",
 							child_path, (unsigned long)b);
@@ -2717,7 +2724,8 @@ int main(int argc, char *argv[])
 					write_block(fd, indirect_blk, indirect_buf);
 					write_ind_parity(fd, indirect_blk, indirect_buf,
 							 data_start_blk, ind_parity_blk,
-							 (uint32_t)ind_parity_count, ind_parity_mode);
+							 (uint32_t)ind_parity_count,
+							 (uint32_t)ind_parity_mode);
 				}
 
 				/* Phase 4b: write dindirect L2 blocks used + L1 block */
@@ -2727,13 +2735,15 @@ int main(int argc, char *argv[])
 							write_block(fd, dind_l2_blkno[l1], dind_l2_bufs[l1]);
 							write_ind_parity(fd, dind_l2_blkno[l1], dind_l2_bufs[l1],
 									 data_start_blk, ind_parity_blk,
-									 (uint32_t)ind_parity_count, ind_parity_mode);
+									 (uint32_t)ind_parity_count,
+									 (uint32_t)ind_parity_mode);
 						}
 					}
 					write_block(fd, dind_l1_blk, dind_l1_buf);
 					write_ind_parity(fd, dind_l1_blk, dind_l1_buf,
 							 data_start_blk, ind_parity_blk,
-							 (uint32_t)ind_parity_count, ind_parity_mode);
+							 (uint32_t)ind_parity_count,
+							 (uint32_t)ind_parity_mode);
 					free(dind_l2_bufs);
 					free(dind_l2_blkno);
 					free(dind_l2_used);
@@ -2793,9 +2803,15 @@ int main(int argc, char *argv[])
 						uint64_t ens = (uint64_t)atoll(sde) * 1000000000ULL;
 						ci->i_atime = ens; ci->i_mtime = ens; ci->i_ctime = ens;
 					} else {
-						ci->i_atime = (uint64_t)cst.st_atim.tv_sec * 1000000000ULL + cst.st_atim.tv_nsec;
-						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec * 1000000000ULL + cst.st_mtim.tv_nsec;
-						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec * 1000000000ULL + cst.st_ctim.tv_nsec;
+						ci->i_atime = (uint64_t)cst.st_atim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_atim.tv_nsec;
+						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_mtim.tv_nsec;
+						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_ctim.tv_nsec;
 					}
 				}
 				ci->i_flags     = 0;
@@ -2889,14 +2905,20 @@ int main(int argc, char *argv[])
 						uint64_t ens = (uint64_t)atoll(sde) * 1000000000ULL;
 						ci->i_atime = ens; ci->i_mtime = ens; ci->i_ctime = ens;
 					} else {
-						ci->i_atime = (uint64_t)cst.st_atim.tv_sec * 1000000000ULL + cst.st_atim.tv_nsec;
-						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec * 1000000000ULL + cst.st_mtim.tv_nsec;
-						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec * 1000000000ULL + cst.st_ctim.tv_nsec;
+						ci->i_atime = (uint64_t)cst.st_atim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_atim.tv_nsec;
+						ci->i_mtime = (uint64_t)cst.st_mtim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_mtim.tv_nsec;
+						ci->i_ctime = (uint64_t)cst.st_ctim.tv_sec *
+							      1000000000ULL +
+							      (uint64_t)cst.st_ctim.tv_nsec;
 					}
 				}
 				ci->i_flags = 0;
 				/* Inline target into i_direct[] reused as 96-byte char buffer */
-				memcpy((char *)ci->i_direct, tgt, tlen);
+				memcpy((char *)ci->i_direct, tgt, (size_t)tlen);
 				ci->i_crc32 = crc32_inode(ci);
 				rs_encode_inode((uint8_t *)ci);
 

@@ -74,7 +74,7 @@
 #define FSCK_CANCELED     32  /* fsck canceled by user */
 #define FSCK_LIB         128  /* Shared library error */
 
-#define FSCK_BEAMFS_VERSION "0.1.8"
+#define FSCK_BEAMFS_VERSION "0.1.9"
 
 struct fsck_opts {
 	const char *device;
@@ -845,8 +845,8 @@ static int pass3_inode_walk(const struct fsck_opts *o)
 		uint64_t block  = sb.s_inode_table_blk + (ino - 1) / inodes_per_block;
 		uint64_t offset = (ino - 1) % inodes_per_block;
 		struct beamfs_inode raw;
-		off_t   pos = (off_t)block * BEAMFS_BLOCK_SIZE
-			    + (off_t)offset * sizeof(struct beamfs_inode);
+		off_t   pos = (off_t)(block * BEAMFS_BLOCK_SIZE
+			    + offset * sizeof(struct beamfs_inode));
 		uint32_t crc;
 		int      inode_dirty = 0;
 		int      i;

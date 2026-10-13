@@ -27,7 +27,7 @@ static void crc32_init(void)
 	int i, j;
 
 	for (i = 0; i < 256; i++) {
-		uint32_t c = i;
+		uint32_t c = (uint32_t)i;
 
 		for (j = 0; j < 8; j++)
 			c = (c & 1) ? (poly ^ (c >> 1)) : (c >> 1);

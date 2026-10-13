@@ -9,24 +9,31 @@
 #
 
 CC      ?= gcc
-# Every warning on, and treated as an error.
+CFLAGS  ?= -O2
+LDFLAGS ?=
+
+# Every warning on, and treated as an error, whatever CFLAGS holds.
 #
-# -Wformat=2 first: a %lu given an unsigned long long compiles clean
+# They are added with override, after CFLAGS. Set with ?= next to -O2,
+# as they were until 0.1.8, they went as soon as a caller passed CFLAGS
+# of its own: the Yocto recipe does, and the fsck.beamfs of the nodes
+# was built with Yocto's flags, -Wall and -Wextra, and no -Werror.
+#
+# -Werror=format first: a %lu given an unsigned long long compiles clean
 # where the types happen to match and breaks where they do not, and two
 # of those reached a commit before this line existed.
 #
-# -Wconversion without -Wsign-conversion: the sign variant fires
-# nineteen times in rs_decode.c, on Galois-field arithmetic whose
-# values are bounded by construction, and a flag that shouts on correct
-# code is one that gets turned off. The truncation half is what catches
-# an offset losing its top bits, which is the mistake that matters.
-CFLAGS  ?= -O2 -std=gnu11 -D_GNU_SOURCE \
-	   -Wall -Wextra -Wformat=2 -Wconversion -Wno-sign-conversion \
-	   -Wcast-qual -Wpointer-arith -Wmissing-prototypes -Wundef \
-	   -Wstrict-prototypes -Wshadow \
-	   -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-	   -Werror
-LDFLAGS ?=
+# -Wsign-conversion too: the Galois-field arithmetic it was turned off
+# for is bounded by construction, and a cast says so where it happens.
+# -fanalyzer when the compiler has it.
+WARNINGS := -Wall -Wextra -Wformat=2 -Werror=format -Wshadow \
+	    -Wmissing-prototypes -Wmissing-declarations -Wundef \
+	    -Wstrict-prototypes -Wno-unused-parameter \
+	    -Wconversion -Wsign-conversion -Wcast-qual -Wpointer-arith \
+	    -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Werror
+ANALYZER := $(shell $(CC) -fanalyzer -c -x c /dev/null -o /dev/null \
+	    2>/dev/null && echo -fanalyzer)
+override CFLAGS += -std=gnu11 -D_GNU_SOURCE $(WARNINGS) $(ANALYZER)
 
 PREFIX     ?= /usr
 SBINDIR    ?= $(PREFIX)/sbin
@@ -36,6 +43,8 @@ INSTALL    ?= install
 BIN     := fsck.beamfs
 SRCS    := fsck.beamfs.c crc32.c rs_decode.c fsck_read.c fsck_pass6.c
 OBJS    := $(SRCS:.c=.o)
+TESTS   := tests/test_rs_vectors tests/region_test tests/interleave_test \
+	   tests/capsule_test tests/burst_test tests/fsck_oracle
 
 .PHONY: all clean install test
 
@@ -73,7 +82,7 @@ $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(BIN) $(OBJS) tests/test_rs_vectors tests/test_rs_vectors.o
+	rm -f $(BIN) $(OBJS) $(TESTS) $(TESTS:=.o)
 
 install: $(BIN)
 	$(INSTALL) -d $(DESTDIR)$(SBINDIR)
@@ -131,8 +140,11 @@ tests/region_test.o: tests/region_test.c rs_decode.h beamfs_format.h
 tests/test_rs_vectors.o: tests/test_rs_vectors.c rs_decode.h
 	$(CC) $(CFLAGS) -I. -c -o $@ $<
 
+# test builds every test it runs. It depended on test_rs_vectors alone
+# and ran region_test and interleave_test as well, which a tree where
+# nothing else had built them did not have.
 .PHONY: test
-test: tests/test_rs_vectors
+test: tests/test_rs_vectors tests/region_test tests/interleave_test
 	@./tests/test_rs_vectors; rc=$$?; \
 	if [ $$rc -eq 0 ]; then echo "OK"; \
 	elif [ $$rc -eq 77 ]; then echo "SKIPPED (decoder skeleton)"; \

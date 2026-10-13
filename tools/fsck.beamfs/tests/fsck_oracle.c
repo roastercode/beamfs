@@ -274,8 +274,8 @@ static void write_inode(int fd, const struct beamfs_super_block *sb,
 	uint32_t per = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
 	uint64_t blk = sb->s_inode_table_blk + (ino - 1) / per;
 	uint64_t idx = (ino - 1) % per;
-	off_t off = (off_t)blk * BEAMFS_BLOCK_SIZE
-		  + (off_t)idx * sizeof(struct beamfs_inode);
+	off_t off = (off_t)(blk * BEAMFS_BLOCK_SIZE
+		  + idx * sizeof(struct beamfs_inode));
 
 	in->i_crc32 = crc32_inode(in);
 	rs_encode_subblock(rs, (uint8_t *)in, BEAMFS_INODE_RS_DATA,
@@ -290,8 +290,8 @@ static void read_inode(int fd, const struct beamfs_super_block *sb,
 	uint64_t blk = sb->s_inode_table_blk + (ino - 1) / per;
 	uint64_t idx = (ino - 1) % per;
 
-	pread_at(fd, (off_t)blk * BEAMFS_BLOCK_SIZE
-		 + (off_t)idx * sizeof(struct beamfs_inode), out, sizeof(*out));
+	pread_at(fd, (off_t)(blk * BEAMFS_BLOCK_SIZE
+		 + idx * sizeof(struct beamfs_inode)), out, sizeof(*out));
 }
 
 /*
@@ -574,7 +574,7 @@ static void case_many_leaks(void)
 		die("cannot open %s", image);
 	read_sb(fd, &sb);
 	for (i = 0; i < 17; i++)
-		set_block_used(fd, &sb, sb.s_data_start_blk + 200 + i, true, rs);
+		set_block_used(fd, &sb, sb.s_data_start_blk + 200 + (__le64)i, true, rs);
 	close(fd);
 	rs_free(rs);
 
@@ -736,9 +736,9 @@ static void flip_bit_in_field(int fd, const struct beamfs_super_block *sb,
 	uint32_t per = BEAMFS_BLOCK_SIZE / sizeof(struct beamfs_inode);
 	uint64_t blk = sb->s_inode_table_blk + (ino - 1) / per;
 	uint64_t idx = (ino - 1) % per;
-	off_t off = (off_t)blk * BEAMFS_BLOCK_SIZE
-		  + (off_t)idx * sizeof(struct beamfs_inode)
-		  + (off_t)field_off;
+	off_t off = (off_t)(blk * BEAMFS_BLOCK_SIZE
+		  + idx * sizeof(struct beamfs_inode)
+		  + field_off);
 	uint8_t byte;
 
 	pread_at(fd, off, &byte, 1);
@@ -895,8 +895,8 @@ static void case_correctable_inode(void)
 	 * recoverable, and that is exactly the situation this
 	 * filesystem exists for.
 	 */
-	off = (off_t)blk * BEAMFS_BLOCK_SIZE + (off_t)idx * sizeof(struct beamfs_inode)
-	    + offsetof(struct beamfs_inode, i_direct);
+	off = (off_t)(blk * BEAMFS_BLOCK_SIZE + idx * sizeof(struct beamfs_inode)
+	    + offsetof(struct beamfs_inode, i_direct));
 	pread_at(fd, off, &byte, 1);
 	byte ^= 0x01;
 	pwrite_at(fd, off, &byte, 1);

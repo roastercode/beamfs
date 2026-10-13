@@ -181,8 +181,8 @@ enum fsck_read_status fsck_read_inode(struct fsck_reader *r, uint64_t ino,
 
 	block  = r->inode_table_blk + (ino - 1) / r->inodes_per_block;
 	offset = (ino - 1) % r->inodes_per_block;
-	pos    = (off_t)block * BEAMFS_BLOCK_SIZE
-	       + (off_t)offset * sizeof(struct beamfs_inode);
+	pos    = (off_t)(block * BEAMFS_BLOCK_SIZE
+	       + offset * sizeof(struct beamfs_inode));
 
 	if (!read_exact(r->fd, pos, out, sizeof(*out)))
 		return FSCK_READ_IO;

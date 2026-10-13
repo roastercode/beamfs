@@ -29,6 +29,12 @@
 #include "rs_decode.h"
 #include "rs_decode_internal.h"
 
+/*
+ * The callers pass ints that are never negative: sums and products of
+ * logarithms, and where one subtracts (- discr_r, root[j] * (fcr - 1),
+ * - index_of[den]) it adds nn, which is at least what it takes away.
+ * Each converts its argument where it calls.
+ */
 static inline uint16_t rs_modnn(const struct rs_codec *rs, uint32_t x)
 {
 	return (uint16_t)(x % (uint32_t)rs->nn);
@@ -89,13 +95,13 @@ struct rs_codec *rs_init(void)
 			if (rs->genpoly[j] != 0)
 				rs->genpoly[j] = rs->genpoly[j - 1] ^
 					rs->alpha_to[rs_modnn(rs,
-						rs->index_of[rs->genpoly[j]] + root)];
+						(uint32_t)(rs->index_of[rs->genpoly[j]] + root))];
 			else
 				rs->genpoly[j] = rs->genpoly[j - 1];
 		}
 		/* rs->genpoly[0] can never be zero. */
 		rs->genpoly[0] = rs->alpha_to[rs_modnn(rs,
-			rs->index_of[rs->genpoly[0]] + root)];
+			(uint32_t)(rs->index_of[rs->genpoly[0]] + root))];
 	}
 
 	/* Convert rs->genpoly[] to index form for quicker encoding. */
@@ -171,7 +177,7 @@ static int rs_decode_internal(struct rs_codec *rs,
 			} else {
 				syn[i] = data[j] ^
 					alpha_to[rs_modnn(rs,
-						index_of[syn[i]] + (fcr + i) * prim)];
+						(uint32_t)(index_of[syn[i]] + (fcr + i) * prim))];
 			}
 		}
 	}
@@ -183,7 +189,7 @@ static int rs_decode_internal(struct rs_codec *rs,
 			} else {
 				syn[i] = par[j] ^
 					alpha_to[rs_modnn(rs,
-						index_of[syn[i]] + (fcr + i) * prim)];
+						(uint32_t)(index_of[syn[i]] + (fcr + i) * prim))];
 			}
 		}
 	}
@@ -202,7 +208,7 @@ static int rs_decode_internal(struct rs_codec *rs,
 	}
 
 	/* Berlekamp-Massey: determine error locator polynomial. */
-	memset(&lambda[1], 0, nroots * sizeof(lambda[0]));
+	memset(&lambda[1], 0, (size_t)nroots * sizeof(lambda[0]));
 	lambda[0] = 1;
 
 	for (i = 0; i < nroots + 1; i++)
@@ -220,7 +226,7 @@ static int rs_decode_internal(struct rs_codec *rs,
 		}
 		discr_r = index_of[discr_r];
 		if (discr_r == nn) {
-			memmove(&b[1], b, nroots * sizeof(b[0]));
+			memmove(&b[1], b, (size_t)nroots * sizeof(b[0]));
 			b[0] = (uint16_t)nn;
 		} else {
 			t[0] = lambda[0];
@@ -236,14 +242,14 @@ static int rs_decode_internal(struct rs_codec *rs,
 				el = r - el;
 				for (i = 0; i <= nroots; i++) {
 					b[i] = (lambda[i] == 0) ? (uint16_t)nn :
-						rs_modnn(rs, index_of[lambda[i]]
-							- discr_r + nn);
+						rs_modnn(rs, (uint32_t)(index_of[lambda[i]]
+							- discr_r + nn));
 				}
 			} else {
-				memmove(&b[1], b, nroots * sizeof(b[0]));
+				memmove(&b[1], b, (size_t)nroots * sizeof(b[0]));
 				b[0] = (uint16_t)nn;
 			}
-			memcpy(lambda, t, (nroots + 1) * sizeof(t[0]));
+			memcpy(lambda, t, (size_t)(nroots + 1) * sizeof(t[0]));
 		}
 	}
 
@@ -260,14 +266,14 @@ static int rs_decode_internal(struct rs_codec *rs,
 	}
 
 	/* Chien search: find roots of the error locator polynomial. */
-	memcpy(&reg[1], &lambda[1], nroots * sizeof(reg[0]));
+	memcpy(&reg[1], &lambda[1], (size_t)nroots * sizeof(reg[0]));
 	count = 0;
 	for (i = 1, k = iprim - 1; i <= nn;
-	     i++, k = rs_modnn(rs, k + iprim)) {
+	     i++, k = rs_modnn(rs, (uint32_t)(k + iprim))) {
 		q = 1;
 		for (j = deg_lambda; j > 0; j--) {
 			if (reg[j] != nn) {
-				reg[j] = rs_modnn(rs, reg[j] + j);
+				reg[j] = rs_modnn(rs, (uint32_t)(reg[j] + j));
 				q ^= alpha_to[reg[j]];
 			}
 		}
@@ -307,25 +313,25 @@ static int rs_decode_internal(struct rs_codec *rs,
 		for (i = deg_omega; i >= 0; i--) {
 			if (omega[i] != nn)
 				num1 ^= alpha_to[rs_modnn(rs,
-					omega[i] + i * root[j])];
+					(uint32_t)(omega[i] + i * root[j]))];
 		}
 		if (num1 == 0) {
 			b[j] = 0;
 			continue;
 		}
-		num2 = alpha_to[rs_modnn(rs, root[j] * (fcr - 1) + nn)];
+		num2 = alpha_to[rs_modnn(rs, (uint32_t)(root[j] * (fcr - 1) + nn))];
 		den = 0;
 		/* lambda[i+1] for i even is the formal derivative. */
 		for (i = (deg_lambda < nroots - 1 ? deg_lambda : nroots - 1) & ~1;
 		     i >= 0; i -= 2) {
 			if (lambda[i + 1] != nn) {
 				den ^= alpha_to[rs_modnn(rs,
-					lambda[i + 1] + i * root[j])];
+					(uint32_t)(lambda[i + 1] + i * root[j]))];
 			}
 		}
 		b[j] = alpha_to[rs_modnn(rs,
-			index_of[num1] + index_of[num2] +
-			nn - index_of[den])];
+			(uint32_t)(index_of[num1] + index_of[num2] +
+			nn - index_of[den]))];
 		num_corrected++;
 	}
 
@@ -336,7 +342,7 @@ static int rs_decode_internal(struct rs_codec *rs,
 			if (b[j] == 0)
 				continue;
 			k = (fcr + i) * prim * (nn - loc[j] - 1);
-			tmp ^= alpha_to[rs_modnn(rs, index_of[b[j]] + k)];
+			tmp ^= alpha_to[rs_modnn(rs, (uint32_t)(index_of[b[j]] + k))];
 		}
 		if (tmp != alpha_to[s[i]])
 			return RS_UNCORRECTABLE;

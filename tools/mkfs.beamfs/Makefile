@@ -10,23 +10,24 @@
 # with the kernel's byte for byte. One file, one behaviour.
 
 CC      ?= gcc
+CFLAGS  ?= -O2
+LDFLAGS ?=
+
+# The checker's directory, where the decoder is. A caller that has the
+# decoder beside the formatter, as the Yocto recipe does, passes RS=.
 RS      := ../fsck.beamfs
 
-# Every warning on, and treated as an error.
-#
-# -Wformat=2 first: a %lu given an unsigned long long compiles clean
-# where the types happen to match and breaks where they do not.
-#
-# -Wconversion without -Wsign-conversion: the sign variant fires on
-# Galois-field arithmetic whose values are bounded by construction, and
-# a flag that shouts on correct code is one that gets turned off.
-CFLAGS  ?= -O2 -std=gnu17 -D_GNU_SOURCE \
-	   -Wall -Wextra -Wformat=2 -Wconversion -Wno-sign-conversion \
-	   -Wcast-qual -Wpointer-arith -Wmissing-prototypes -Wundef \
-	   -Wstrict-prototypes -Wshadow \
-	   -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-	   -Werror
-LDFLAGS ?=
+# Every warning on, and treated as an error, whatever CFLAGS holds:
+# added with override, after CFLAGS, so that a caller's CFLAGS cannot
+# take them away. The list is fsck.beamfs's, whose Makefile says why.
+WARNINGS := -Wall -Wextra -Wformat=2 -Werror=format -Wshadow \
+	    -Wmissing-prototypes -Wmissing-declarations -Wundef \
+	    -Wstrict-prototypes -Wno-unused-parameter \
+	    -Wconversion -Wsign-conversion -Wcast-qual -Wpointer-arith \
+	    -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Werror
+ANALYZER := $(shell $(CC) -fanalyzer -c -x c /dev/null -o /dev/null \
+	    2>/dev/null && echo -fanalyzer)
+override CFLAGS += -std=gnu17 -D_GNU_SOURCE $(WARNINGS) $(ANALYZER)
 
 PREFIX  ?= /usr
 SBINDIR ?= $(PREFIX)/sbin
