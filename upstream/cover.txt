@@ -22,20 +22,36 @@ Who it is for
 Systems that keep their data on one storage device in a radiation
 environment, where no second copy fits.
 
-Space is where this started: FTRFS (Fuchs, Langer, Trinitis, ARCS
-2015) was designed for satellite on-board computers. Memon et al. [2]
-irradiated systems on chip running Linux with 20 to 58 MeV protons; on
-an i.MX 8M Plus running ext4 on eMMC, filesystem faults and
-storage-driver errors made up 90% of the failures they observed, up to
-journal aborts and read-only remounts.
+The physics is measured, not supposed. Soft errors in commercial
+silicon are a documented fact (Baumann [7]); their mechanism, a
+particle depositing charge in a circuit node, is modelled (Dodd and
+Massengill [8]); atmospheric neutrons alone upset avionics at altitude
+(Normand [9]); and the medium is not exempt, NAND flash having error
+modes and rates of its own (Cai et al. [10], Mielke et al. [11]).
+Between the medium and the page cache a read crosses a controller, a
+bus, DMA buffers and caches, any of which can flip a bit.
 
-Medicine has the same problem on the ground. Photon beams above 10 MV
-and every proton or ion beam produce secondary neutrons, and AAPM
-TG-203 [3] reports their effect on the electronics of implanted
-cardiac devices: single-event upsets that reset the device or lose its
-stored data. Hashimoto et al. [4] counted 29 soft errors in four
-defibrillators placed outside a proton field. Any Linux system inside
-a treatment room keeps its data in the same neutron field.
+Space is where this started: FTRFS (Fuchs, Langer and Trinitis, ARCS
+2015 [6]) was designed for satellite on-board computers. Memon et al.
+[2] irradiated commercial systems on chip running Linux with 20 to
+58 MeV protons; on an i.MX 8M Plus running ext4 on eMMC, filesystem
+faults and storage-driver errors made up 90% of the failures they
+observed, up to journal aborts and read-only remounts.
+
+Medicine has the same problem on the ground, every working day. A
+radiotherapy room is a neutron field: photon beams above 10 MV free
+neutrons from the accelerator head, and every proton or ion beam
+produces secondary neutrons. AAPM Task Group 203 (Miften et al. [3])
+reports what that field does to the electronics of implanted cardiac
+devices, single-event upsets that reset the device or lose its stored
+data, and sets out how such patients are to be managed. Hashimoto et
+al. [4] counted 29 soft errors in four defibrillators placed outside a
+proton field. Any Linux system inside a treatment room, the imaging,
+positioning and logging equipment included, keeps its data in the same
+field, and what it records is part of a patient's record. There, a
+read that returns a wrong byte without saying so is worse than a read
+that fails: beamfs is built to return the bytes that were written, or
+to refuse.
 
 What beamfs covers is the path between the medium and the page cache.
 It does not protect memory after the read and does not replace ECC
@@ -181,7 +197,9 @@ repeat the measurements are in the Zenodo record [5].
 
 [1] https://lore.kernel.org/linux-fsdevel/20260413142357.515792-1-aurelien@hackers.camp/
     https://lore.kernel.org/linux-fsdevel/20260414120726.5713-1-aurelien@hackers.camp/
-[2] S. Memon et al., Where Linux Breaks Under Radiation, arXiv:2503.03722
+[2] S. Memon et al., Where Linux Breaks Under Radiation, arXiv:2503.03722;
+    When Linux Meets Radiation, IEEE Transactions on Reliability, 2025,
+    NASA NTRS 20250004489
 [3] M. Miften et al., Management of radiotherapy patients with implanted
     cardiac pacemakers and defibrillators: a report of the AAPM TG-203,
     Medical Physics, 2019, doi:10.1002/mp.13838
@@ -190,4 +208,21 @@ repeat the measurements are in the Zenodo record [5].
     cardioverter defibrillators, Radiation Oncology 7:10, 2012,
     doi:10.1186/1748-717X-7-10
 [5] https://doi.org/10.5281/zenodo.23253350
-[6] https://lore.kernel.org/lkml/cover.1778710307.git.aurelien@hackers.camp/
+[6] C. M. Fuchs, M. Langer, C. Trinitis, FTRFS: A Fault-Tolerant
+    Radiation-Robust Filesystem for Space Use, ARCS 2015, LNCS 9017,
+    doi:10.1007/978-3-319-16086-3_8; the rslib.h patch:
+    https://lore.kernel.org/lkml/cover.1778710307.git.aurelien@hackers.camp/
+[7] R. C. Baumann, Radiation-induced soft errors in advanced
+    semiconductor technologies, IEEE Transactions on Device and
+    Materials Reliability 5(3), 2005, doi:10.1109/TDMR.2005.853449
+[8] P. E. Dodd, L. W. Massengill, Basic mechanisms and modeling of
+    single-event upset in digital microelectronics, IEEE Transactions
+    on Nuclear Science 50(3), 2003, doi:10.1109/TNS.2003.813129
+[9] E. Normand, Single-event effects in avionics, IEEE Transactions on
+    Nuclear Science 43(2), 1996, doi:10.1109/23.490893
+[10] Y. Cai et al., Error Characterization, Mitigation, and Recovery in
+    Flash-Memory-Based Solid-State Drives, Proceedings of the IEEE
+    105(9), 2017, doi:10.1109/JPROC.2017.2713127
+[11] N. R. Mielke et al., Reliability of Solid-State Drives Based on
+    NAND Flash Memory, Proceedings of the IEEE 105(9), 2017,
+    doi:10.1109/JPROC.2017.2725738
