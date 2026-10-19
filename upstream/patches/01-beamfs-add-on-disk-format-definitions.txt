@@ -1,0 +1,14 @@
+beamfs: add on-disk format definitions
+
+beamfs is a block-device filesystem that keeps Reed-Solomon parity
+with the blocks it protects and decodes on every read, so corrupted
+bytes are corrected in place on a single device, with no second copy
+to repair from.
+
+This header holds every structure and constant that describes bytes
+on the medium, and nothing else. It uses no kernel-only types, so
+mkfs.beamfs and fsck.beamfs include it directly instead of keeping
+copies that drift from the kernel's.
+
+Nothing is built until the Kconfig and Makefile patch near the end of
+the series.

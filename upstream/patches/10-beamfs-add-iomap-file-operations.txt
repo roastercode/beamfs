@@ -1,0 +1,9 @@
+beamfs: add iomap file operations
+
+file.c holds the file, inode and address_space operations of the
+iomap-based path used by the INODE_UNIVERSAL scheme (scheme 5). That
+path does not maintain the parity of indirect blocks, so the kernel
+refuses to mount the scheme and mkfs.beamfs refuses to format it: on
+volumes mkfs.beamfs creates, file data takes the inline path of the
+next four patches. inode.c and namei.c choose between the two from the
+volume's scheme.

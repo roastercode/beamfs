@@ -1,0 +1,4 @@
+beamfs: add namespace operations
+
+Directory entry operations: create, mkdir, unlink, rmdir, link and
+rename.

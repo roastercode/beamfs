@@ -1,0 +1,3 @@
+MAINTAINERS: add beamfs
+
+Add an entry for beamfs and its documentation.

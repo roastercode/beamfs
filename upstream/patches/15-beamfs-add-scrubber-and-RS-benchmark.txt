@@ -1,0 +1,14 @@
+beamfs: add scrubber and RS benchmark
+
+beamfs corrects on read, so a block nobody reads accumulates upsets
+until it is past the correction radius. scrub.c runs one kernel thread
+per mounted volume, beamfs-scrub/<dev>, that walks the allocated
+blocks at a bounded pace and decodes each one, so that drift is found
+while it is still correctable. Its pace and counters are in
+/sys/fs/beamfs/<dev>/, and the scrub_interval_ms module parameter sets
+the pace for volumes mounted later.
+
+rsbench.c times the codec alone: reading
+/sys/kernel/debug/beamfs/rs_bench encodes and decodes in memory and
+reports nanoseconds per block; rs_bench_iters sets the iteration
+count.

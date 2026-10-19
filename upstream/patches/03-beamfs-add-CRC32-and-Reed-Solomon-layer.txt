@@ -1,0 +1,12 @@
+beamfs: add CRC32 and Reed-Solomon layer
+
+CRC32 and Reed-Solomon FEC built on lib/reed_solomon: RS(255,239) over
+GF(2^8), primitive polynomial 0x187, sixteen parity symbols for each
+239-byte subblock, so up to eight corrupted symbols per codeword are
+corrected.
+
+The decoder keeps its scratch buffers in struct rs_control, so one
+rs_control shared by concurrent callers corrupts their intermediate
+state and reports spurious uncorrectable codewords. beamfs allocates
+one rs_control per possible CPU. rslib.h does not state this contract;
+a patch documenting it was posted to linux-kernel on 2026-05-13.

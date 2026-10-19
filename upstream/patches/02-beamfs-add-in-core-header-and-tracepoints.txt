@@ -1,0 +1,8 @@
+beamfs: add in-core header and tracepoints
+
+beamfs.h holds the in-core superblock and inode, and the declarations
+shared between the translation units.
+
+beamfs_trace.h defines the tracepoints, among them one event per store
+into the block tree and one per read of a slot, which the usual event
+filters narrow to a single inode.

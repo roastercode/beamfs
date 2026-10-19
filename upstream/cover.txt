@@ -1,0 +1,192 @@
+beamfs: Reed-Solomon protected filesystem
+
+beamfs is a block-device filesystem that corrects corrupted bytes in
+place, on a single device, with no second copy to repair from. Every
+data block is a capsule of sixteen interleaved RS(255,239) codewords,
+built on lib/reed_solomon; every read decodes it, and a read the
+decoder cannot vouch for fails with -EIO instead of returning wrong
+bytes. Directory blocks, inodes, the allocation bitmap and the
+superblock carry Reed-Solomon parity as well, and indirect blocks have
+a parity region of their own. In the default layout 288 bytes of every
+4096 (7%) are overhead.
+
+beamfs descends from FTRFS, posted here as an RFC in April [1]. The
+limits of FTRFS were in its design (threat model, where correction
+sits, scale, kernel integration), so beamfs is a new filesystem with
+its own on-disk format, and this is a new thread.
+
+
+Who it is for
+-------------
+
+Systems that keep their data on one storage device in a radiation
+environment, where no second copy fits.
+
+Space is where this started: FTRFS (Fuchs, Langer, Trinitis, ARCS
+2015) was designed for satellite on-board computers. Memon et al. [2]
+irradiated systems on chip running Linux with 20 to 58 MeV protons; on
+an i.MX 8M Plus running ext4 on eMMC, filesystem faults and
+storage-driver errors made up 90% of the failures they observed, up to
+journal aborts and read-only remounts.
+
+Medicine has the same problem on the ground. Photon beams above 10 MV
+and every proton or ion beam produce secondary neutrons, and AAPM
+TG-203 [3] reports their effect on the electronics of implanted
+cardiac devices: single-event upsets that reset the device or lose its
+stored data. Hashimoto et al. [4] counted 29 soft errors in four
+defibrillators placed outside a proton field. Any Linux system inside
+a treatment room keeps its data in the same neutron field.
+
+What beamfs covers is the path between the medium and the page cache.
+It does not protect memory after the read and does not replace ECC
+memory.
+
+
+What has been measured
+----------------------
+
+The beamfs v3 report [5] measured beamfs 0.1.26, commit 1bf151d, on
+Linux 7.3-rc5, on x86-64 and aarch64:
+
+- xfstests, auto group, 734 tests: all 122 that ran on x86-64 passed,
+  and 122 of the 123 that ran on aarch64; generic/476 reached the
+  harness's time budget in the sweep and passed when run alone.
+  xfstests declined the other tests, mostly for features beamfs does
+  not implement; they are counted apart, not as passes.
+
+- Single-bit upsets injected into read bios by the emufi injector, on
+  a four-node aarch64 cluster and on USB flash media: beamfs never
+  returned wrong data. It returned the correct file in every exercised
+  case but one, and in that one refused the read, after a flip in an
+  indirect pointer. In the same runs ext4 and ext3 returned silently
+  corrupted data, and btrfs, with a single copy of its data, refused
+  the read.
+
+The limits of these numbers are part of the result. The upsets are
+emulated, not a beam. At most two erroneous symbols reached a codeword
+in one decode, so the eight-symbol correction limit, bursts and
+miscorrection beyond it are not exercised. No performance was
+measured. Section X of the report lists every limit, and a beam
+campaign is the next step.
+
+
+What changed since the FTRFS review
+-----------------------------------
+
+- Reed-Solomon goes through lib/reed_solomon, as Eric Biggers asked.
+  Doing so showed that one struct rs_control cannot be shared by
+  concurrent decoders: beamfs uses one per CPU, and a patch documenting
+  the contract in rslib.h was posted in May [6].
+
+- File data goes through iomap, with address_space_operations, which
+  Matthew Wilcox found missing.
+
+- Validation is the whole xfstests auto group, on two architectures,
+  test by test, from signed run records.
+
+
+What is not there yet
+---------------------
+
+- No journal and no copy-on-write, the point Darrick J. Wong raised in
+  April.
+  Metadata reaches the medium through writeback, in no guaranteed
+  order, and an unclean shutdown is left to fsck.beamfs.
+
+- Metadata still goes through buffer heads.
+
+- In the default configuration, an indirect pointer flipped onto
+  another allocated block in range is not detected; DATA_SELFID closes
+  that. Beyond eight corrupted bytes in a codeword the decoder can
+  miscorrect; DATA_CSUM makes such a read fail closed. mkfs.beamfs
+  --data-csum enables both; neither is on by default.
+
+- fs/beamfs/file.c is the iomap path of the INODE_UNIVERSAL scheme.
+  The kernel refuses to mount that scheme and mkfs.beamfs refuses to
+  format it, so on volumes mkfs.beamfs creates, file data takes the
+  inline path of file_inline.c.
+
+- checkpatch reports no error and no warning on any patch; what it
+  reports with --strict (parenthesis alignment, open-ended lines) is
+  left as it is.
+
+
+Questions
+---------
+
+- Is correction inside the filesystem, for one small device, something
+  fs/ would consider as a filesystem of its own, or would you rather
+  see it proposed for an existing filesystem?
+
+- Is a journal a precondition for further review, or can it follow?
+
+
+The series
+----------
+
+Patches 1 to 15 add the sources. Nothing is built until patch 17 adds
+the Kconfig and the Makefile. file_inline.c, the largest, is split
+across patches 11 to 14 to stay under the list's message size. Patch
+16 adds Documentation/filesystems/beamfs.rst and the sysfs entry in
+Documentation/ABI, and patch 18 the MAINTAINERS entry. The series is
+based on @@BASE@@, the VFS tree it is meant for, and builds there and
+on linux-next; the inode operations take the const struct mnt_idmap *
+that tree has, so it does not build on a mainline that has not merged
+that change yet.
+
+Tools: the series was checked, from the commit named below, by
+beamfs-upstream, a checker written for it: checkpatch.pl with and
+without --strict (spdxcheck included), sparse, smatch, coccicheck
+(every semantic patch, report mode), kernel-doc, checkstack (no frame
+over 512 bytes), get_maintainer, builds with gcc and clang as a module
+and built in, under tinyconfig, allnoconfig and allmodconfig with
+CONFIG_WERROR, on x86-64, arm64, i386, arm and s390 (big-endian), with
+W=1 and KCFLAGS=-W, under lockdep and the memory and object debugging
+options, the merge into current master and linux-next, and htmldocs
+against the base. The code, the checker and this letter were written
+with the assistance of an LLM, Claude (Anthropic), under the author's
+direction and review; the Assisted-by: LLM tag on every patch records
+it, as Documentation/process/coding-assistants.rst asks. Every
+measurement was taken on the author's machines with the project's own
+tooling.
+
+Testing: the code in this series is commit @@COMMIT@@ of the beamfs
+repository. It descends from the 0.1.26 above by the changes its
+CHANGELOG lists since: comments, what checkpatch --strict and
+coccicheck asked for, corrected positions carried as bytes, and the
+scrubber's decode scratch and the inode copy taken off the stack.
+xfstests: the auto group as ./check runs it bare, 740 tests, run whole by
+beamfs-xfstests 2.8.0 on 2 machines, each test once. Every test that ran
+passed, none is listed as a known failure, and no node needed recovering.
+The code measured passed the code gate as tree 04d9b3a99b78 (sources
+9cd9b6b71380, the ones in this series), kernel 7.3.0-rc7 built from the
+series' base with vfs.git's vfs.all at 9afee012f4, beamfs built in, module
+0.1.26; a test xfstests declines is recorded with the reason it gives, a
+feature beamfs does not have or a tool the image lacks:
+- qemux86-64: 128 ran, 128 passed, 0 failed; 612 not run by xfstests,
+  chiefly reflink and dedupe (189), fallocate modes and exchange-range
+  (84), device-mapper targets, scsi_debug and DAX (60), other features and
+  test prerequisites (59), O_DIRECT (50); 219 min; record sweep-1792250852.
+- qemuarm64: 129 ran, 129 passed, 0 failed; 611 not run by xfstests,
+  chiefly reflink and dedupe (189), fallocate modes and exchange-range
+  (84), device-mapper targets, scsi_debug and DAX (60), other features and
+  test prerequisites (58), O_DIRECT (50); 1817 min; record
+  sweep-1792268754.
+
+mkfs.beamfs, fsck.beamfs and the journal decoder are in
+https://github.com/roastercode/beamfs, under tools/. The report, the
+root images and kernels measured, and the source trees needed to
+repeat the measurements are in the Zenodo record [5].
+
+[1] https://lore.kernel.org/linux-fsdevel/20260413142357.515792-1-aurelien@hackers.camp/
+    https://lore.kernel.org/linux-fsdevel/20260414120726.5713-1-aurelien@hackers.camp/
+[2] S. Memon et al., Where Linux Breaks Under Radiation, arXiv:2503.03722
+[3] M. Miften et al., Management of radiotherapy patients with implanted
+    cardiac pacemakers and defibrillators: a report of the AAPM TG-203,
+    Medical Physics, 2019, doi:10.1002/mp.13838
+[4] T. Hashimoto et al., Influence of secondary neutrons induced by
+    proton radiotherapy for cancer patients with implantable
+    cardioverter defibrillators, Radiation Oncology 7:10, 2012,
+    doi:10.1186/1748-717X-7-10
+[5] https://doi.org/10.5281/zenodo.23253350
+[6] https://lore.kernel.org/lkml/cover.1778710307.git.aurelien@hackers.camp/

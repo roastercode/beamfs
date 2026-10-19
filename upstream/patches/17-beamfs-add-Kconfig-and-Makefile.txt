@@ -1,0 +1,12 @@
+beamfs: add Kconfig and Makefile
+
+Hook beamfs into fs/Kconfig, among the miscellaneous filesystems, and
+into fs/Makefile.
+
+Besides BEAMFS_FS there are two debugging options: BEAMFS_DEBUG_TREE
+enables the tree checker, and BEAMFS_ORDERED_META writes metadata
+blocks synchronously in dependency order, an experiment kept to
+measure ordering questions. Both default to off.
+
+The Makefile adds the warnings the module is developed with; whether
+they stop the build is left to CONFIG_WERROR.

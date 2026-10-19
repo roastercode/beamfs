@@ -1,0 +1,5 @@
+beamfs: add superblock operations
+
+Mount and unmount, statfs, sync, the inode cache, and registration of
+the "beamfs" filesystem type, which requires a block device. The
+tracepoints are instantiated in this file.

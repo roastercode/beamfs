@@ -1,0 +1,15 @@
+beamfs: inline data path 3/4, read side
+
+file_inline.c is the data path of the UNIVERSAL_INLINE protection
+scheme (scheme 2), the one mkfs.beamfs formats. Each 4096-byte data
+block holds sixteen RS(255,239) codewords, 3824 coded bytes and 256
+bytes of parity, followed by a 16-byte tail; every read decodes the
+block.
+
+The file is 4875 lines, too large for one message to the list, so it
+is split across four patches along function boundaries. It builds only
+as a whole, once the Kconfig and Makefile patch is applied.
+
+This part: the tail descriptor and its payload CRC, block decode,
+symlink decode, ->iomap_begin and ->iomap_end, and the read side:
+read_folio and the read of partial blocks before a write.

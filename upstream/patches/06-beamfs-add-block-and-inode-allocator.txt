@@ -1,0 +1,4 @@
+beamfs: add block and inode allocator
+
+Block and inode allocation over in-memory bitmaps loaded at mount
+time. No I/O is done under the allocator's spinlock.

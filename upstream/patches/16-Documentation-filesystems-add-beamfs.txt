@@ -1,0 +1,8 @@
+Documentation: filesystems: add beamfs
+
+What beamfs protects and how, its runtime interfaces (module
+parameters, sysfs, uevents, debugfs, tracepoints), its userspace tools
+and its known limitations.
+
+Documentation/ABI/testing/sysfs-fs-beamfs describes the attributes
+under /sys/fs/beamfs/<dev>/ and the uevent raised there.

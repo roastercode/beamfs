@@ -1,0 +1,136 @@
+[series]
+fs = "beamfs"
+branch = "beamfs-rfc"
+version = 1
+subject_prefix = "RFC PATCH"
+author = "Aurelien DESBRIERES <aurelien@hackers.camp>"
+assisted_by = "LLM"
+# Put in Cc of every mail, besides what get_maintainer names.
+cc = ["aurelien.desbrieres@gmail.com"]
+cover = "cover.txt"
+max_mail_bytes = 100000
+# The tree the series is meant for, fetched at build time and taken as
+# the base in place of the newest mainline tag, which it has to hold:
+# the T: tree of FILESYSTEMS (VFS and infrastructure) in MAINTAINERS.
+# The lab runs the same commit, so what xfstests judged is what is sent.
+base = { url = "https://git.kernel.org/pub/scm/linux/kernel/git/vfs/vfs.git", branch = "vfs.all" }
+# The trees the series must still merge into and build on. Mainline is
+# left out while it lacks the const mnt_idmap signatures the base has.
+newer = ["linux-next/master"]
+
+# CHECKs of checkpatch --strict kept on purpose. Each names the file,
+# the types kept there and the mainline form it follows; the checker
+# fails on every other CHECK once a plan drives it, and notes an
+# exception that no finding uses any more, so the list cannot go stale.
+[[series.strict_exception]]
+file = "beamfs_trace.h"
+types = ["OPEN_ENDED_LINE", "PARENTHESIS_ALIGNMENT"]
+why = """the canonical TRACE_EVENT layout; under --strict, 7.3-rc7's \
+include/trace/events/ext4.h raises 186 and 124 of them, \
+include/trace/events/btrfs.h 83 and 205, fs/xfs/xfs_trace.h 324 and 175"""
+
+[[series.strict_exception]]
+file = "beamfs_format.h"
+types = ["PREFER_KERNEL_TYPES"]
+why = """the header is shared with mkfs.beamfs and fsck.beamfs: its \
+#ifndef __KERNEL__ section defines u8..u64 and __le16..__le64 from the \
+stdint.h types, which is what the CHECK asks to replace; the kernel \
+side never sees it"""
+
+[[series.strict_exception]]
+file = "beamfs.h"
+types = ["CAMELCASE"]
+why = """BUFFER_FNS(BeamfsVerified, beamfs_verified) names its BH_ flag the \
+way gfs2 (Pinned), nilfs2 (NILFS_Node) and jbd2 (JWrite) do; under --strict, \
+include/linux/jbd2.h raises the same CHECK on JWrite and Revoked"""
+
+# Sources come from the beamfs commit the series measures, never from
+# the working tree; add = files of the repository root, placed under
+# fs/beamfs/; tree = files under upstream/tree/, placed at their path;
+# part = the next slice of a file, up to the line `upto` excluded, the
+# rest when upto is absent; insert = one line after an anchor line;
+# maintainers = a block placed in MAINTAINERS by alphabetical order.
+#
+# The cover letter carries three markers, and the series is not ready
+# to mail while one is left: @@COMMIT@@ and @@BASE@@, which the
+# generator replaces by the commit the series carries and the tag it
+# sits on; @@XFSTESTS@@, which beamfs-xfstests replaces by the result of
+# its sweep of that commit on both architectures, from its signed
+# records, so the letter never claims a run the code did not have.
+
+[[patch]]
+message = "patches/01-beamfs-add-on-disk-format-definitions.txt"
+add = ["beamfs_format.h"]
+
+[[patch]]
+message = "patches/02-beamfs-add-in-core-header-and-tracepoints.txt"
+add = ["beamfs.h", "beamfs_trace.h"]
+
+[[patch]]
+message = "patches/03-beamfs-add-CRC32-and-Reed-Solomon-layer.txt"
+add = ["edac.c"]
+
+[[patch]]
+message = "patches/04-beamfs-add-error-budget-alerts-and-clock.txt"
+add = ["alert.c", "budget.c", "clock.c"]
+
+[[patch]]
+message = "patches/05-beamfs-add-indirect-parity-tree-checker.txt"
+add = ["indparity.c", "treecheck.c"]
+
+[[patch]]
+message = "patches/06-beamfs-add-block-and-inode-allocator.txt"
+add = ["alloc.c"]
+
+[[patch]]
+message = "patches/07-beamfs-add-superblock-operations.txt"
+add = ["super.c"]
+
+[[patch]]
+message = "patches/08-beamfs-add-inode-and-directory-operations.txt"
+add = ["dir.c", "dirent.c", "inode.c"]
+
+[[patch]]
+message = "patches/09-beamfs-add-namespace-operations.txt"
+add = ["namei.c"]
+
+[[patch]]
+message = "patches/10-beamfs-add-iomap-file-operations.txt"
+add = ["file.c"]
+
+[[patch]]
+message = "patches/11-beamfs-inline-data-path-1-4-block-map.txt"
+part = { file = "file_inline.c", upto = "static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode," }
+
+[[patch]]
+message = "patches/12-beamfs-inline-data-path-2-4-allocation.txt"
+part = { file = "file_inline.c", upto = "/* ------------------------------------------------------------------------- */" }
+
+[[patch]]
+message = "patches/13-beamfs-inline-data-path-3-4-read-side.txt"
+part = { file = "file_inline.c", upto = "static void beamfs_wb_folio_done(struct beamfs_wb_folio *o)" }
+
+[[patch]]
+message = "patches/14-beamfs-inline-data-path-4-4-write-side.txt"
+part = { file = "file_inline.c" }
+
+[[patch]]
+message = "patches/15-beamfs-add-scrubber-and-RS-benchmark.txt"
+add = ["rsbench.c", "scrub.c"]
+
+[[patch]]
+message = "patches/16-Documentation-filesystems-add-beamfs.txt"
+tree = ["Documentation/filesystems/beamfs.rst", "Documentation/ABI/testing/sysfs-fs-beamfs"]
+insert = [{ file = "Documentation/filesystems/index.rst", after = "   autofs-mount-control", line = "   beamfs" }]
+
+[[patch]]
+message = "patches/17-beamfs-add-Kconfig-and-Makefile.txt"
+tree = ["fs/beamfs/Kconfig", "fs/beamfs/Makefile"]
+insert = [
+  { file = "fs/Kconfig", after = "source \"fs/hfsplus/Kconfig\"", line = "source \"fs/beamfs/Kconfig\"" },
+  { file = "fs/Makefile", after = "obj-$(CONFIG_NILFS2_FS)\t\t+= nilfs2/", line = "obj-$(CONFIG_BEAMFS_FS)\t\t+= beamfs/" },
+]
+
+[[patch]]
+message = "patches/18-MAINTAINERS-add-beamfs.txt"
+maintainers = "tree/MAINTAINERS.entry"

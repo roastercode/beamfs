@@ -1,0 +1,15 @@
+beamfs: add error budget, alerts and clock
+
+budget.c records, for each data block, the largest number of symbols
+corrected in any of its codewords: a high-water mark of the correction
+capacity the block has used, which reads as the margin it has left.
+
+alert.c sends a KOBJ_CHANGE uevent on the filesystem's kobject when a
+threshold is crossed: a block reached zero margin, uncorrectable
+codewords within an interval, or blocks at zero margin. Notifications
+are rate-limited per class; what to do about them is left to
+userspace.
+
+clock.c anchors the monotonic timestamps of the event journal to the
+wall clock, with the accuracy of that clock as declared by the
+clock_source module parameter.

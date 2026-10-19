@@ -1,0 +1,8 @@
+beamfs: add inode and directory operations
+
+inode.c reads inodes from the inode table into the VFS.
+
+dir.c implements readdir and dirent.c the directory block format.
+Directory blocks carry inline Reed-Solomon parity, sixteen codewords
+per block as on the data path, and hold variable-length entries
+delimited by d_rec_len.

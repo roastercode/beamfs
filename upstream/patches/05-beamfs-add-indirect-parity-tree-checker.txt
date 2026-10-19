@@ -1,0 +1,13 @@
+beamfs: add indirect parity, tree checker
+
+An indirect block is 512 little-endian 64-bit pointers filling the
+whole block, with no room for a checksum, and a flipped pointer that
+still lands on an allocated block in range passes every structural
+check. indparity.c keeps Reed-Solomon parity for indirect blocks in a
+region of its own, at a slot computed from the block number, so the
+indirect block format does not change.
+
+treecheck.c is empty unless CONFIG_BEAMFS_DEBUG_TREE is set. It then
+records every pointer stored into an indirect block and warns, naming
+the task, the block and the slot, when a store finds zero where a live
+pointer was recorded.
