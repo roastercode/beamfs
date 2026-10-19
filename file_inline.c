@@ -54,8 +54,8 @@ static int     beamfs_inline_writepages(struct address_space *mapping,
 					struct writeback_control *wbc);
 static ssize_t beamfs_inline_file_write_iter(struct kiocb *iocb,
 					     struct iov_iter *from);
-static int     beamfs_inline_setattr(struct mnt_idmap *idmap,
-				    struct dentry *dentry,
+static int     beamfs_inline_setattr(const struct mnt_idmap *idmap,
+				     struct dentry *dentry,
 				    struct iattr *attr);
 static void    beamfs_inline_free_blocks_from(struct inode *inode,
 					      u64 b_first_freed);
@@ -343,7 +343,7 @@ int beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
 				return -EIO;
 			}
 			trace_beamfs_ind_read(inode->i_sb->s_dev, inode->i_ino, indirect_blk,
-				(unsigned int)indirect_slot,
+					      (unsigned int)indirect_slot,
 				le64_to_cpu(((__le64 *)ibh->b_data)[indirect_slot]),
 				buffer_uptodate(ibh), fresh);
 		}
@@ -848,7 +848,7 @@ static int beamfs_inline_lookup_or_alloc_phys(struct inode *inode,
  * Paired with beamfs_seal_data_block, which encodes what this writes.
  */
 void beamfs_lay_data_payload(struct super_block *sb, u8 *block,
-			       const u8 *payload)
+			     const u8 *payload)
 {
 	unsigned int i;
 
@@ -1171,7 +1171,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * tree loses every root indirect block.
 			 */
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
-							indirect_blk, 0);
+						indirect_blk, 0);
 			fi->i_indirect = cpu_to_le64(indirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1204,14 +1204,14 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			}
 			if (ibh)
 				trace_beamfs_ind_read(inode->i_sb->s_dev,
-					inode->i_ino, indirect_blk,
+						      inode->i_ino, indirect_blk,
 					(unsigned int)indirect_slot,
 					le64_to_cpu(((__le64 *)ibh->b_data)[indirect_slot]),
 					buffer_uptodate(ibh), !cached);
 		}
 		if (!ibh) {
 			pr_err_ratelimited("beamfs/inline: failed to read indirect block %llu\n",
-					  (unsigned long long)indirect_blk);
+					   (unsigned long long)indirect_blk);
 			return -EIO;
 		}
 		/*
@@ -1459,7 +1459,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * tree loses every root indirect block.
 			 */
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
-							dindirect_blk, 0);
+						dindirect_blk, 0);
 			fi->i_dindirect = cpu_to_le64(dindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -1492,7 +1492,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			ibh = sb_bread(sb, dindirect_blk);
 			if (ibh)
 				trace_beamfs_ind_read(inode->i_sb->s_dev,
-					inode->i_ino, dindirect_blk,
+						      inode->i_ino, dindirect_blk,
 					(unsigned int)l1_slot,
 					le64_to_cpu(((__le64 *)ibh->b_data)[l1_slot]),
 					buffer_uptodate(ibh), !cached);
@@ -1677,7 +1677,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			}
 			if (l1bh)
 				trace_beamfs_ind_read(inode->i_sb->s_dev,
-					inode->i_ino, l1_blk,
+						      inode->i_ino, l1_blk,
 					(unsigned int)l2_slot,
 					le64_to_cpu(((__le64 *)l1bh->b_data)[l2_slot]),
 					buffer_uptodate(l1bh), !cached);
@@ -1929,7 +1929,7 @@ static int beamfs_inline_lookup_or_alloc_phys_new(struct inode *inode,
 			 * tree loses every root indirect block.
 			 */
 			trace_beamfs_slot_store(inode->i_sb->s_dev, inode->i_ino, 0, 0, 0,
-							tindirect_blk, 0);
+						tindirect_blk, 0);
 			fi->i_tindirect = cpu_to_le64(tindirect_blk);
 			mark_inode_dirty(inode);
 		}
@@ -2575,7 +2575,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 {
 	u8                 *tmp = NULL;
 	int                 rs_results[BEAMFS_DATA_INLINE_SUBBLOCKS];
-	int                 rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
+	u8                 rs_positions[BEAMFS_DATA_INLINE_SUBBLOCKS *
 				      (BEAMFS_RS_PARITY / 2)];
 	bool                corrected = false;
 	bool                uncorrectable = false;
@@ -2665,7 +2665,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			 * preserves the forensic record of the event.
 			 */
 			beamfs_log_rs_event_flagged(sb, (u64)phys,
-				NULL, 0,
+						    NULL, 0,
 				BEAMFS_SUBBLOCK_DATA,
 				xflags | beamfs_rs_event_subblock_bits(i));
 			pr_err_ratelimited("beamfs/inline: ino=%llu iblock=%llu subblock=%u uncorrectable%s\n",
@@ -2677,7 +2677,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 			uncorrectable = true;
 		} else if (rc > 0) {
 			unsigned int np = (unsigned int)rc;
-			int *pos = rs_positions +
+			u8 *pos = rs_positions +
 				   (size_t)i * (BEAMFS_RS_PARITY / 2);
 			u32 xflags = rmw_path ?
 				BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0;
@@ -2690,7 +2690,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 					    i, rc,
 					    rmw_path ? "neutralised" : "corrected");
 			beamfs_log_rs_event_flagged(sb, (u64)phys,
-				pos, np,
+						    pos, np,
 				BEAMFS_SUBBLOCK_DATA,
 				xflags | beamfs_rs_event_subblock_bits(i));
 			/*
@@ -2777,7 +2777,7 @@ static int beamfs_inline_decode_block_into_buf(struct super_block *sb,
 
 		if (want != got) {
 			beamfs_log_rs_event_flagged(sb,
-				(u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS,
+						    (u64)phys * BEAMFS_DATA_INLINE_SUBBLOCKS,
 				NULL, 0,
 				BEAMFS_SUBBLOCK_DATA,
 				rmw_path ? BEAMFS_RS_EVENT_FLAG_RMW_NEUTRALISED : 0);
@@ -4514,7 +4514,7 @@ static void beamfs_inline_free_blocks_from(struct inode *inode,
 		if (beamfs_ind_parity_verify(sb, ibh)) {
 			brelse(ibh);
 			pr_err_ratelimited("beamfs/inline: truncate: indirect block %llu failed parity, subtree left allocated\n",
-						   (unsigned long long)indirect_blk);
+					   (unsigned long long)indirect_blk);
 			return;
 		}
 		ptrs = (__le64 *)ibh->b_data;
@@ -4750,7 +4750,7 @@ static int beamfs_inline_zero_tail_block(struct inode *inode, u64 b,
  * Other attribute changes (mode, owner, times) are forwarded to
  * setattr_copy + mark_inode_dirty.
  */
-static int beamfs_inline_setattr(struct mnt_idmap *idmap,
+static int beamfs_inline_setattr(const struct mnt_idmap *idmap,
 				 struct dentry *dentry, struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);

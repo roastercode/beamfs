@@ -117,7 +117,7 @@ static noinline_for_stack void beamfs_scrub_confirm(struct super_block *sb,
 						    u64 phys, u8 *buf,
 						    bool woven, int *r2)
 {
-	int p2[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
+	u8 p2[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int k;
 	int mr;
 
@@ -364,13 +364,18 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 {
 	struct buffer_head *bh = NULL;
 	/*
-	 * On the stack, as in beamfs_dirent_decode: 64 and 512 bytes,
-	 * against a 2 KiB frame budget, on a sweep that must not wait on
-	 * the allocator while the machine is under pressure.
+	 * Off the stack: submit-checklist allows a frame 512 bytes, and
+	 * with these three on it the frame was 656. The allocation is
+	 * small and GFP_NOFS; a sweep that cannot get it skips the block
+	 * and comes back to it.
 	 */
-	int  results[BEAMFS_DATA_INLINE_SUBBLOCKS];
-	int  positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
-	int  r2[BEAMFS_DATA_INLINE_SUBBLOCKS];
+	struct beamfs_scrub_scratch {
+		int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
+		int r2[BEAMFS_DATA_INLINE_SUBBLOCKS];
+		u8 positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
+	} *sc;
+	int *results, *r2;
+	u8 *positions;
 	u8   *staging, *orig;
 	unsigned int i, n_corrected = 0;
 	int ret = 0, dret;
@@ -383,8 +388,12 @@ int beamfs_scrub_check_block(struct super_block *sb, u64 phys,
 
 	*corrected = 0;
 
-	memset(results, 0, sizeof(results));
-	memset(r2, 0, sizeof(r2));
+	sc = kzalloc_obj(*sc, GFP_NOFS);
+	if (!sc)
+		return -ENOMEM;
+	results = sc->results;
+	r2 = sc->r2;
+	positions = sc->positions;
 	/*
 	 * Both pages before any mutex: the pool waits when it is empty,
 	 * and nothing may wait on it holding the owner's allocation
@@ -473,7 +482,7 @@ decoded:
 		if (results[i] > 0) {
 			n_corrected++;
 			beamfs_log_rs_event_flagged(sb,
-				phys,
+						    phys,
 				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
 				BEAMFS_SUBBLOCK_DATA,
@@ -528,7 +537,7 @@ decoded:
 			 * is correct: the damage is the same either way.
 			 */
 			beamfs_log_rs_event_flagged(sb,
-				phys,
+						    phys,
 				NULL, 0, BEAMFS_SUBBLOCK_DATA,
 				beamfs_rs_event_subblock_bits(i));
 			ret = -EUCLEAN;
@@ -593,6 +602,7 @@ out_brelse:
 out_free:
 	beamfs_scratch_put(sb, orig);
 	beamfs_scratch_put(sb, staging);
+	kfree(sc);
 	return ret;
 }
 

@@ -182,7 +182,7 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 	 * function whose callers are shallow.
 	 */
 	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
-	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
+	u8 positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int i, corrected = 0;
 	int ret = 0;
 
@@ -234,7 +234,7 @@ int beamfs_dirent_decode(struct super_block *sb, struct buffer_head *bh,
 		if (results[i] > 0) {
 			corrected++;
 			beamfs_log_rs_event_flagged(sb,
-				bh->b_blocknr,
+						    bh->b_blocknr,
 				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
 				BEAMFS_SUBBLOCK_DATA,

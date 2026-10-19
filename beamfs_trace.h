@@ -293,6 +293,45 @@ TRACE_EVENT(beamfs_inode_dirty,
 		  __entry->ino, __entry->state)
 );
 
+/*
+ * One event per RS decode that found something, on every path: data
+ * read, RMW transit, directory, bitmap, indirect parity, scrub and
+ * superblock. It is raised in beamfs_log_rs_event_flagged, the one
+ * place every decoder reports to, so a capture misses none of them and
+ * none is rate-limited the way the dmesg lines are. The journal in the
+ * superblock keeps the last sixty-four; this keeps as many as the ring
+ * buffer is sized for.
+ *
+ * @blk is the physical block, the number emufi's flip_log gives as
+ * sector / 8, so a flip and its verdict join on it directly. @sub is
+ * the subblock, -1 when the event has none (a superblock or inode
+ * correction). @symbols is how many the decoder corrected, 0 when it
+ * could not; @flags is re_flags as journalled, so uncorrectable
+ * (BIT(1)), RMW-neutralised (BIT(2)) and inode (BIT(3)) read off it.
+ */
+TRACE_EVENT(beamfs_rs_event,
+	TP_PROTO(dev_t dev, u64 blk, int sub, unsigned int symbols, u32 flags),
+	TP_ARGS(dev, blk, sub, symbols, flags),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(u64, blk)
+		__field(int, sub)
+		__field(unsigned int, symbols)
+		__field(u32, flags)
+	),
+	TP_fast_assign(
+		__entry->dev = dev;
+		__entry->blk = blk;
+		__entry->sub = sub;
+		__entry->symbols = symbols;
+		__entry->flags = flags;
+	),
+	TP_printk("dev=%u:%u blk=%llu sub=%d symbols=%u flags=0x%x",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->blk, __entry->sub, __entry->symbols,
+		  __entry->flags)
+);
+
 #endif /* _BEAMFS_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH

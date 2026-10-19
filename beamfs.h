@@ -141,6 +141,18 @@ struct beamfs_sb_info {
 	 * stays clear.
 	 */
 	unsigned long            *s_bitmap_needs_encode;
+	/*
+	 * Metadata buffers the whole volume shares: bitmap blocks and
+	 * indirect parity regions. One list for all of them, never an
+	 * inode's. A buffer that moves between per-inode lists meets the
+	 * window in mmb_sync where b_mmb is NULL under one inode's lock
+	 * while mmb_mark_buffer_dirty, under another inode's lock, relinks
+	 * the same b_assoc_buffers: list_del corruption, then a soft lockup
+	 * holding mmb->lock (dbench, generic/241, x86-01, 2026-10-15).
+	 * write_inode, sync_inode_metadata and evict sync this list before
+	 * the inode's own; put_super empties it before releasing them.
+	 */
+	struct mapping_metadata_bhs s_shared_bhs;
 	bool                      s_super_needs_encode;
 	spinlock_t                s_lock;     /* Superblock lock */
 
@@ -417,15 +429,15 @@ int  beamfs_inline_lookup_phys(struct inode *inode, u64 iblock_logical,
  * NOT appear in extra_flags (WARN_ON_ONCE enforces).
  */
 void beamfs_log_rs_event_flagged(struct super_block *sb,
-			u64 block_no,
-			const int *positions,
+				 u64 block_no,
+			const u8 *positions,
 			unsigned int n_positions,
 			size_t code_len_bytes,
 			u32 extra_flags);
 
 void beamfs_log_rs_event(struct super_block *sb,
-			u64 block_no,
-			const int *positions,
+			 u64 block_no,
+			const u8 *positions,
 			unsigned int n_positions,
 			size_t code_len_bytes);
 void beamfs_dirty_super(struct beamfs_sb_info *sbi);
@@ -436,7 +448,7 @@ extern const struct file_operations          beamfs_inline_file_operations;
 
 /* inode.c */
 struct inode *beamfs_iget(struct super_block *sb, unsigned long ino);
-int beamfs_getattr(struct mnt_idmap *idmap, const struct path *path,
+int beamfs_getattr(const struct mnt_idmap *idmap, const struct path *path,
 		   struct kstat *stat, u32 request_mask,
 		   unsigned int query_flags);
 /* namei.c */
@@ -534,7 +546,7 @@ int beamfs_rs_encode(u8 *data, size_t len, u8 *parity);
  * entropy estimator must only be given the data positions.
  */
 int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
-		    int *positions, unsigned int max_positions,
+		     u8 *positions, unsigned int max_positions,
 		     const char *who);
 
 /*
@@ -551,8 +563,8 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
  * Pre: positions != NULL, 1 <= n_positions <= BEAMFS_RS_PARITY/2
  *      code_len_bytes >= n_positions
  */
-__u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
-				      unsigned int n_positions,
+__u32 beamfs_rs_compute_entropy_q16_16(const u8 *positions,
+				       unsigned int n_positions,
 				      size_t code_len_bytes);
 
 /*
@@ -620,13 +632,13 @@ int beamfs_rs_decode_woven(u8 *data_buf, u8 *parity_buf,
  * does not need entropy logging for any of the subblocks.
  */
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
-			   u8 *parity_buf, size_t parity_stride,
+			    u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks);
 int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
-			   u8 *parity_buf, size_t parity_stride,
+			    u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks,
 			   int *results,
-			   int *positions_buf,
+			   u8 *positions_buf,
 			   unsigned int positions_stride,
 			    const char *who);
 
@@ -792,7 +804,7 @@ void beamfs_free_inode_num(struct super_block *sb, u64 ino);
 
 /* dir.c */
 struct dentry *beamfs_lookup(struct inode *dir, struct dentry *dentry,
-			    unsigned int flags);
+			     unsigned int flags);
 
 /* namei.c */
 int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc);

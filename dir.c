@@ -252,7 +252,7 @@ struct dentry *beamfs_lookup(struct inode *dir,
 			    !memcmp(de->d_name, dentry->d_name.name,
 				    de->d_name_len)) {
 				inode = beamfs_iget(sb,
-					(unsigned long)le64_to_cpu(de->d_ino));
+						    (unsigned long)le64_to_cpu(de->d_ino));
 				goto out;
 			}
 

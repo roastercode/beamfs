@@ -140,7 +140,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 		     k++) {
 			u64 disk_blk = bitmap_blk + (u64)k;
 			int rs_results[BEAMFS_BITMAP_SUBBLOCKS];
-			int rs_positions[BEAMFS_BITMAP_SUBBLOCKS *
+			u8 rs_positions[BEAMFS_BITMAP_SUBBLOCKS *
 					 (BEAMFS_RS_PARITY / 2)];
 			unsigned long bit_local;
 
@@ -181,7 +181,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 					       k, i);
 				} else if (rc > 0) {
 					unsigned int np = (unsigned int)rc;
-					int *pos = rs_positions +
+					u8 *pos = rs_positions +
 						i * (BEAMFS_RS_PARITY / 2);
 
 					if (np > BEAMFS_RS_PARITY / 2)
@@ -189,7 +189,7 @@ int beamfs_setup_bitmap(struct super_block *sb)
 					pr_warn("beamfs: bmap blk %u sub %lu: %d corrected\n",
 						k, i, rc);
 					beamfs_log_rs_event_flagged(sb,
-						disk_blk,
+								    disk_blk,
 						pos, np,
 						BEAMFS_SUBBLOCK_DATA,
 						beamfs_rs_event_subblock_bits(i));
@@ -525,28 +525,33 @@ int beamfs_write_bitmap_block(struct super_block *sb,
 	 * untouched and their parity still holds.
 	 */
 	beamfs_bitmap_encode_sub_locked(sbi, k,
-		(u32)((bit_global % BEAMFS_BITS_PER_BITMAP_BLOCK) /
+					(u32)((bit_global % BEAMFS_BITS_PER_BITMAP_BLOCK) /
 		      (BEAMFS_SUBBLOCK_DATA * 8)),
 		bh);
 	clear_bit(k, sbi->s_bitmap_needs_encode);
 	mark_buffer_dirty(bh);
 
 	/*
-	 * Bind to the owner inode so VFS writeback flushes this bitmap
-	 * block BEFORE the owner inode is marked clean. The VFS flushes
-	 * the inode's metadata buffer list in __writeback_single_inode
-	 * before write_inode, which establishes the bitmap-before-inode
-	 * ordering that prevents the boot-time double-free: without it,
-	 * boot N could persist an inode pointer without persisting the
-	 * matching bitmap clear, leaving boot N+1 to mount a bitmap
-	 * declaring a block free while an inode still referenced it.
+	 * On the volume's shared metadata list, never the owner's.
 	 *
-	 * owner is NULL on the mount path, where the caller drives a
-	 * synchronous sync_dirty_buffer itself, and on the free path from
-	 * beamfs_free_data_blocks.
+	 * The bitmap block is shared by every inode allocating from it.
+	 * Attached to the owner's i_metadata_bhs it moved from one inode's
+	 * list to the next, and mmb_sync has a window -- b_mmb NULL under
+	 * one inode's lock -- where mmb_mark_buffer_dirty under another
+	 * inode's lock relinks the same b_assoc_buffers: list_del
+	 * corruption, then a soft lockup holding mmb->lock (dbench,
+	 * generic/241, x86-01, 2026-10-15). One list, one lock, no move.
+	 *
+	 * The bitmap-before-inode ordering that prevents the boot-time
+	 * double-free -- boot N persisting an inode pointer without the
+	 * matching bitmap clear, boot N+1 mounting a bitmap that declares
+	 * a block free while an inode still references it -- is kept by
+	 * beamfs_write_inode, which syncs s_shared_bhs before writing the
+	 * inode. owner is NULL on the mount path and on the free path from
+	 * beamfs_free_data_blocks; the block is on the list either way.
 	 */
+	mmb_mark_buffer_dirty(bh, &sbi->s_shared_bhs);
 	if (owner && !(inode_state_read_once(owner) & I_FREEING)) {
-		mmb_mark_buffer_dirty(bh, &BEAMFS_I(owner)->i_metadata_bhs);
 		/*
 		 * And the owner, or the list is never walked.
 		 *

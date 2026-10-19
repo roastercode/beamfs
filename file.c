@@ -47,7 +47,7 @@ const struct inode_operations beamfs_file_inode_operations = {
  * (iblock 12..523, covering up to ~2 MiB per file).
  */
 static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
-			     unsigned int flags, struct iomap *iomap,
+			      unsigned int flags, struct iomap *iomap,
 			     struct iomap *srcmap)
 {
 	struct beamfs_inode_info *fi  = BEAMFS_I(inode);
@@ -399,7 +399,7 @@ static int beamfs_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 }
 
 static int beamfs_iomap_end(struct inode *inode, loff_t pos, loff_t length,
-			   ssize_t written, unsigned int flags,
+			    ssize_t written, unsigned int flags,
 			   struct iomap *iomap)
 {
 	return 0;
@@ -447,13 +447,13 @@ int beamfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
  * get_folio/put_folio use generic helpers (no journaling required).
  */
 static struct folio *beamfs_iomap_get_folio(struct iomap_iter *iter,
-					   loff_t pos, unsigned int len)
+					    loff_t pos, unsigned int len)
 {
 	return iomap_get_folio(iter, pos, len);
 }
 
 static void beamfs_iomap_put_folio(struct inode *inode, loff_t pos,
-				  unsigned int copied, struct folio *folio)
+				   unsigned int copied, struct folio *folio)
 {
 	folio_unlock(folio);
 	folio_put(folio);
@@ -474,7 +474,7 @@ static ssize_t beamfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
  * Writeback path - beamfs_writeback_ops
  */
 static ssize_t beamfs_writeback_range(struct iomap_writepage_ctx *wpc,
-				     struct folio *folio, u64 offset,
+				      struct folio *folio, u64 offset,
 				     unsigned int len, u64 end_pos)
 {
 	if ((loff_t)offset < wpc->iomap.offset ||
@@ -483,7 +483,7 @@ static ssize_t beamfs_writeback_range(struct iomap_writepage_ctx *wpc,
 
 		memset(&wpc->iomap, 0, sizeof(wpc->iomap));
 		ret = beamfs_iomap_begin(wpc->inode,
-					offset, INT_MAX, 0,
+					 offset, INT_MAX, 0,
 					&wpc->iomap, NULL);
 		if (ret)
 			return ret;
@@ -497,7 +497,7 @@ static const struct iomap_writeback_ops beamfs_writeback_ops = {
 };
 
 static int beamfs_writepages(struct address_space *mapping,
-			    struct writeback_control *wbc)
+			     struct writeback_control *wbc)
 {
 	struct iomap_writepage_ctx wpc = {
 		.inode = mapping->host,

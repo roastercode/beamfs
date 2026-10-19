@@ -147,8 +147,8 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 
 	crc = beamfs_inode_crc(raw);
 	if (crc != le32_to_cpu(raw->i_crc32)) {
-		u32 scheme = le32_to_cpu(
-			BEAMFS_SB(sb)->s_beamfs_sb->s_data_protection_scheme);
+		struct beamfs_super_block *bsb = BEAMFS_SB(sb)->s_beamfs_sb;
+		u32 scheme = le32_to_cpu(bsb->s_data_protection_scheme);
 		int nerr;
 
 		if (scheme != BEAMFS_DATA_PROTECTION_INODE_UNIVERSAL &&
@@ -163,8 +163,8 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 		}
 
 		{
-			int positions[BEAMFS_RS_PARITY / 2];
-			struct beamfs_inode fixed;
+			u8 positions[BEAMFS_RS_PARITY / 2];
+			struct beamfs_inode *fixed;
 
 			/*
 			 * Decode a copy, not the shared buffer.
@@ -186,24 +186,37 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 			 * the buffer lock. A correction that does not pass the
 			 * CRC touches nothing.
 			 */
-			memcpy(&fixed, raw, sizeof(fixed));
-			nerr = beamfs_rs_decode((u8 *)&fixed,
-					       BEAMFS_INODE_RS_DATA,
-					       fixed.i_reserved,
+			/*
+			 * The copy lives on the heap: with it on the stack
+			 * the frame of beamfs_iget was 560 bytes, past the
+			 * 512 submit-checklist allows, and iget_locked has
+			 * just allocated the in-core inode anyway.
+			 */
+			fixed = kmemdup(raw, sizeof(*fixed), GFP_NOFS);
+			if (!fixed) {
+				brelse(bh);
+				iget_failed(inode);
+				return ERR_PTR(-ENOMEM);
+			}
+			nerr = beamfs_rs_decode((u8 *)fixed,
+						BEAMFS_INODE_RS_DATA,
+					       fixed->i_reserved,
 					       positions,
 					       BEAMFS_RS_PARITY / 2,
 				"inode");
 			if (nerr < 0) {
 				pr_err("beamfs: inode %lu uncorrectable\n", ino);
+				kfree(fixed);
 				brelse(bh);
 				iget_failed(inode);
 				return ERR_PTR(-EIO);
 			}
 
-			crc = beamfs_inode_crc(&fixed);
-			if (crc != le32_to_cpu(fixed.i_crc32)) {
+			crc = beamfs_inode_crc(fixed);
+			if (crc != le32_to_cpu(fixed->i_crc32)) {
 				pr_err("beamfs: inode %lu CRC32 mismatch after RS correction\n",
 				       ino);
+				kfree(fixed);
 				brelse(bh);
 				iget_failed(inode);
 				return ERR_PTR(-EIO);
@@ -211,12 +224,12 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 
 			/* Confirmed: publish the correction. */
 			lock_buffer(bh);
-			memcpy(raw, &fixed, sizeof(fixed));
+			memcpy(raw, fixed, sizeof(*fixed));
 			unlock_buffer(bh);
+			kfree(fixed);
 
-			/* Log the RS event with position list for entropy. nerr is
-			 * the total symbol count (data + parity); positions[] holds
-			 * only DATA positions used by the entropy estimator.
+			/* Log the RS event with its positions: nerr is the number
+			 * of data bytes corrected, the entries positions[] holds.
 			 */
 			if (nerr > 0) {
 				unsigned int np = (unsigned int)nerr;
@@ -230,7 +243,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
 				 * position.
 				 */
 				beamfs_log_rs_event_flagged(sb, bh->b_blocknr,
-						   positions, np,
+							    positions, np,
 						   BEAMFS_INODE_RS_DATA,
 						   BEAMFS_RS_EVENT_FLAG_INODE);
 			}
@@ -342,7 +355,7 @@ struct inode *beamfs_iget(struct super_block *sb, unsigned long ino)
  * where it failed. Until a count is kept, the mask statx returns leaves
  * STATX_BLOCKS out rather than vouch for the number.
  */
-int beamfs_getattr(struct mnt_idmap *idmap, const struct path *path,
+int beamfs_getattr(const struct mnt_idmap *idmap, const struct path *path,
 		   struct kstat *stat, u32 request_mask,
 		   unsigned int query_flags)
 {

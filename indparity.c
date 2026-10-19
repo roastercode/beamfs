@@ -176,7 +176,7 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 			   u8 *scratch)
 {
 	int results[BEAMFS_DATA_INLINE_SUBBLOCKS];
-	int positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
+	u8 positions[BEAMFS_DATA_INLINE_SUBBLOCKS * (BEAMFS_RS_PARITY / 2)];
 	unsigned int i;
 	int ret = 0;
 	u64 gen_at_read;
@@ -237,7 +237,7 @@ static int ind_region_read(struct super_block *sb, struct buffer_head *pbh,
 			ret = -EUCLEAN;
 		} else if (results[i] > 0) {
 			beamfs_log_rs_event_flagged(sb, pbh->b_blocknr,
-				positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
+						    positions + (size_t)i * (BEAMFS_RS_PARITY / 2),
 				(unsigned int)results[i],
 				BEAMFS_SUBBLOCK_DATA,
 				beamfs_rs_event_subblock_bits(i));
@@ -623,13 +623,16 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 	unlock_buffer(pbh);
 	beamfs_scratch_put(sb, scratch);
 	/*
-	 * On the inode's list when there is one, so writeback carries it
-	 * with the block it describes. Without an inode -- the scrubber
-	 * -- a plain dirty is all there is, and sync_blockdev is what
-	 * eventually takes it.
+	 * On the volume's shared metadata list, so that the sync of any
+	 * inode carries it with the blocks it describes. Not on the
+	 * inode's own list: a region holds the parity of fourteen indirect
+	 * blocks of as many files, and a buffer that moves between inode
+	 * lists meets the window in mmb_sync described at s_shared_bhs.
+	 * Without an inode -- the scrubber -- the list is still the one
+	 * the next write_inode syncs.
 	 */
+	mmb_mark_buffer_dirty(pbh, &BEAMFS_SB(sb)->s_shared_bhs);
 	if (inode) {
-		mmb_mark_buffer_dirty(pbh, &BEAMFS_I(inode)->i_metadata_bhs);
 		/*
 		 * And the inode, so the list gets flushed.
 		 *
@@ -648,8 +651,6 @@ void beamfs_ind_parity_update(struct super_block *sb, struct buffer_head *bh,
 		 * it just never landed.
 		 */
 		mark_inode_dirty(inode);
-	} else {
-		mark_buffer_dirty(pbh);
 	}
 	brelse(pbh);
 }
@@ -820,7 +821,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u CRC mismatch\n",
 						   (unsigned long long)phys, i);
 				beamfs_log_rs_event_flagged(sb,
-					phys, NULL, 0, BEAMFS_SUBBLOCK_DATA,
+							    phys, NULL, 0, BEAMFS_SUBBLOCK_DATA,
 					beamfs_rs_event_subblock_bits(i));
 				ret = -EUCLEAN;
 			}
@@ -828,7 +829,7 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 	} else {
 		u8 *slot = slotbuf;
 		int results[1];
-		int positions[BEAMFS_RS_PARITY / 2];
+		u8 positions[BEAMFS_RS_PARITY / 2];
 		u8 *copy;
 
 		/*
@@ -865,14 +866,16 @@ int beamfs_ind_parity_verify(struct super_block *sb, struct buffer_head *bh)
 		memcpy(copy, block, BEAMFS_BLOCK_SIZE);
 
 		for (i = 0; i < BEAMFS_DATA_INLINE_SUBBLOCKS; i++) {
-			int region_rc = beamfs_rs_decode_region(
-				copy + (size_t)i * BEAMFS_SUBBLOCK_DATA,
-				BEAMFS_SUBBLOCK_DATA,
-				slot + (size_t)i * BEAMFS_RS_PARITY,
-				BEAMFS_RS_PARITY,
-				BEAMFS_SUBBLOCK_DATA, 1,
-				results, positions, BEAMFS_RS_PARITY / 2,
-				"indirect");
+			u8 *dsub = copy + (size_t)i * BEAMFS_SUBBLOCK_DATA;
+			u8 *psub = slot + (size_t)i * BEAMFS_RS_PARITY;
+			int region_rc;
+
+			region_rc = beamfs_rs_decode_region(dsub, BEAMFS_SUBBLOCK_DATA,
+							    psub, BEAMFS_RS_PARITY,
+							    BEAMFS_SUBBLOCK_DATA, 1,
+							    results, positions,
+							    BEAMFS_RS_PARITY / 2,
+							    "indirect");
 
 			if (region_rc < 0 || results[0] < 0) {
 				pr_err_ratelimited("beamfs: indirect block %llu subblock %u uncorrectable\n",

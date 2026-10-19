@@ -210,8 +210,8 @@ static const __u32 beamfs_rs_entropy_term_q16_16[9][9] = {
  * but is forensically non-significant; beamfs_log_rs_event_flagged
  * does not call this for one and leaves the flag clear.
  */
-__u32 beamfs_rs_compute_entropy_q16_16(const int *positions,
-				      unsigned int n_positions,
+__u32 beamfs_rs_compute_entropy_q16_16(const u8 *positions,
+				       unsigned int n_positions,
 				      size_t code_len_bytes)
 {
 	unsigned int bin_count[BEAMFS_RS_ENTROPY_BINS];
@@ -305,36 +305,40 @@ int beamfs_rs_encode(u8 *data, size_t len, u8 *parity)
  *
  * @data:          data bytes (@len bytes), corrected in place on success
  * @len:           number of data bytes (must match the length passed to encode)
- * @parity:        parity bytes (BEAMFS_RS_PARITY)
- * @positions:     optional output, BEAMFS_RS_PARITY/2 = 8 entries; on a
+ * @parity:        parity bytes (BEAMFS_RS_PARITY); read, never rewritten
+ * @positions:     optional output, up to @max_positions entries; on a
  *                 positive return holds the corrected DATA byte positions
- *                 in [0, len). May be NULL if no entropy logging is needed.
+ *                 in [0, len), ascending. May be NULL if no entropy
+ *                 logging is needed.
  * @max_positions: capacity of @positions; ignored if @positions is NULL.
  *
  * Returns:
  *   < 0  uncorrectable (-EBADMSG) or invalid input (-EINVAL)
  *   = 0  no errors detected
- *   > 0  number of symbol errors corrected in place (data + parity)
+ *   > 0  with @positions: the number of DATA bytes corrected, which is
+ *        the number of entries written to @positions; without it, the
+ *        number of symbols corrected, parity included.
  *
- * Implementation note: decode_rs8 cannot both correct in place
- * AND report eras_pos in a single call (its API is mutually exclusive on
- * those modes; see lib/reed_solomon/decode_rs.c). To avoid a second RS
- * decode pass, we snapshot @data before the call and reconstruct the
- * corrected data positions by byte diff afterwards. Parity-side
- * corrections are not reflected in @positions, and they stay in a
- * local copy: @parity itself is not rewritten. The journal's entropy
- * estimate is over data positions only.
- *
- * Stack cost: BEAMFS_SUBBLOCK_DATA = 239 bytes for the snapshot (per call).
+ * decode_rs8() either applies its corrections or reports them (see
+ * lib/reed_solomon/decode_rs.c: with eras_pos and corr it stores each
+ * correction's position and pattern and touches nothing). Asked to
+ * report, we apply the data corrections ourselves and leave the
+ * parity alone: the 239-byte snapshot this function used to take, to
+ * find the corrected bytes by diff, is gone from the stack. A parity
+ * symbol decode_rs8 would have corrected is not counted when the
+ * caller wants positions, so that the count it gets is the count of
+ * entries it may read: alloc.c and the others hand that count on to
+ * the journal.
  */
 int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
-		    int *positions, unsigned int max_positions,
+		     u8 *positions, unsigned int max_positions,
 		    const char *who)
 {
 	u16 par[BEAMFS_RS_PARITY];
-	u8 data_orig[BEAMFS_SUBBLOCK_DATA];
-	int i, nerr;
-	unsigned int n_data_corrected = 0;
+	u16 corr[BEAMFS_RS_PARITY];
+	int pos[BEAMFS_RS_PARITY];
+	int i, j, nerr;
+	unsigned int n_data = 0;
 
 	if (!beamfs_rs_ctrl_pcpu)
 		return -EINVAL;
@@ -346,14 +350,7 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 	for (i = 0; i < BEAMFS_RS_PARITY; i++)
 		par[i] = parity[i];
 
-	/* Snapshot data for post-decode position reconstruction. */
-	if (positions)
-		memcpy(data_orig, data, len);
-
-	/* Mode "apply": corrects data, and the local copy of the parity, in
-	 * place. With eras_pos NULL, decode_rs8() applies the correction
-	 * rather than reporting it.
-	 *
+	/*
 	 * Per-CPU: get_cpu_ptr disables preemption while decode runs in
 	 * the CPU-local rs_control. decode_rs8 is pure computation, no
 	 * allocs, no sleeps -- preempt-disable is safe.
@@ -367,7 +364,7 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 			return -EINVAL;
 		}
 		nerr = decode_rs8(ctrl, data, par, len,
-				  NULL, 0, NULL, 0, NULL);
+				  NULL, 0, pos, 0, corr);
 		put_cpu_ptr(beamfs_rs_ctrl_pcpu);
 	}
 
@@ -377,32 +374,41 @@ int beamfs_rs_decode(u8 *data, size_t len, u8 *parity,
 		 *
 		 * This function knows a length and nothing else -- not the
 		 * block, not which of the sixteen subblocks, not what owns
-		 * it. It said "RS uncorrectable (len=239) in sweep", which
-		 * names the caller and stops exactly where the question
-		 * starts. Every caller has results[] and its own context,
-		 * and reports from there.
+		 * it. Every caller has results[] and its own context, and
+		 * reports from there.
 		 */
 		return -EBADMSG;
 	}
+	if (nerr > BEAMFS_RS_PARITY)
+		return -EBADMSG;
 
-	/* Reconstruct DATA-side corrected positions by byte diff. nerr is
-	 * the total count (data + parity); n_data_corrected is the subset
-	 * relevant for the entropy estimator.
+	/*
+	 * Positions come out in locator order; the journal and its
+	 * entropy estimate were written for ascending ones.
 	 */
-	if (positions && nerr > 0) {
-		for (i = 0; i < (int)len &&
-		     n_data_corrected < max_positions; i++) {
-			if (data[i] != data_orig[i])
-				positions[n_data_corrected++] = i;
+	for (i = 1; i < nerr; i++) {
+		int p = pos[i];
+		u16 c = corr[i];
+
+		for (j = i - 1; j >= 0 && pos[j] > p; j--) {
+			pos[j + 1] = pos[j];
+			corr[j + 1] = corr[j];
 		}
+		pos[j + 1] = p;
+		corr[j + 1] = c;
 	}
 
-	/* nerr, the value returned, counts data and parity symbols; only
-	 * the first n_data_corrected entries of @positions are written,
-	 * and that count is not returned. When parity symbols were
-	 * corrected too, nerr exceeds it, and a caller that hands nerr on
-	 * as the number of positions passes entries nobody wrote.
-	 */
+	for (i = 0; i < nerr; i++) {
+		if (pos[i] < 0 || pos[i] >= (int)len)
+			continue;	/* a parity symbol: the copy is dropped */
+		data[pos[i]] ^= (u8)corr[i];
+		if (positions && n_data < max_positions)
+			positions[n_data] = (u8)pos[i];
+		n_data++;
+	}
+
+	if (positions)
+		return (int)min(n_data, max_positions);
 	return nerr;
 }
 
@@ -634,7 +640,7 @@ void beamfs_block_write(u8 *block, size_t off, size_t len, const u8 *in)
  * On failure the buffer is in an indeterminate state.
  */
 int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
-			   u8 *parity_buf, size_t parity_stride,
+			    u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks)
 {
 	unsigned int i;
@@ -690,10 +696,10 @@ int beamfs_rs_encode_region(u8 *data_buf, size_t data_stride,
  * outcome, and the first negative error is the one returned.
  */
 int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
-			   u8 *parity_buf, size_t parity_stride,
+			    u8 *parity_buf, size_t parity_stride,
 			   size_t data_len, unsigned int n_subblocks,
 			   int *results,
-			   int *positions_buf,
+			   u8 *positions_buf,
 			   unsigned int positions_stride,
 			   const char *who)
 {
@@ -710,7 +716,7 @@ int beamfs_rs_decode_region(u8 *data_buf, size_t data_stride,
 	for (i = 0; i < n_subblocks; i++) {
 		u8 *d = data_buf   + (size_t)i * data_stride;
 		u8 *p = parity_buf + (size_t)i * parity_stride;
-		int *pos = positions_buf
+		u8 *pos = positions_buf
 			? positions_buf + (size_t)i * positions_stride
 			: NULL;
 		int rc = beamfs_rs_decode(d, data_len, p,

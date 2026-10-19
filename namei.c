@@ -727,8 +727,8 @@ struct inode *beamfs_new_inode(struct inode *dir, umode_t mode)
 /* create - create a regular file                                       */
 /* ------------------------------------------------------------------ */
 
-static int beamfs_create(struct mnt_idmap *idmap, struct inode *dir,
-			struct dentry *dentry, umode_t mode)
+static int beamfs_create(const struct mnt_idmap *idmap, struct inode *dir,
+			 struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	int           ret;
@@ -780,8 +780,8 @@ out_iput:
 /* mkdir - create a directory                                          */
 /* ------------------------------------------------------------------ */
 
-static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-				  struct dentry *dentry, umode_t mode)
+static struct dentry *beamfs_mkdir(const struct mnt_idmap *idmap, struct inode *dir,
+				   struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	int           ret;
@@ -796,12 +796,12 @@ static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	/* Add . and .. entries */
 	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT(".", 1),
-			       inode->i_ino, DT_DIR);
+				inode->i_ino, DT_DIR);
 	if (ret)
 		goto out_fail;
 
 	ret = beamfs_add_dirent(inode, &(struct qstr)QSTR_INIT("..", 2),
-			       dir->i_ino, DT_DIR);
+				dir->i_ino, DT_DIR);
 	if (ret)
 		goto out_fail;
 
@@ -810,7 +810,7 @@ static struct dentry *beamfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		goto out_fail;
 
 	ret = beamfs_add_dirent(dir, &dentry->d_name, inode->i_ino,
-			       DT_DIR);
+				DT_DIR);
 	if (ret)
 		goto out_fail;
 
@@ -984,7 +984,7 @@ static int beamfs_rmdir(struct inode *dir, struct dentry *dentry)
 /* ------------------------------------------------------------------ */
 
 static int beamfs_link(struct dentry *old_dentry, struct inode *dir,
-		      struct dentry *dentry)
+		       struct dentry *dentry)
 {
 	struct inode *inode = d_inode(old_dentry);
 	int           ret;
@@ -1107,7 +1107,7 @@ static int beamfs_symlink_store_block(struct inode *inode, const char *target,
  * goes in a data block whose number is in i_direct[0]; i_size tells the
  * two apart. Anything longer, or an empty target, gets -ENAMETOOLONG.
  */
-static int beamfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
+static int beamfs_symlink(const struct mnt_idmap *idmap, struct inode *dir,
 			  struct dentry *dentry, const char *symname)
 {
 	struct inode             *inode;
@@ -1268,7 +1268,7 @@ const struct inode_operations beamfs_symlink_inode_operations = {
 int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	bool sync = wbc->sync_mode == WB_SYNC_ALL;
-	int ret, mret;
+	int ret, mret, sret;
 
 	/*
 	 * Flush the inode's metadata buffers, not just the inode.
@@ -1292,6 +1292,18 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	 * inode, keeps the two together: whatever i_indirect points at is
 	 * on the medium by the time the inode naming it is.
 	 */
+	/*
+	 * The volume's shared metadata first -- bitmap blocks and parity
+	 * regions, see s_shared_bhs -- so that whatever this inode's
+	 * pointers rely on is on the medium before the inode naming them.
+	 */
+	{
+		int had = mmb_has_buffers(&BEAMFS_SB(inode->i_sb)->s_shared_bhs);
+
+		sret = mmb_sync(&BEAMFS_SB(inode->i_sb)->s_shared_bhs);
+		trace_beamfs_mmb(inode->i_sb->s_dev, inode->i_ino,
+				 "write_inode shared", had, sret);
+	}
 	ret = beamfs_write_inode_raw_flags(inode, sync);
 
 	{
@@ -1303,6 +1315,8 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	}
 	if (!ret)
 		ret = mret;
+	if (!ret)
+		ret = sret;
 
 	/*
 	 * Tell the VFS this inode may have metadata in flight.
@@ -1329,8 +1343,8 @@ int beamfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 /* rename - move/rename a directory entry                              */
 /* ------------------------------------------------------------------ */
 
-static int beamfs_rename(struct mnt_idmap *idmap,
-			struct inode *old_dir, struct dentry *old_dentry,
+static int beamfs_rename(const struct mnt_idmap *idmap,
+			 struct inode *old_dir, struct dentry *old_dentry,
 			struct inode *new_dir, struct dentry *new_dentry,
 			unsigned int flags)
 {
@@ -1375,7 +1389,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 
 	/* Add entry in new_dir */
 	ret = beamfs_add_dirent(new_dir, &new_dentry->d_name,
-			       old_inode->i_ino,
+				old_inode->i_ino,
 			       is_dir ? DT_DIR : DT_REG);
 	if (ret) {
 		/*
@@ -1462,7 +1476,7 @@ static int beamfs_rename(struct mnt_idmap *idmap,
 			return ret;
 
 		ret = beamfs_add_dirent(old_inode, &dotdot,
-				       new_dir->i_ino, DT_DIR);
+					new_dir->i_ino, DT_DIR);
 		if (ret)
 			return ret;
 

@@ -57,7 +57,7 @@ static int beamfs_rsbench_run(u32 iters, u64 *enc_ns, u64 *dec_ns)
 {
 	u8 *data, *parity;
 	int *results;
-	int *positions;
+	u8 *positions;
 	ktime_t t0;
 	u32 i;
 	int ret = 0;

@@ -16,8 +16,43 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
 
 ## [Unreleased]
 
+- Shared metadata buffers (bitmap blocks, indirect parity regions) live on one
+  superblock list, `s_shared_bhs`, never on an inode's `i_metadata_bhs`. A
+  buffer moving between per-inode lists met the window in the kernel's
+  `mmb_sync` where `b_mmb` is NULL under one inode's lock while
+  `mmb_mark_buffer_dirty` relinks it under another's: `list_del corruption`,
+  then a soft lockup holding `mmb->lock` and the node lost to OOM (dbench,
+  generic/241, x86-01, 2026-10-15). `write_inode`, `sync_inode_metadata` and
+  `evict` sync the shared list before the inode's own; `put_super` empties it.
+- tests/expected-kernel-messages: generic/361 also expects the buffer layer's
+  rate-limit summary (`buffer_io_error: N callbacks suppressed`), seen on the
+  slower arm64 node.
 ### Changed
-
+- tests/expected-kernel-messages: generic/361 may end with "umount: the
+  superblock did not reach the medium", the loop device being full.
+- checkpatch --strict: parenthesis alignment and bare unsigned types
+  across the sources; two open-ended calls (inode.c, indparity.c)
+  rewritten with locals. The TRACE_EVENT layout of beamfs_trace.h,
+  the BUFFER_FNS name BeamfsVerified and the stdint typedefs of the
+  userspace section of beamfs_format.h keep the forms mainline uses
+  or the tools need, and are listed as justified exceptions in
+  upstream/series.toml.
+- The inode operations take `const struct mnt_idmap *`, as the VFS
+  tree (vfs.git, branch vfs.all, the tree a new filesystem is applied
+  to) has them since Christian Brauner's "fs: port ->setattr() to pass
+  const mnt_idmap" and its siblings, in linux-next since next-20261008.
+  The module builds against that tree and against linux-next, not
+  against a mainline that has not merged the change.
+- Corrected byte positions travel as `u8`, a position being a byte
+  offset below 239: the decode scratch of the directory, indirect
+  parity, scrub and bitmap paths is 128 bytes where it was 512, and
+  `beamfs_rs_decode` asks `decode_rs8` to report its corrections
+  rather than apply them, applies the data ones itself and leaves the
+  parity alone, as before, without the 239-byte copy it kept to find
+  the corrected bytes by comparison. The two frames that stayed above
+  the 512 bytes submit-checklist's `make checkstack` allows,
+  `beamfs_scrub_check_block` and `beamfs_iget`, keep their decode
+  scratch and their copy of the inode on the heap.
 - Comments rewritten to describe the code as it is: the scrubber writes
   a corrected block back, the block bitmap is on disk, a capsule
   survives a burst of 129 coded bytes (not 139) and its parity is not
@@ -46,8 +81,23 @@ the module of `beamfs-v3` (3.0) declares; the history before it is in
   README now sets out under Versions: `beamfs-v3` is 3.0, and the next
   release is 3.1, in place of the 0.2.0 announced before.
 
+### Fixed
+
+- With a positions buffer, `beamfs_rs_decode` returns the number of
+  positions it wrote, data bytes only. It returned the number of
+  symbols corrected, parity included, and `beamfs_setup_bitmap`, the
+  data path and the others handed that count on to the journal, which
+  then read entries nobody had written.
+
 ### Added
 
+- Tracepoint `beamfs_rs_event`, raised in `beamfs_log_rs_event_flagged`
+  for every RS decode that corrected or failed, on every path. It
+  carries the physical block, the subblock, the symbols corrected and
+  the journalled flags, is never rate-limited, and holds as many
+  events as the ftrace buffer is sized for where the superblock
+  journal keeps sixty-four. A flip injected by emufi joins its
+  verdict on the block number.
 - This changelog. The README carries its latest entries at the top, and
   the warning on the known defects of 0.1.26 is now one of them.
 - `tests/xfstests/`: tests in the xfstests format, which the Yocto

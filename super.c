@@ -86,6 +86,17 @@ static void beamfs_put_super(struct super_block *sb)
 {
 	struct beamfs_sb_info *sbi = BEAMFS_SB(sb);
 
+	/*
+	 * The shared metadata list is written and emptied before the
+	 * buffers on it are released: one left there keeps b_mmb pointing
+	 * into sbi after kfree, for drop_buffers to follow later.
+	 */
+	if (sbi) {
+		if (mmb_sync(&sbi->s_shared_bhs))
+			pr_err("beamfs: put_super: shared metadata not written\n");
+		mmb_invalidate(&sbi->s_shared_bhs);
+	}
+
 	if (sbi) {
 		/* Stop the sweep before the structures it reads go away. */
 		beamfs_scrub_exit(sb);
@@ -600,11 +611,11 @@ static void beamfs_evict_inode(struct inode *inode)
 		 * A deleted inode used to drop its list on the grounds that
 		 * its blocks are freed above and what they hold no longer
 		 * matters. That holds for its own indirect blocks. It does
-		 * not hold for the two kinds of buffer that sit on the same
-		 * list without belonging to it: the bitmap block, shared by
-		 * the whole volume, and the indirect parity region, which
-		 * carries the parity of fourteen indirect blocks belonging
-		 * to other, living files.
+		 * not hold for the two kinds of buffer the volume shares: the
+		 * bitmap block, and the indirect parity region, which carries
+		 * the parity of fourteen indirect blocks belonging to other,
+		 * living files. Those live on s_shared_bhs (one list, never an
+		 * inode's) and are synced here first, before the inode's own.
 		 *
 		 * The bitmap has a net -- sync_fs and put_super walk
 		 * s_bitmap_blkhs and write every block still dirty. The
@@ -620,7 +631,9 @@ static void beamfs_evict_inode(struct inode *inode)
 		 * which is what ruled the block itself out and left its
 		 * parity as the thing that never landed.
 		 */
-		err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+		err = mmb_sync(&BEAMFS_SB(inode->i_sb)->s_shared_bhs);
+		if (!err)
+			err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
 		if (err)
 			pr_err_ratelimited("beamfs: inode %llu: metadata not written before evict: %d\n",
 					   (unsigned long long)inode->i_ino,
@@ -752,7 +765,7 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 
 	t1_ns = ktime_get_ns();
 	pr_debug("beamfs/sync310: wait=%d bitmap_dirty=%u bitmap_synced=%u sb_synced=%u err=%d dt_ns=%llu\n",
-		wait, n_bitmap_dirty, n_bitmap_synced, n_sb_synced,
+		 wait, n_bitmap_dirty, n_bitmap_synced, n_sb_synced,
 		last_err, (unsigned long long)(t1_ns - t0_ns));
 	trace_beamfs_bitmap_flush(sb->s_dev, "sync_fs", n_bitmap_dirty,
 				  n_bitmap_synced, last_err);
@@ -776,8 +789,10 @@ static int beamfs_sync_fs(struct super_block *sb, int wait)
 static int beamfs_sync_inode_metadata(struct inode *inode,
 				      struct writeback_control *wbc)
 {
-	int err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
+	int err = mmb_sync(&BEAMFS_SB(inode->i_sb)->s_shared_bhs);
 
+	if (!err)
+		err = mmb_sync(&BEAMFS_I(inode)->i_metadata_bhs);
 	if (err)
 		pr_err_ratelimited("beamfs: cannot sync metadata of inode %lu\n",
 				   (unsigned long)inode->i_ino);
@@ -819,7 +834,7 @@ static const struct super_operations beamfs_super_ops = {
  * Must match mkfs.beamfs.c::sb_to_rs_staging() byte-for-byte.
  */
 static void beamfs_sb_to_rs_staging(const struct beamfs_super_block *sb,
-				   u8 staging[BEAMFS_SB_RS_STAGING_BYTES])
+				    u8 staging[BEAMFS_SB_RS_STAGING_BYTES])
 {
 	const u8 *base = (const u8 *)sb;
 	const size_t off_crc32 = offsetof(struct beamfs_super_block, s_crc32);
@@ -848,7 +863,7 @@ static void beamfs_sb_to_rs_staging(const struct beamfs_super_block *sb,
  * Used on the mount-time RS recovery path in beamfs_fill_super.
  */
 static void beamfs_sb_from_rs_staging(const u8 staging[BEAMFS_SB_RS_STAGING_BYTES],
-				     struct beamfs_super_block *sb)
+				      struct beamfs_super_block *sb)
 {
 	u8 *base = (u8 *)sb;
 	const size_t off_crc32 = offsetof(struct beamfs_super_block, s_crc32);
@@ -1120,8 +1135,8 @@ void beamfs_dirty_super_now(struct beamfs_sb_info *sbi)
  * Safe to call from any context; spinlock-protected internally.
  */
 void beamfs_log_rs_event_flagged(struct super_block *sb,
-			u64 block_no,
-			const int *positions,
+				 u64 block_no,
+			const u8 *positions,
 			unsigned int n_positions,
 			size_t code_len_bytes,
 			u32 extra_flags)
@@ -1169,7 +1184,7 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 		flags = BEAMFS_RS_EVENT_FLAG_UNCORRECTABLE;
 	} else if (n_positions >= 2) {
 		entropy_q16 = beamfs_rs_compute_entropy_q16_16(positions,
-							      n_positions,
+							       n_positions,
 							      code_len_bytes);
 		flags = BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID;
 	}
@@ -1204,6 +1219,9 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
 
 	spin_unlock(&sbi->s_lock);
 
+	trace_beamfs_rs_event(sb->s_dev, block_no,
+			      beamfs_rs_event_subblock(flags),
+			      n_positions, flags);
 	pr_debug("beamfs: RS event block=%llu symbols=%u entropy_valid=%u entropy_q16=%u rmw_neutralised=%u uncorrectable=%u\n",
 		 block_no, n_positions,
 		 (flags & BEAMFS_RS_EVENT_FLAG_ENTROPY_VALID) ? 1 : 0,
@@ -1218,8 +1236,8 @@ void beamfs_log_rs_event_flagged(struct super_block *sb,
  * replay of superblock recovery events in beamfs_fill_super.
  */
 void beamfs_log_rs_event(struct super_block *sb,
-			u64 block_no,
-			const int *positions,
+			 u64 block_no,
+			const u8 *positions,
 			unsigned int n_positions,
 			size_t code_len_bytes)
 {
@@ -1241,7 +1259,7 @@ struct beamfs_pending_rs_event {
 	u64 block_no;
 	unsigned int n_positions;
 	size_t code_len_bytes;
-	int positions[BEAMFS_RS_PARITY / 2];
+	u8 positions[BEAMFS_RS_PARITY / 2];
 };
 
 /*
@@ -1263,7 +1281,7 @@ struct beamfs_pending_rs_event {
  * Returns the number of events stored in *out.
  */
 static unsigned int
-beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
+beamfs_capture_sb_rs_events(const int *rs_results, const u8 *rs_positions,
 			    struct beamfs_pending_rs_event **out)
 {
 	struct beamfs_pending_rs_event *pending;
@@ -1294,7 +1312,7 @@ beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
 
 	for (i = 0; i < BEAMFS_SB_RS_SUBBLOCKS; i++) {
 		unsigned int np;
-		const int *src;
+		const u8 *src;
 
 		if (rs_results[i] <= 0)
 			continue;
@@ -1307,7 +1325,7 @@ beamfs_capture_sb_rs_events(const int *rs_results, const int *rs_positions,
 		pending[k].n_positions = np;
 		pending[k].code_len_bytes = BEAMFS_SB_RS_DATA_LEN;
 		src = rs_positions + i * (BEAMFS_RS_PARITY / 2);
-		memcpy(pending[k].positions, src, np * sizeof(int));
+		memcpy(pending[k].positions, src, np * sizeof(*src));
 		k++;
 	}
 
@@ -1368,7 +1386,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		u8 *staging = NULL;
 		u8 *parity_src = (u8 *)fsb + BEAMFS_SB_RS_PARITY_OFFSET;
 		int *rs_results = NULL;
-		int *rs_positions = NULL;
+		u8 *rs_positions = NULL;
 		int rc;
 
 		/*
@@ -1395,7 +1413,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 		beamfs_sb_to_rs_staging(fsb, staging);
 		rc = beamfs_rs_decode_region(staging, BEAMFS_SB_RS_DATA_LEN,
-					    parity_src, BEAMFS_RS_PARITY,
+					     parity_src, BEAMFS_RS_PARITY,
 					    BEAMFS_SB_RS_DATA_LEN,
 					    BEAMFS_SB_RS_SUBBLOCKS,
 					    rs_results,
@@ -1539,6 +1557,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbi->s_free_inodes = le64_to_cpu(fsb->s_free_inodes);
 	spin_lock_init(&sbi->s_lock);
 	INIT_LIST_HEAD(&sbi->s_rsv_windows);
+	mmb_init(&sbi->s_shared_bhs, sb->s_bdev->bd_mapping);
 
 	/*
 	 * The paths that can hold a scratch page at the same time:
@@ -1631,7 +1650,7 @@ int beamfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 		for (i = 0; i < n_pending; i++) {
 			beamfs_log_rs_event(sb,
-					   pending[i].block_no,
+					    pending[i].block_no,
 					   pending[i].positions,
 					   pending[i].n_positions,
 					   pending[i].code_len_bytes);
