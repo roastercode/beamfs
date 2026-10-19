@@ -13,7 +13,8 @@ max_mail_bytes = 100000
 # the base in place of the newest mainline tag, which it has to hold:
 # the T: tree of FILESYSTEMS (VFS and infrastructure) in MAINTAINERS.
 # The lab runs the same commit, so what xfstests judged is what is sent.
-base = { url = "https://git.kernel.org/pub/scm/linux/kernel/git/vfs/vfs.git", branch = "vfs.all" }
+base = { url = "https://git.kernel.org/pub/scm/linux/kernel/git/vfs/vfs.git", branch = "vfs.all",
+         behind = "v7.3 was tagged on 2026-10-18 while the series was being measured on vfs.all at 2c3ba1f1cb41 (on v7.3-rc7), which has not moved since and holds the const struct mnt_idmap * the series needs; the sweeps on both architectures ran on that base and the series is mailed on it as it stands" }
 # The trees the series must still merge into and build on. Mainline is
 # left out while it lacks the const mnt_idmap signatures the base has.
 newer = ["linux-next/master"]

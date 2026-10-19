@@ -132,7 +132,8 @@ Documentation/ABI, and patch 18 the MAINTAINERS entry. The series is
 based on @@BASE@@, the VFS tree it is meant for, and builds there and
 on linux-next; the inode operations take the const struct mnt_idmap *
 that tree has, so it does not build on a mainline that has not merged
-that change yet.
+that change yet. v7.3 was tagged while this series was being measured;
+vfs.all has not moved since, and the series is sent on it as it stands.
 
 Tools: the series was checked, from the commit named below, by
 beamfs-upstream, a checker written for it: checkpatch.pl with and
